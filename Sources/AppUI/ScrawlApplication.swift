@@ -863,7 +863,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let symbolName: String
         switch runtime.overlayController.state {
         case .idle:
-            symbolName = "pencil.tip"
+            symbolName = "quote.bubble.fill"
         case .recording:
             symbolName = "waveform.circle.fill"
         case .transcribing:
