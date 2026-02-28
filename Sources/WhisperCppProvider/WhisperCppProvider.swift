@@ -104,13 +104,51 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !cleaned.isEmpty else {
-            throw TranscriptionError.executionFailed("whisper.cpp returned an empty transcript")
+            throw TranscriptionError.noSpeechDetected
+        }
+
+        if Self.isNoSpeechTranscript(cleaned) {
+            throw TranscriptionError.noSpeechDetected
         }
 
         try? FileManager.default.removeItem(at: transcriptFile)
 
         let latencyMS = Int(Date().timeIntervalSince(startedAt) * 1_000)
         return TranscriptionResult(text: cleaned, latencyMS: latencyMS)
+    }
+
+    static func isNoSpeechTranscript(_ transcript: String) -> Bool {
+        let lines = transcript
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !lines.isEmpty else {
+            return true
+        }
+
+        return lines.allSatisfy { line in
+            let condensed = line
+                .uppercased()
+                .replacingOccurrences(of: " ", with: "")
+                .replacingOccurrences(of: "-", with: "")
+                .replacingOccurrences(of: "_", with: "")
+
+            switch condensed {
+            case "[BLANKAUDIO]", "(BLANKAUDIO)", "BLANKAUDIO":
+                return true
+            case "[NOSPEECH]", "(NOSPEECH)", "NOSPEECH":
+                return true
+            case "[SILENCE]", "(SILENCE)", "SILENCE":
+                return true
+            case "[NOISE]", "(NOISE)", "NOISE":
+                return true
+            case "[MUSIC]", "(MUSIC)", "MUSIC":
+                return true
+            default:
+                return false
+            }
+        }
     }
 
     private func resolveModelPath(modelID: String) -> URL? {

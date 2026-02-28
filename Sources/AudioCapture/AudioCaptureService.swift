@@ -4,10 +4,16 @@ import Foundation
 public struct AudioCaptureConfig: Sendable {
     public var sampleRate: Double
     public var channels: Int
+    public var minimumDurationSeconds: Double
 
-    public init(sampleRate: Double = 16_000, channels: Int = 1) {
+    public init(
+        sampleRate: Double = 16_000,
+        channels: Int = 1,
+        minimumDurationSeconds: Double = 0.18
+    ) {
         self.sampleRate = sampleRate
         self.channels = channels
+        self.minimumDurationSeconds = minimumDurationSeconds
     }
 }
 
@@ -16,6 +22,27 @@ public enum AudioCaptureError: Error {
     case notCapturing
     case recorderCreationFailed
     case recorderStartFailed
+    case captureTooShort(durationSeconds: Double)
+    case outputFileEmpty
+}
+
+extension AudioCaptureError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .alreadyCapturing:
+            return "Recording is already in progress."
+        case .notCapturing:
+            return "No active recording to stop."
+        case .recorderCreationFailed:
+            return "Could not create audio recorder."
+        case .recorderStartFailed:
+            return "Could not start recording."
+        case let .captureTooShort(durationSeconds):
+            return String(format: "Recording was too short (%.2fs).", durationSeconds)
+        case .outputFileEmpty:
+            return "Recorded audio was empty."
+        }
+    }
 }
 
 public protocol AudioCaptureServing: Sendable {
@@ -76,9 +103,22 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.notCapturing
         }
 
+        let durationSeconds = recorder.currentTime
         recorder.stop()
         self.recorder = nil
         self.outputURL = nil
+
+        if durationSeconds < config.minimumDurationSeconds {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw AudioCaptureError.captureTooShort(durationSeconds: durationSeconds)
+        }
+
+        let fileSize = (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if fileSize <= 44 {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw AudioCaptureError.outputFileEmpty
+        }
+
         return outputURL
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import AudioCapture
 import HotkeyEngine
 import Permissions
 import SettingsStore
@@ -389,6 +390,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
+    private func presentNoSpeechDetectedAlert() {
+        _ = presentAlert(
+            title: "No speech detected",
+            message: """
+            Scrawl did not detect usable speech from the recording.
+
+            Try again and:
+            - hold the hotkey a bit longer
+            - speak slightly closer to your microphone
+            """
+        )
+    }
+
     private func presentTranscriptionGuidanceIfNeeded(for error: Error) {
         guard let transcriptionError = error as? TranscriptionError else {
             return
@@ -399,8 +413,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             presentWhisperMissingAlert()
         case .modelMissing:
             presentMissingModelAlert(triggeredByHotkey: true)
-        case .executionFailed:
-            break
+        case .noSpeechDetected:
+            presentNoSpeechDetectedAlert()
+        case let .executionFailed(message):
+            let normalized = message.uppercased()
+            if normalized.contains("BLANK_AUDIO")
+                || normalized.contains("EMPTY TRANSCRIPT")
+                || normalized.contains("NO SPEECH")
+            {
+                presentNoSpeechDetectedAlert()
+            }
         }
     }
 
@@ -431,21 +453,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         menu.addItem(.separator())
 
-        let modelsItem = NSMenuItem(title: "Models", action: nil, keyEquivalent: "")
-        let modelsSubmenu = NSMenu()
-        modelsItem.submenu = modelsSubmenu
-        self.modelsSubmenu = modelsSubmenu
-        menu.addItem(modelsItem)
-
-        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(beginHotkeyCapture(_:)), keyEquivalent: "")
-        setHotkeyItem.target = self
-        menu.addItem(setHotkeyItem)
-
         let historyItem = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
         let historySubmenu = NSMenu()
         historyItem.submenu = historySubmenu
         self.historySubmenu = historySubmenu
         menu.addItem(historyItem)
+
+        let modelsItem = NSMenuItem(title: "Models", action: nil, keyEquivalent: "")
+        let modelsSubmenu = NSMenu()
+        modelsItem.submenu = modelsSubmenu
+        self.modelsSubmenu = modelsSubmenu
+        menu.addItem(modelsItem)
 
         // Permissions — hidden once both are granted
         let micItem = NSMenuItem(title: "", action: #selector(requestMicrophonePermission(_:)), keyEquivalent: "")
@@ -486,6 +504,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         menu.addItem(.separator())
+
+        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(beginHotkeyCapture(_:)), keyEquivalent: "")
+        setHotkeyItem.target = self
+        menu.addItem(setHotkeyItem)
 
         let quitItem = NSMenuItem(title: "Quit Scrawl", action: #selector(quit(_:)), keyEquivalent: "q")
         quitItem.target = self
@@ -581,7 +603,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func stopRecordingAndTranscribe(reason: String) {
-        guard recordingOrigin != nil else {
+        guard let activeOrigin = recordingOrigin else {
             return
         }
 
@@ -592,7 +614,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         do {
             audioURL = try runtime.audioCaptureService.stopCapture()
         } catch {
+            recordingOrigin = nil
+            updateRecordingActionRows()
+            runtime.overlayController.setState(.idle)
+            updateStatusIcon()
             setStatus("Stop error: \(describe(error))")
+            if case AudioCaptureError.captureTooShort = error, activeOrigin != .manual {
+                presentNoSpeechDetectedAlert()
+            }
             return
         }
 

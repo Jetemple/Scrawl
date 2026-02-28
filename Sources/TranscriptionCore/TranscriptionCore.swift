@@ -25,7 +25,23 @@ public struct TranscriptionResult: Sendable {
 public enum TranscriptionError: Error {
     case providerUnavailable
     case modelMissing(String)
+    case noSpeechDetected
     case executionFailed(String)
+}
+
+extension TranscriptionError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .providerUnavailable:
+            return "whisper-cli is not available."
+        case let .modelMissing(modelID):
+            return "Whisper model '\(modelID)' is not installed."
+        case .noSpeechDetected:
+            return "No speech was detected. Try again and speak a little longer."
+        case let .executionFailed(message):
+            return message
+        }
+    }
 }
 
 public protocol TranscriptionProvider: Sendable {
