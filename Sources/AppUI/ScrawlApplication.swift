@@ -69,7 +69,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var isCapturingHotkey = false
 
     private var isModelDownloadInProgress = false
-    private var hasShownFirstRunModelPrompt = false
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -95,7 +94,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
         setStatus("Idle")
         updateStatusIcon()
-        promptForFirstRunModelDownloadIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -282,31 +280,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    private func promptForFirstRunModelDownloadIfNeeded() {
-        guard !hasShownFirstRunModelPrompt else {
-            return
-        }
-        guard modelManager.installedModelIDs().isEmpty else {
-            return
-        }
-        guard let tinyModel = LocalModelManager.downloadableModels.first(where: { $0.id == "ggml-tiny.en" }) else {
-            return
-        }
-
-        hasShownFirstRunModelPrompt = true
-
-        let response = presentAlert(
-            title: "No model installed",
-            message: "Scrawl needs a Whisper model before the hotkey can transcribe. Download tiny.en (75 MB) now to get started.",
-            primaryButton: "Download tiny.en",
-            secondaryButton: "Later"
-        )
-
-        if response == .alertFirstButtonReturn {
-            startModelDownload(tinyModel)
-        }
-    }
-
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
         if !FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) {
             setStatus("whisper-cli missing")
@@ -379,17 +352,24 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        let prefix = triggeredByHotkey
-            ? "Hotkey recording cannot start because no model is installed."
-            : "No model is installed."
-        let response = presentAlert(
-            title: "No model installed",
-            message: "\(prefix)\n\nDownload tiny.en (75 MB) now to get started.",
-            primaryButton: "Download tiny.en",
-            secondaryButton: "Later"
-        )
+        let alert = NSAlert()
+        alert.messageText = "Set Up Speech Recognition"
+        alert.informativeText = """
+            Scrawl transcribes audio locally on your Mac using OpenAI's \
+            Whisper model. No data leaves your device.
 
-        if response == .alertFirstButtonReturn {
+            To get started, download the tiny.en model (75 MB). \
+            You can switch to a larger model later for improved accuracy.
+            """
+        alert.alertStyle = .informational
+        if let icon = NSImage(systemSymbolName: "waveform", accessibilityDescription: nil) {
+            alert.icon = icon.withSymbolConfiguration(.init(pointSize: 48, weight: .medium))
+        }
+        alert.addButton(withTitle: "Download Model")
+        alert.addButton(withTitle: "Not Now")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        if alert.runModal() == .alertFirstButtonReturn {
             startModelDownload(tinyModel)
         }
     }
