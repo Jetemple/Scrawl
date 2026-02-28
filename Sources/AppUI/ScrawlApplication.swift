@@ -1,4 +1,5 @@
 import AppKit
+import AudioCapture
 import HotkeyEngine
 import Permissions
 import SettingsStore
@@ -43,9 +44,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var statusItem: NSStatusItem?
     private var rootMenu: NSMenu?
 
-    private var modelLineItem: NSMenuItem?
-    private var hotkeyLineItem: NSMenuItem?
-    private var statusLineItem: NSMenuItem?
+    private var infoLineItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
     private var accessibilityItem: NSMenuItem?
     private var startManualItem: NSMenuItem?
@@ -223,6 +222,35 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         else {
             return
         }
+        startModelDownload(model)
+    }
+
+    @objc private func deleteSelectedModel(_ sender: Any?) {
+        let settings = runtime.settingsStore.load()
+        let selected = settings.selectedModelID
+
+        do {
+            try modelManager.deleteModel(id: selected)
+            var updated = settings
+            let installed = modelManager.installedModelIDs()
+            if let fallback = installed.first {
+                updated.selectedModelID = fallback
+            }
+            saveSettings(updated)
+            setStatus("Deleted model: \(selected)")
+        } catch {
+            setStatus("Delete failed: \(describe(error))")
+        }
+    }
+
+    private func startModelDownload(_ model: DownloadableModel) {
+        guard !isModelDownloadInProgress else {
+            return
+        }
+        guard !modelManager.modelExists(downloadableModel: model) else {
+            setStatus("Model already installed: \(model.id)")
+            return
+        }
 
         isModelDownloadInProgress = true
         refreshModelMenu()
@@ -252,21 +280,125 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    @objc private func deleteSelectedModel(_ sender: Any?) {
-        let settings = runtime.settingsStore.load()
-        let selected = settings.selectedModelID
+    private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
+        if !FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) {
+            setStatus("whisper-cli missing")
+            presentWhisperMissingAlert()
+            return false
+        }
 
-        do {
-            try modelManager.deleteModel(id: selected)
+        let settings = runtime.settingsStore.load()
+        if modelManager.modelExists(id: settings.modelID) {
+            return true
+        }
+
+        let installed = modelManager.installedModelIDs()
+        if let fallback = installed.first {
             var updated = settings
-            let installed = modelManager.installedModelIDs()
-            if let fallback = installed.first {
-                updated.selectedModelID = fallback
-            }
+            updated.selectedModelID = fallback
             saveSettings(updated)
-            setStatus("Deleted model: \(selected)")
-        } catch {
-            setStatus("Delete failed: \(describe(error))")
+            return true
+        }
+
+        setStatus("No model installed")
+        presentMissingModelAlert(triggeredByHotkey: origin != .manual)
+        return false
+    }
+
+    @discardableResult
+    private func presentAlert(
+        title: String,
+        message: String,
+        primaryButton: String = "OK",
+        secondaryButton: String? = nil
+    ) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: primaryButton)
+        if let secondaryButton {
+            alert.addButton(withTitle: secondaryButton)
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        return alert.runModal()
+    }
+
+    private func presentWhisperMissingAlert() {
+        let executablePath = runtime.whisperExecutableURL.path
+        let message = """
+        Scrawl could not find whisper-cli at:
+        \(executablePath)
+
+        Install whisper.cpp:
+        brew install whisper-cpp
+
+        Or set:
+        SCRAWL_WHISPER_EXECUTABLE=/absolute/path/to/whisper-cli
+        """
+
+        _ = presentAlert(
+            title: "whisper-cli not found",
+            message: message
+        )
+    }
+
+    private func presentMissingModelAlert(triggeredByHotkey: Bool) {
+        guard let tinyModel = LocalModelManager.downloadableModels.first(where: { $0.id == "ggml-tiny.en" }) else {
+            _ = presentAlert(
+                title: "No model installed",
+                message: "Scrawl needs a Whisper model in Models before transcription can run."
+            )
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Set Up Speech Recognition"
+        alert.informativeText = """
+            Scrawl transcribes audio locally on your Mac using OpenAI's \
+            Whisper model. No data leaves your device.
+
+            To get started, download the tiny.en model (75 MB). \
+            You can switch to a larger model later for improved accuracy.
+            """
+        alert.alertStyle = .informational
+        if let icon = NSImage(systemSymbolName: "waveform", accessibilityDescription: nil) {
+            alert.icon = icon.withSymbolConfiguration(.init(pointSize: 48, weight: .medium))
+        }
+        alert.addButton(withTitle: "Download Model")
+        alert.addButton(withTitle: "Not Now")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            startModelDownload(tinyModel)
+        }
+    }
+
+    private func presentNoSpeechDetectedAlert() {
+        runtime.overlayController.showTransientMessage("No speech detected. Try again.")
+        setStatus("No speech detected")
+    }
+
+    private func presentTranscriptionGuidanceIfNeeded(for error: Error) {
+        guard let transcriptionError = error as? TranscriptionError else {
+            return
+        }
+
+        switch transcriptionError {
+        case .providerUnavailable:
+            presentWhisperMissingAlert()
+        case .modelMissing:
+            presentMissingModelAlert(triggeredByHotkey: true)
+        case .noSpeechDetected:
+            presentNoSpeechDetectedAlert()
+        case let .executionFailed(message):
+            let normalized = message.uppercased()
+            if normalized.contains("BLANK_AUDIO")
+                || normalized.contains("EMPTY TRANSCRIPT")
+                || normalized.contains("NO SPEECH")
+            {
+                presentNoSpeechDetectedAlert()
+            }
         }
     }
 
@@ -290,22 +422,18 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         menu.delegate = self
         rootMenu = menu
 
-        let modelLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        modelLineItem.isEnabled = false
-        menu.addItem(modelLineItem)
-        self.modelLineItem = modelLineItem
-
-        let hotkeyLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        hotkeyLineItem.isEnabled = false
-        menu.addItem(hotkeyLineItem)
-        self.hotkeyLineItem = hotkeyLineItem
-
-        let statusLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        statusLineItem.isEnabled = false
-        menu.addItem(statusLineItem)
-        self.statusLineItem = statusLineItem
+        let infoLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        infoLineItem.isEnabled = false
+        menu.addItem(infoLineItem)
+        self.infoLineItem = infoLineItem
 
         menu.addItem(.separator())
+
+        let historyItem = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
+        let historySubmenu = NSMenu()
+        historyItem.submenu = historySubmenu
+        self.historySubmenu = historySubmenu
+        menu.addItem(historyItem)
 
         let modelsItem = NSMenuItem(title: "Models", action: nil, keyEquivalent: "")
         let modelsSubmenu = NSMenu()
@@ -313,12 +441,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         self.modelsSubmenu = modelsSubmenu
         menu.addItem(modelsItem)
 
-        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(beginHotkeyCapture(_:)), keyEquivalent: "h")
-        setHotkeyItem.target = self
-        menu.addItem(setHotkeyItem)
-
-        menu.addItem(.separator())
-
+        // Permissions — hidden once both are granted
         let micItem = NSMenuItem(title: "", action: #selector(requestMicrophonePermission(_:)), keyEquivalent: "")
         micItem.target = self
         menu.addItem(micItem)
@@ -329,41 +452,38 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         menu.addItem(axItem)
         self.accessibilityItem = axItem
 
-        menu.addItem(.separator())
+        // Debug tools — only visible with SCRAWL_DEBUG=1
+        if ProcessInfo.processInfo.environment["SCRAWL_DEBUG"] != nil {
+            menu.addItem(.separator())
 
-        let startManualItem = NSMenuItem(title: "Start Recording (Manual)", action: #selector(startManualRecording(_:)), keyEquivalent: "r")
-        startManualItem.target = self
-        menu.addItem(startManualItem)
-        self.startManualItem = startManualItem
+            let startManualItem = NSMenuItem(title: "Start Recording", action: #selector(startManualRecording(_:)), keyEquivalent: "r")
+            startManualItem.target = self
+            menu.addItem(startManualItem)
+            self.startManualItem = startManualItem
 
-        let stopManualItem = NSMenuItem(title: "Stop + Transcribe (Manual)", action: #selector(stopManualRecordingAndTranscribe(_:)), keyEquivalent: "s")
-        stopManualItem.target = self
-        menu.addItem(stopManualItem)
-        self.stopManualItem = stopManualItem
+            let stopManualItem = NSMenuItem(title: "Stop + Transcribe", action: #selector(stopManualRecordingAndTranscribe(_:)), keyEquivalent: "s")
+            stopManualItem.target = self
+            menu.addItem(stopManualItem)
+            self.stopManualItem = stopManualItem
 
-        menu.addItem(.separator())
+            let idleState = NSMenuItem(title: "Preview Idle", action: #selector(showIdleState(_:)), keyEquivalent: "")
+            idleState.target = self
+            menu.addItem(idleState)
 
-        let historyItem = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
-        let historySubmenu = NSMenu()
-        historyItem.submenu = historySubmenu
-        self.historySubmenu = historySubmenu
-        menu.addItem(historyItem)
+            let recordingState = NSMenuItem(title: "Preview Recording", action: #selector(showRecordingState(_:)), keyEquivalent: "")
+            recordingState.target = self
+            menu.addItem(recordingState)
 
-        menu.addItem(.separator())
-
-        let idleState = NSMenuItem(title: "Preview Idle Indicator", action: #selector(showIdleState(_:)), keyEquivalent: "")
-        idleState.target = self
-        menu.addItem(idleState)
-
-        let recordingState = NSMenuItem(title: "Preview Recording Indicator", action: #selector(showRecordingState(_:)), keyEquivalent: "")
-        recordingState.target = self
-        menu.addItem(recordingState)
-
-        let transcribingState = NSMenuItem(title: "Preview Transcribing Indicator", action: #selector(showTranscribingState(_:)), keyEquivalent: "")
-        transcribingState.target = self
-        menu.addItem(transcribingState)
+            let transcribingState = NSMenuItem(title: "Preview Transcribing", action: #selector(showTranscribingState(_:)), keyEquivalent: "")
+            transcribingState.target = self
+            menu.addItem(transcribingState)
+        }
 
         menu.addItem(.separator())
+
+        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(beginHotkeyCapture(_:)), keyEquivalent: "")
+        setHotkeyItem.target = self
+        menu.addItem(setHotkeyItem)
 
         let quitItem = NSMenuItem(title: "Quit Scrawl", action: #selector(quit(_:)), keyEquivalent: "q")
         quitItem.target = self
@@ -439,6 +559,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
+        guard validateTranscriptionPrerequisites(origin: origin) else {
+            return
+        }
+
         captureInsertionTargetApp()
 
         do {
@@ -455,7 +579,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func stopRecordingAndTranscribe(reason: String) {
-        guard recordingOrigin != nil else {
+        guard let activeOrigin = recordingOrigin else {
             return
         }
 
@@ -466,7 +590,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         do {
             audioURL = try runtime.audioCaptureService.stopCapture()
         } catch {
+            recordingOrigin = nil
+            updateRecordingActionRows()
+            runtime.overlayController.setState(.idle)
+            updateStatusIcon()
             setStatus("Stop error: \(describe(error))")
+            if case AudioCaptureError.captureTooShort = error, activeOrigin != .manual {
+                presentNoSpeechDetectedAlert()
+            }
             return
         }
 
@@ -552,14 +683,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private func capturedHotkey(from event: NSEvent) -> HotkeySetting? {
         if event.type == .flagsChanged {
             switch event.keyCode {
-            case 56: return HotkeySetting(keyCode: 56, isModifierKey: true, displayName: "Left Shift")
-            case 60: return HotkeySetting(keyCode: 60, isModifierKey: true, displayName: "Right Shift")
-            case 58: return HotkeySetting(keyCode: 58, isModifierKey: true, displayName: "Left Option")
-            case 61: return HotkeySetting(keyCode: 61, isModifierKey: true, displayName: "Right Option")
-            case 59: return HotkeySetting(keyCode: 59, isModifierKey: true, displayName: "Left Control")
-            case 62: return HotkeySetting(keyCode: 62, isModifierKey: true, displayName: "Right Control")
-            case 55: return HotkeySetting(keyCode: 55, isModifierKey: true, displayName: "Left Command")
-            case 54: return HotkeySetting(keyCode: 54, isModifierKey: true, displayName: "Right Command")
+            case 56: return HotkeySetting(keyCode: 56, isModifierKey: true, displayName: "Left \u{21E7} Shift")
+            case 60: return HotkeySetting(keyCode: 60, isModifierKey: true, displayName: "Right \u{21E7} Shift")
+            case 58: return HotkeySetting(keyCode: 58, isModifierKey: true, displayName: "Left \u{2325} Option")
+            case 61: return HotkeySetting(keyCode: 61, isModifierKey: true, displayName: "Right \u{2325} Option")
+            case 59: return HotkeySetting(keyCode: 59, isModifierKey: true, displayName: "Left \u{2303} Control")
+            case 62: return HotkeySetting(keyCode: 62, isModifierKey: true, displayName: "Right \u{2303} Control")
+            case 55: return HotkeySetting(keyCode: 55, isModifierKey: true, displayName: "Left \u{2318} Command")
+            case 54: return HotkeySetting(keyCode: 54, isModifierKey: true, displayName: "Right \u{2318} Command")
             default: return nil
             }
         }
@@ -607,8 +738,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func refreshSettingsRows() {
         let settings = runtime.settingsStore.load()
-        modelLineItem?.title = "Model: \(settings.modelID)"
-        hotkeyLineItem?.title = "Hotkey: \(settings.hotkey.displayName)"
+        let modelName = settings.modelID
+            .replacingOccurrences(of: "ggml-", with: "")
+        infoLineItem?.title = "\(modelName) · \(settings.hotkey.displayName)"
     }
 
     private func refreshModelMenu() {
@@ -626,7 +758,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             modelsSubmenu.addItem(empty)
         } else {
             for modelID in installed {
-                let item = NSMenuItem(title: modelID, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
+                let displayName = modelID.replacingOccurrences(of: "ggml-", with: "")
+                let item = NSMenuItem(title: displayName, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = modelID
                 item.state = (modelID == settings.modelID) ? .on : .off
@@ -636,17 +769,24 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         modelsSubmenu.addItem(.separator())
 
+        let downloadable = LocalModelManager.downloadableModels.filter { !modelManager.modelExists(downloadableModel: $0) }
+
         let downloadableHeader = NSMenuItem(title: "Download", action: nil, keyEquivalent: "")
         downloadableHeader.isEnabled = false
         modelsSubmenu.addItem(downloadableHeader)
 
-        for model in LocalModelManager.downloadableModels {
-            let alreadyInstalled = modelManager.modelExists(id: model.id)
-            let item = NSMenuItem(title: model.displayName, action: #selector(downloadModel(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = model.id
-            item.isEnabled = !alreadyInstalled && !isModelDownloadInProgress
-            modelsSubmenu.addItem(item)
+        if downloadable.isEmpty {
+            let allInstalled = NSMenuItem(title: "All available models are installed", action: nil, keyEquivalent: "")
+            allInstalled.isEnabled = false
+            modelsSubmenu.addItem(allInstalled)
+        } else {
+            for model in downloadable {
+                let item = NSMenuItem(title: model.displayName, action: #selector(downloadModel(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = model.id
+                item.isEnabled = !isModelDownloadInProgress
+                modelsSubmenu.addItem(item)
+            }
         }
 
         modelsSubmenu.addItem(.separator())
@@ -685,8 +825,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func updatePermissionRows() {
-        microphoneItem?.title = permissionMenuTitle(for: "Microphone", status: runtime.permissionManager.microphoneStatus())
-        accessibilityItem?.title = permissionMenuTitle(for: "Accessibility", status: runtime.permissionManager.accessibilityStatus())
+        let micStatus = runtime.permissionManager.microphoneStatus()
+        let axStatus = runtime.permissionManager.accessibilityStatus()
+
+        microphoneItem?.title = permissionMenuTitle(for: "Microphone", status: micStatus)
+        accessibilityItem?.title = permissionMenuTitle(for: "Accessibility", status: axStatus)
+
+        // Hide permission rows once both are granted
+        let bothGranted = micStatus == .authorized && axStatus == .authorized
+        microphoneItem?.isHidden = bothGranted
+        accessibilityItem?.isHidden = bothGranted
     }
 
     private func updateRecordingActionRows() {
@@ -696,7 +844,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func setStatus(_ text: String) {
-        statusLineItem?.title = "Status: \(text)"
+        // Status is now communicated via the overlay + menubar icon.
+        // This method is kept as a hook for debug logging.
+        #if DEBUG
+        print("[Scrawl] \(text)")
+        #endif
     }
 
     @MainActor
@@ -723,9 +875,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let symbolName: String
         switch runtime.overlayController.state {
         case .idle:
-            symbolName = "mic.fill"
+            symbolName = "quote.bubble.fill"
         case .recording:
-            symbolName = "record.circle.fill"
+            symbolName = "waveform.circle.fill"
         case .transcribing:
             symbolName = "ellipsis.circle.fill"
         }
@@ -818,7 +970,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         runtime.overlayController.setState(.idle)
         addTranscriptToHistory(transcript)
         updateStatusIcon()
-        setStatus("Pasted in \(latencyMS)ms")
+        setStatus("Done")
     }
 
     @MainActor
@@ -826,5 +978,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         runtime.overlayController.setState(.idle)
         updateStatusIcon()
         setStatus("\(reason): \(describe(error))")
+        presentTranscriptionGuidanceIfNeeded(for: error)
     }
 }

@@ -71,6 +71,12 @@ let package = Package(
             dependencies: [
                 "SettingsStore"
             ]
+        ),
+        .testTarget(
+            name: "WhisperCppProviderTests",
+            dependencies: [
+                "WhisperCppProvider"
+            ]
         )
     ]
 )

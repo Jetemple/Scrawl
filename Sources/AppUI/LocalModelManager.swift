@@ -30,12 +30,31 @@ final class LocalModelManager: @unchecked Sendable {
         return files
             .filter { $0.pathExtension == "bin" }
             .map { $0.deletingPathExtension().lastPathComponent }
+            .filter { !$0.hasPrefix("for-tests-") }
             .sorted()
     }
 
     func modelExists(id: String) -> Bool {
         let path = modelsDirectoryURL.appendingPathComponent("\(id).bin")
         return FileManager.default.fileExists(atPath: path.path)
+    }
+
+    func modelExists(downloadableModel: DownloadableModel) -> Bool {
+        let explicitFilePath = modelsDirectoryURL.appendingPathComponent(downloadableModel.fileName)
+        if FileManager.default.fileExists(atPath: explicitFilePath.path) {
+            return true
+        }
+        if modelExists(id: downloadableModel.id) {
+            return true
+        }
+
+        let targetFamilies: Set<String> = [
+            canonicalFamily(from: downloadableModel.id),
+            canonicalFamily(from: downloadableModel.fileName)
+        ]
+
+        let installedFamilies = Set(installedModelIDs().map(canonicalFamily(from:)))
+        return !targetFamilies.isDisjoint(with: installedFamilies)
     }
 
     func modelURL(id: String) -> URL {
@@ -67,6 +86,20 @@ final class LocalModelManager: @unchecked Sendable {
         try FileManager.default.moveItem(at: temporaryURL, to: destination)
         return destination
     }
+
+    private func canonicalFamily(from raw: String) -> String {
+        var value = raw.lowercased()
+        if value.hasSuffix(".bin") {
+            value = String(value.dropLast(4))
+        }
+        if value.hasPrefix("ggml-") {
+            value = String(value.dropFirst(5))
+        }
+        if value.hasSuffix(".en") {
+            value = String(value.dropLast(3))
+        }
+        return value
+    }
 }
 
 extension LocalModelManager {
@@ -74,31 +107,19 @@ extension LocalModelManager {
         DownloadableModel(
             id: "ggml-tiny.en",
             fileName: "ggml-tiny.en.bin",
-            displayName: "tiny.en (~75MB)",
+            displayName: "tiny.en — fast, 75 MB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin")!
-        ),
-        DownloadableModel(
-            id: "ggml-base.en",
-            fileName: "ggml-base.en.bin",
-            displayName: "base.en (~142MB)",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin")!
         ),
         DownloadableModel(
             id: "ggml-small.en",
             fileName: "ggml-small.en.bin",
-            displayName: "small.en (~466MB)",
+            displayName: "small.en — recommended, 466 MB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin")!
-        ),
-        DownloadableModel(
-            id: "ggml-small",
-            fileName: "ggml-small.bin",
-            displayName: "small multilingual (~466MB)",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin")!
         ),
         DownloadableModel(
             id: "ggml-medium",
             fileName: "ggml-medium.bin",
-            displayName: "medium multilingual (~1.5GB)",
+            displayName: "medium — multilingual, 1.5 GB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")!
         )
     ]
