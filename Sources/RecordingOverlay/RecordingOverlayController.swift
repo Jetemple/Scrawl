@@ -14,6 +14,13 @@ public final class RecordingOverlayController: @unchecked Sendable {
     private var dotView: NSView?
     private var titleLabel: NSTextField?
     private var spinner: NSProgressIndicator?
+    private var transientDismissWorkItem: DispatchWorkItem?
+    private var notchPanel: NSPanel?
+    private var bloomLayers: [CALayer] = []
+    private var leftBars: [CALayer] = []
+    private var rightBars: [CALayer] = []
+    private var waveformTimer: Timer?
+    private var wavePhase: CGFloat = 0
 
     public init() {}
 
@@ -27,7 +34,20 @@ public final class RecordingOverlayController: @unchecked Sendable {
         }
     }
 
+    public func showTransientMessage(_ text: String, duration: TimeInterval = 1.6) {
+        if Thread.isMainThread {
+            applyTransientMessage(text, duration: duration)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.applyTransientMessage(text, duration: duration)
+            }
+        }
+    }
+
     private func apply(_ state: RecordingOverlayState) {
+        transientDismissWorkItem?.cancel()
+        transientDismissWorkItem = nil
+
         let previous = self.state
         self.state = state
         ensurePanel()
@@ -41,6 +61,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             dotView.isHidden = true
             spinner.stopAnimation(nil)
             spinner.isHidden = true
+            if Self.notchVisualizerEnabled { hideNotchWaveform() }
             fadeOut(panel)
 
         case .recording:
@@ -53,6 +74,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             layoutSubviews()
             positionPanel(panel)
             fadeIn(panel, wasHidden: previous == .idle)
+            if Self.notchVisualizerEnabled { showNotchWaveform() }
 
         case .transcribing:
             titleLabel.stringValue = "Transcribing"
@@ -61,10 +83,38 @@ public final class RecordingOverlayController: @unchecked Sendable {
             dotView.isHidden = true
             spinner.isHidden = false
             spinner.startAnimation(nil)
+            if Self.notchVisualizerEnabled { hideNotchWaveform() }
             layoutSubviews()
             positionPanel(panel)
             fadeIn(panel, wasHidden: previous == .idle)
         }
+    }
+
+    private func applyTransientMessage(_ text: String, duration: TimeInterval) {
+        ensurePanel()
+        guard let panel, let dotView, let titleLabel, let spinner else {
+            return
+        }
+
+        dotView.layer?.removeAnimation(forKey: "pulse")
+        dotView.isHidden = true
+        spinner.stopAnimation(nil)
+        spinner.isHidden = true
+        titleLabel.stringValue = text
+        titleLabel.textColor = .secondaryLabelColor
+        layoutSubviews()
+        positionPanel(panel)
+        fadeIn(panel, wasHidden: panel.alphaValue == 0)
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.state == .idle {
+                self.fadeOut(panel)
+            }
+        }
+        transientDismissWorkItem?.cancel()
+        transientDismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0.2), execute: workItem)
     }
 
     // MARK: - Panel setup
@@ -266,5 +316,160 @@ public final class RecordingOverlayController: @unchecked Sendable {
         let x = visible.maxX - panel.frame.width - 16
         let y = visible.maxY - panel.frame.height - 8
         panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+
+    // MARK: - Notch Visualizer (experimental — disabled for now)
+
+    private static let notchVisualizerEnabled = false
+
+    private static let vizBarCount = 4
+    private static let vizBarHeight: CGFloat = 4
+    private static let vizBarGap: CGFloat = 2
+    private static let vizMaxWidth: CGFloat = 26
+    private static let vizMinWidth: CGFloat = 4
+    private static let notchWidthApprox: CGFloat = 190
+
+    private func ensureNotchPanel() {
+        guard notchPanel == nil else { return }
+        guard let screen = NSScreen.main ?? NSScreen.screens.first,
+              screen.safeAreaInsets.top > 0 else { return }
+
+        let menuBarH = screen.safeAreaInsets.top
+        let screenW = screen.frame.width
+        let notchPad: CGFloat = 6
+        let panelW = Self.notchWidthApprox + (notchPad + Self.vizMaxWidth) * 2 + 20
+        let panelH = menuBarH
+        let panelX = screen.frame.origin.x + (screenW - panelW) / 2
+        let panelY = screen.frame.maxY - panelH
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: panelX, y: panelY, width: panelW, height: panelH),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle]
+        panel.ignoresMouseEvents = true
+        panel.alphaValue = 0
+
+        let content = NSView(frame: NSRect(origin: .zero, size: panel.frame.size))
+        content.wantsLayer = true
+        panel.contentView = content
+
+        let panelCenterX = panelW / 2
+        let halfNotch = Self.notchWidthApprox / 2
+        let totalStackH = CGFloat(Self.vizBarCount) * Self.vizBarHeight
+            + CGFloat(Self.vizBarCount - 1) * Self.vizBarGap
+        let stackStartY = (panelH - totalStackH) / 2
+
+        // Left bars — horizontal, anchored at notch edge, grow leftward
+        for i in 0..<Self.vizBarCount {
+            let bar = CALayer()
+            bar.backgroundColor = NSColor.systemRed.cgColor
+            bar.cornerRadius = Self.vizBarHeight / 2
+            bar.shadowColor = NSColor.systemRed.cgColor
+            bar.shadowRadius = 6
+            bar.shadowOpacity = 0.8
+            bar.shadowOffset = .zero
+            bar.anchorPoint = CGPoint(x: 1.0, y: 0.5)
+            let y = stackStartY + CGFloat(i) * (Self.vizBarHeight + Self.vizBarGap) + Self.vizBarHeight / 2
+            bar.position = CGPoint(x: panelCenterX - halfNotch - notchPad, y: y)
+            bar.bounds = CGRect(origin: .zero, size: CGSize(width: Self.vizMinWidth, height: Self.vizBarHeight))
+            content.layer?.addSublayer(bar)
+            leftBars.append(bar)
+        }
+
+        // Right bars — horizontal, anchored at notch edge, grow rightward
+        for i in 0..<Self.vizBarCount {
+            let bar = CALayer()
+            bar.backgroundColor = NSColor.systemRed.cgColor
+            bar.cornerRadius = Self.vizBarHeight / 2
+            bar.shadowColor = NSColor.systemRed.cgColor
+            bar.shadowRadius = 6
+            bar.shadowOpacity = 0.8
+            bar.shadowOffset = .zero
+            bar.anchorPoint = CGPoint(x: 0.0, y: 0.5)
+            let y = stackStartY + CGFloat(i) * (Self.vizBarHeight + Self.vizBarGap) + Self.vizBarHeight / 2
+            bar.position = CGPoint(x: panelCenterX + halfNotch + notchPad, y: y)
+            bar.bounds = CGRect(origin: .zero, size: CGSize(width: Self.vizMinWidth, height: Self.vizBarHeight))
+            content.layer?.addSublayer(bar)
+            rightBars.append(bar)
+        }
+
+        self.notchPanel = panel
+    }
+
+    private func showNotchWaveform() {
+        ensureNotchPanel()
+        guard let notchPanel else { return }
+
+        notchPanel.alphaValue = 0
+        notchPanel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.3
+            notchPanel.animator().alphaValue = 1.0
+        }
+
+        waveformTimer?.invalidate()
+        wavePhase = 0
+        waveformTimer = Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { [weak self] _ in
+            self?.tickVisualizer()
+        }
+    }
+
+    private func hideNotchWaveform() {
+        waveformTimer?.invalidate()
+        waveformTimer = nil
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.2)
+        for bar in leftBars + rightBars {
+            bar.bounds = CGRect(origin: .zero, size: CGSize(width: Self.vizMinWidth, height: Self.vizBarHeight))
+        }
+        CATransaction.commit()
+
+        guard let notchPanel, notchPanel.alphaValue > 0 else { return }
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.25
+            notchPanel.animator().alphaValue = 0
+        }, completionHandler: {
+            notchPanel.orderOut(nil)
+        })
+    }
+
+    private func tickVisualizer() {
+        wavePhase += 0.35
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.07)
+
+        // Left side — its own set of frequencies and offsets
+        for (i, bar) in leftBars.enumerated() {
+            let w1 = sin(wavePhase * 1.0 + CGFloat(i) * 0.9)
+            let w2 = sin(wavePhase * 1.4 + CGFloat(i) * 0.6 + 0.8)
+            let w3 = sin(wavePhase * 0.6 + CGFloat(i) * 1.3 + 3.1)
+            let combined = (w1 + w2 + w3) / 3.0 * 0.5 + 0.5
+            let jitter = CGFloat.random(in: -1.5...1.5)
+            let width = max(Self.vizMinWidth, Self.vizMinWidth + (Self.vizMaxWidth - Self.vizMinWidth) * combined + jitter)
+            bar.bounds = CGRect(origin: .zero, size: CGSize(width: width, height: Self.vizBarHeight))
+        }
+
+        // Right side — different frequencies so it moves independently
+        for (i, bar) in rightBars.enumerated() {
+            let w1 = sin(wavePhase * 1.1 + CGFloat(i) * 0.7 + 4.2)
+            let w2 = sin(wavePhase * 0.8 + CGFloat(i) * 1.0 + 1.9)
+            let w3 = sin(wavePhase * 1.5 + CGFloat(i) * 0.4 + 5.7)
+            let combined = (w1 + w2 + w3) / 3.0 * 0.5 + 0.5
+            let jitter = CGFloat.random(in: -1.5...1.5)
+            let width = max(Self.vizMinWidth, Self.vizMinWidth + (Self.vizMaxWidth - Self.vizMinWidth) * combined + jitter)
+            bar.bounds = CGRect(origin: .zero, size: CGSize(width: width, height: Self.vizBarHeight))
+        }
+
+        CATransaction.commit()
     }
 }

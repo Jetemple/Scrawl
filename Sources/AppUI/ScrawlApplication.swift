@@ -249,6 +249,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         guard !isModelDownloadInProgress else {
             return
         }
+        guard !modelManager.modelExists(downloadableModel: model) else {
+            setStatus("Model already installed: \(model.id)")
+            return
+        }
 
         isModelDownloadInProgress = true
         refreshModelMenu()
@@ -391,16 +395,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func presentNoSpeechDetectedAlert() {
-        _ = presentAlert(
-            title: "No speech detected",
-            message: """
-            Scrawl did not detect usable speech from the recording.
-
-            Try again and:
-            - hold the hotkey a bit longer
-            - speak slightly closer to your microphone
-            """
-        )
+        runtime.overlayController.showTransientMessage("No speech detected. Try again.")
+        setStatus("No speech detected")
     }
 
     private func presentTranscriptionGuidanceIfNeeded(for error: Error) {
@@ -793,17 +789,24 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         modelsSubmenu.addItem(.separator())
 
+        let downloadable = LocalModelManager.downloadableModels.filter { !modelManager.modelExists(downloadableModel: $0) }
+
         let downloadableHeader = NSMenuItem(title: "Download", action: nil, keyEquivalent: "")
         downloadableHeader.isEnabled = false
         modelsSubmenu.addItem(downloadableHeader)
 
-        for model in LocalModelManager.downloadableModels {
-            let alreadyInstalled = modelManager.modelExists(id: model.id)
-            let item = NSMenuItem(title: model.displayName, action: #selector(downloadModel(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = model.id
-            item.isEnabled = !alreadyInstalled && !isModelDownloadInProgress
-            modelsSubmenu.addItem(item)
+        if downloadable.isEmpty {
+            let allInstalled = NSMenuItem(title: "All available models are installed", action: nil, keyEquivalent: "")
+            allInstalled.isEnabled = false
+            modelsSubmenu.addItem(allInstalled)
+        } else {
+            for model in downloadable {
+                let item = NSMenuItem(title: model.displayName, action: #selector(downloadModel(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = model.id
+                item.isEnabled = !isModelDownloadInProgress
+                modelsSubmenu.addItem(item)
+            }
         }
 
         modelsSubmenu.addItem(.separator())
