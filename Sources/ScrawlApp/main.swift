@@ -1,0 +1,3 @@
+import AppUI
+
+ScrawlApplication().run()
