@@ -8,7 +8,7 @@ public struct HotkeySetting: Codable, Equatable, Sendable {
     public init(
         keyCode: UInt16 = 61,
         isModifierKey: Bool = true,
-        displayName: String = "Right Option"
+        displayName: String = "Right \u{2325} Option"
     ) {
         self.keyCode = keyCode
         self.isModifierKey = isModifierKey
@@ -66,7 +66,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
             self.hotkey = hotkey
         } else {
-            let description = try container.decodeIfPresent(String.self, forKey: .hotkeyDescription) ?? "Right Option"
+            let description = try container.decodeIfPresent(String.self, forKey: .hotkeyDescription) ?? "Right \u{2325} Option"
             self.hotkey = HotkeySetting(keyCode: 61, isModifierKey: true, displayName: description)
         }
     }

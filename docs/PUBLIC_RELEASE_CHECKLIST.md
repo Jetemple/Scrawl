@@ -1,4 +1,4 @@
-# Public v0.0.1 Checklist
+# Public v0.0.2 Checklist
 
 Keep this lightweight for the first public push.
 
@@ -12,10 +12,10 @@ Keep this lightweight for the first public push.
 ## Recommended
 
 - Add 1-2 screenshots/GIFs to README.
-- Add a short changelog entry for v0.0.1.
+- Add a short changelog entry for v0.0.2.
 - Open GitHub issues for known rough edges (see `docs/TODO.md`).
 
-## Not Required For v0.0.1
+## Not Required For v0.0.2
 
 - Signed/notarized app distribution.
 - Homebrew cask.

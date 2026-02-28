@@ -19,6 +19,7 @@ public struct AppRuntime {
     public let dictionaryStore: any DictionaryStoring
     public let whisperProvider: any TranscriptionProvider
     public let modelsDirectoryURL: URL
+    public let whisperExecutableURL: URL
 
     public init(
         permissionManager: PermissionManager,
@@ -29,7 +30,8 @@ public struct AppRuntime {
         textOutputTarget: TextOutputTarget,
         dictionaryStore: any DictionaryStoring,
         whisperProvider: any TranscriptionProvider,
-        modelsDirectoryURL: URL
+        modelsDirectoryURL: URL,
+        whisperExecutableURL: URL
     ) {
         self.permissionManager = permissionManager
         self.settingsStore = settingsStore
@@ -40,6 +42,7 @@ public struct AppRuntime {
         self.dictionaryStore = dictionaryStore
         self.whisperProvider = whisperProvider
         self.modelsDirectoryURL = modelsDirectoryURL
+        self.whisperExecutableURL = whisperExecutableURL
     }
 
     public static func live() -> AppRuntime {
@@ -65,7 +68,8 @@ public struct AppRuntime {
                     modelsDirectoryURL: modelsDir
                 )
             ),
-            modelsDirectoryURL: modelsDir
+            modelsDirectoryURL: modelsDir,
+            whisperExecutableURL: executableURL
         )
     }
 

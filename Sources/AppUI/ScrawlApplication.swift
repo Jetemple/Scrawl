@@ -68,6 +68,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var isCapturingHotkey = false
 
     private var isModelDownloadInProgress = false
+    private var hasShownFirstRunModelPrompt = false
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -93,6 +94,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
         setStatus("Idle")
         updateStatusIcon()
+        promptForFirstRunModelDownloadIfNeeded()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -221,6 +223,31 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         else {
             return
         }
+        startModelDownload(model)
+    }
+
+    @objc private func deleteSelectedModel(_ sender: Any?) {
+        let settings = runtime.settingsStore.load()
+        let selected = settings.selectedModelID
+
+        do {
+            try modelManager.deleteModel(id: selected)
+            var updated = settings
+            let installed = modelManager.installedModelIDs()
+            if let fallback = installed.first {
+                updated.selectedModelID = fallback
+            }
+            saveSettings(updated)
+            setStatus("Deleted model: \(selected)")
+        } catch {
+            setStatus("Delete failed: \(describe(error))")
+        }
+    }
+
+    private func startModelDownload(_ model: DownloadableModel) {
+        guard !isModelDownloadInProgress else {
+            return
+        }
 
         isModelDownloadInProgress = true
         refreshModelMenu()
@@ -250,21 +277,130 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    @objc private func deleteSelectedModel(_ sender: Any?) {
-        let settings = runtime.settingsStore.load()
-        let selected = settings.selectedModelID
+    private func promptForFirstRunModelDownloadIfNeeded() {
+        guard !hasShownFirstRunModelPrompt else {
+            return
+        }
+        guard modelManager.installedModelIDs().isEmpty else {
+            return
+        }
+        guard let tinyModel = LocalModelManager.downloadableModels.first(where: { $0.id == "ggml-tiny.en" }) else {
+            return
+        }
 
-        do {
-            try modelManager.deleteModel(id: selected)
+        hasShownFirstRunModelPrompt = true
+
+        let response = presentAlert(
+            title: "No model installed",
+            message: "Scrawl needs a Whisper model before the hotkey can transcribe. Download tiny.en (75 MB) now to get started.",
+            primaryButton: "Download tiny.en",
+            secondaryButton: "Later"
+        )
+
+        if response == .alertFirstButtonReturn {
+            startModelDownload(tinyModel)
+        }
+    }
+
+    private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
+        if !FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) {
+            setStatus("whisper-cli missing")
+            presentWhisperMissingAlert()
+            return false
+        }
+
+        let settings = runtime.settingsStore.load()
+        if modelManager.modelExists(id: settings.modelID) {
+            return true
+        }
+
+        let installed = modelManager.installedModelIDs()
+        if let fallback = installed.first {
             var updated = settings
-            let installed = modelManager.installedModelIDs()
-            if let fallback = installed.first {
-                updated.selectedModelID = fallback
-            }
+            updated.selectedModelID = fallback
             saveSettings(updated)
-            setStatus("Deleted model: \(selected)")
-        } catch {
-            setStatus("Delete failed: \(describe(error))")
+            return true
+        }
+
+        setStatus("No model installed")
+        presentMissingModelAlert(triggeredByHotkey: origin != .manual)
+        return false
+    }
+
+    @discardableResult
+    private func presentAlert(
+        title: String,
+        message: String,
+        primaryButton: String = "OK",
+        secondaryButton: String? = nil
+    ) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: primaryButton)
+        if let secondaryButton {
+            alert.addButton(withTitle: secondaryButton)
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        return alert.runModal()
+    }
+
+    private func presentWhisperMissingAlert() {
+        let executablePath = runtime.whisperExecutableURL.path
+        let message = """
+        Scrawl could not find whisper-cli at:
+        \(executablePath)
+
+        Install whisper.cpp:
+        brew install whisper-cpp
+
+        Or set:
+        SCRAWL_WHISPER_EXECUTABLE=/absolute/path/to/whisper-cli
+        """
+
+        _ = presentAlert(
+            title: "whisper-cli not found",
+            message: message
+        )
+    }
+
+    private func presentMissingModelAlert(triggeredByHotkey: Bool) {
+        guard let tinyModel = LocalModelManager.downloadableModels.first(where: { $0.id == "ggml-tiny.en" }) else {
+            _ = presentAlert(
+                title: "No model installed",
+                message: "Scrawl needs a Whisper model in Models before transcription can run."
+            )
+            return
+        }
+
+        let prefix = triggeredByHotkey
+            ? "Hotkey recording cannot start because no model is installed."
+            : "No model is installed."
+        let response = presentAlert(
+            title: "No model installed",
+            message: "\(prefix)\n\nDownload tiny.en (75 MB) now to get started.",
+            primaryButton: "Download tiny.en",
+            secondaryButton: "Later"
+        )
+
+        if response == .alertFirstButtonReturn {
+            startModelDownload(tinyModel)
+        }
+    }
+
+    private func presentTranscriptionGuidanceIfNeeded(for error: Error) {
+        guard let transcriptionError = error as? TranscriptionError else {
+            return
+        }
+
+        switch transcriptionError {
+        case .providerUnavailable:
+            presentWhisperMissingAlert()
+        case .modelMissing:
+            presentMissingModelAlert(triggeredByHotkey: true)
+        case .executionFailed:
+            break
         }
     }
 
@@ -425,6 +561,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
+        guard validateTranscriptionPrerequisites(origin: origin) else {
+            return
+        }
+
         captureInsertionTargetApp()
 
         do {
@@ -538,14 +678,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private func capturedHotkey(from event: NSEvent) -> HotkeySetting? {
         if event.type == .flagsChanged {
             switch event.keyCode {
-            case 56: return HotkeySetting(keyCode: 56, isModifierKey: true, displayName: "Left Shift")
-            case 60: return HotkeySetting(keyCode: 60, isModifierKey: true, displayName: "Right Shift")
-            case 58: return HotkeySetting(keyCode: 58, isModifierKey: true, displayName: "Left Option")
-            case 61: return HotkeySetting(keyCode: 61, isModifierKey: true, displayName: "Right Option")
-            case 59: return HotkeySetting(keyCode: 59, isModifierKey: true, displayName: "Left Control")
-            case 62: return HotkeySetting(keyCode: 62, isModifierKey: true, displayName: "Right Control")
-            case 55: return HotkeySetting(keyCode: 55, isModifierKey: true, displayName: "Left Command")
-            case 54: return HotkeySetting(keyCode: 54, isModifierKey: true, displayName: "Right Command")
+            case 56: return HotkeySetting(keyCode: 56, isModifierKey: true, displayName: "Left \u{21E7} Shift")
+            case 60: return HotkeySetting(keyCode: 60, isModifierKey: true, displayName: "Right \u{21E7} Shift")
+            case 58: return HotkeySetting(keyCode: 58, isModifierKey: true, displayName: "Left \u{2325} Option")
+            case 61: return HotkeySetting(keyCode: 61, isModifierKey: true, displayName: "Right \u{2325} Option")
+            case 59: return HotkeySetting(keyCode: 59, isModifierKey: true, displayName: "Left \u{2303} Control")
+            case 62: return HotkeySetting(keyCode: 62, isModifierKey: true, displayName: "Right \u{2303} Control")
+            case 55: return HotkeySetting(keyCode: 55, isModifierKey: true, displayName: "Left \u{2318} Command")
+            case 54: return HotkeySetting(keyCode: 54, isModifierKey: true, displayName: "Right \u{2318} Command")
             default: return nil
             }
         }
@@ -613,7 +753,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             modelsSubmenu.addItem(empty)
         } else {
             for modelID in installed {
-                let item = NSMenuItem(title: modelID, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
+                let displayName = modelID.replacingOccurrences(of: "ggml-", with: "")
+                let item = NSMenuItem(title: displayName, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = modelID
                 item.state = (modelID == settings.modelID) ? .on : .off
@@ -722,7 +863,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let symbolName: String
         switch runtime.overlayController.state {
         case .idle:
-            symbolName = "mic.fill"
+            symbolName = "pencil.tip"
         case .recording:
             symbolName = "waveform.circle.fill"
         case .transcribing:
@@ -825,5 +966,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         runtime.overlayController.setState(.idle)
         updateStatusIcon()
         setStatus("\(reason): \(describe(error))")
+        presentTranscriptionGuidanceIfNeeded(for: error)
     }
 }

@@ -30,6 +30,7 @@ final class LocalModelManager: @unchecked Sendable {
         return files
             .filter { $0.pathExtension == "bin" }
             .map { $0.deletingPathExtension().lastPathComponent }
+            .filter { !$0.hasPrefix("for-tests-") }
             .sorted()
     }
 

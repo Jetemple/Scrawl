@@ -1,4 +1,4 @@
-# Publish v0.0.1 (GitHub)
+# Publish v0.0.2 (GitHub)
 
 This is a simple path to publish Scrawl as a source-first project.
 
@@ -21,7 +21,7 @@ Verify:
 ```bash
 git init
 git add .
-git commit -m "Initial public v0.0.1"
+git commit -m "Public release v0.0.2"
 ```
 
 ## 3. Create GitHub repo and push
@@ -32,11 +32,11 @@ git remote add origin <YOUR_GITHUB_REPO_URL>
 git push -u origin main
 ```
 
-## 4. Tag v0.0.1
+## 4. Tag v0.0.2
 
 ```bash
-git tag -a v0.0.1 -m "Scrawl v0.0.1"
-git push origin v0.0.1
+git tag -a v0.0.2 -m "Scrawl v0.0.2"
+git push origin v0.0.2
 ```
 
 ## 5. (Optional) GitHub Release notes

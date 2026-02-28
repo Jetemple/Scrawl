@@ -1,86 +1,69 @@
 # Scrawl
 
-Scrawl is a small macOS dictation app that stays local.
+Local-first voice-to-text for macOS. Press a key, talk, text appears at your cursor. Everything runs on-device via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — nothing leaves your machine.
 
-You hit a hotkey, talk, and it pastes text where your cursor is.
+## How it works
 
-- menubar app
-- global hotkey
-- local transcription via `whisper.cpp`
-- dictionary fixes (`wrong -> correct`)
+1. Hold your hotkey (default: `Right Option`)
+2. Speak
+3. Release — transcript is pasted into whatever app you're focused on
 
-## Quickstart
+Or double-tap the hotkey to toggle recording on, then single-tap to stop.
 
-### 1. Requirements
+## Install
 
-- macOS 14+
-- Xcode command line tools
-- `whisper-cli` installed (`whisper.cpp`)
-- At least one Whisper model downloaded
-
-### 2. Run
+Requires macOS 14+ and `whisper-cli` from whisper.cpp.
 
 ```bash
+# install whisper.cpp (if you haven't)
+brew install whisper-cpp
+
+# clone and run
+git clone https://github.com/TODO/scrawl.git
+cd scrawl
 swift run ScrawlApp
 ```
 
-Optional runtime overrides:
+On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
 
-- `SCRAWL_WHISPER_EXECUTABLE=/absolute/path/to/whisper-cli`
-- `SCRAWL_MODELS_DIR=/absolute/path/to/model-directory`
+Download a model from the Models menu — `small.en` is recommended for daily use.
 
-Default model directory:
+## Configuration
 
-- `~/Library/Application Support/Scrawl/models`
+Scrawl lives in your menubar. From there you can:
 
-### 3. First use
+- **Change the hotkey** — Set Hotkey, then press any key or modifier
+- **Switch models** — tiny.en (fast), small.en (recommended), medium (multilingual)
+- **Repaste recent transcripts** — Recent Transcripts submenu
 
-1. Grant Microphone and Accessibility permissions from the app menu.
-2. Focus a text field (Terminal, editor, browser).
-3. Hold `Right Option`, speak, release.
-4. Transcript is pasted at the cursor.
+Dictionary replacements are stored at `~/Library/Application Support/Scrawl/dictionary.json` — add `{"wrong": "...", "correct": "..."}` entries to auto-correct transcription mistakes.
 
-Toggle mode:
+## Advanced
 
-1. Double tap hotkey to start recording.
-2. Single tap to stop and transcribe.
+Override paths via environment variables:
 
-## Features
+```bash
+SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli swift run ScrawlApp
+SCRAWL_MODELS_DIR=/path/to/models swift run ScrawlApp
+```
 
-- `Set Hotkey...` (saved across runs)
-- Model manager:
-  - select installed model
-  - download common models
-  - delete selected model
-- Recent transcript history with repaste actions
-- Dictionary replacements pipeline (currently file-based, no in-app editor yet)
+Debug mode (shows manual record/stop controls and overlay previews):
 
-Dictionary file location:
-
-- `~/Library/Application Support/Scrawl/dictionary.json`
-
-## Status
-
-This is an early build (`v0.0.2` range), but it’s already usable.
+```bash
+SCRAWL_DEBUG=1 swift run ScrawlApp
+```
 
 ## Development
 
-Build:
-
 ```bash
-swift build
+swift build   # build
+swift test    # run tests
 ```
 
-Test:
+## Status
 
-```bash
-swift test
-```
-
-## Publishing
-
-See [docs/PUBLISH.md](docs/PUBLISH.md) for a minimal GitHub `v0.0.2` publish flow.
+Early build. Usable but rough around the edges.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT
