@@ -61,7 +61,7 @@ Dictionary file location:
 
 ## Status
 
-This is an early build (`v0.0.1` range), but it’s already usable.
+This is an early build (`v0.0.2` range), but it’s already usable.
 
 ## Development
 
@@ -79,7 +79,7 @@ swift test
 
 ## Publishing
 
-See [docs/PUBLISH.md](docs/PUBLISH.md) for a minimal GitHub `v0.0.1` publish flow.
+See [docs/PUBLISH.md](docs/PUBLISH.md) for a minimal GitHub `v0.0.2` publish flow.
 
 ## License
 

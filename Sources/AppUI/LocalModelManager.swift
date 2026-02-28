@@ -74,31 +74,19 @@ extension LocalModelManager {
         DownloadableModel(
             id: "ggml-tiny.en",
             fileName: "ggml-tiny.en.bin",
-            displayName: "tiny.en (~75MB)",
+            displayName: "tiny.en — fast, 75 MB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin")!
-        ),
-        DownloadableModel(
-            id: "ggml-base.en",
-            fileName: "ggml-base.en.bin",
-            displayName: "base.en (~142MB)",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin")!
         ),
         DownloadableModel(
             id: "ggml-small.en",
             fileName: "ggml-small.en.bin",
-            displayName: "small.en (~466MB)",
+            displayName: "small.en — recommended, 466 MB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin")!
-        ),
-        DownloadableModel(
-            id: "ggml-small",
-            fileName: "ggml-small.bin",
-            displayName: "small multilingual (~466MB)",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin")!
         ),
         DownloadableModel(
             id: "ggml-medium",
             fileName: "ggml-medium.bin",
-            displayName: "medium multilingual (~1.5GB)",
+            displayName: "medium — multilingual, 1.5 GB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")!
         )
     ]

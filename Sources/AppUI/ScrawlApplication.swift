@@ -43,9 +43,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var statusItem: NSStatusItem?
     private var rootMenu: NSMenu?
 
-    private var modelLineItem: NSMenuItem?
-    private var hotkeyLineItem: NSMenuItem?
-    private var statusLineItem: NSMenuItem?
+    private var infoLineItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
     private var accessibilityItem: NSMenuItem?
     private var startManualItem: NSMenuItem?
@@ -290,20 +288,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         menu.delegate = self
         rootMenu = menu
 
-        let modelLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        modelLineItem.isEnabled = false
-        menu.addItem(modelLineItem)
-        self.modelLineItem = modelLineItem
-
-        let hotkeyLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        hotkeyLineItem.isEnabled = false
-        menu.addItem(hotkeyLineItem)
-        self.hotkeyLineItem = hotkeyLineItem
-
-        let statusLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        statusLineItem.isEnabled = false
-        menu.addItem(statusLineItem)
-        self.statusLineItem = statusLineItem
+        let infoLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        infoLineItem.isEnabled = false
+        menu.addItem(infoLineItem)
+        self.infoLineItem = infoLineItem
 
         menu.addItem(.separator())
 
@@ -313,12 +301,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         self.modelsSubmenu = modelsSubmenu
         menu.addItem(modelsItem)
 
-        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(beginHotkeyCapture(_:)), keyEquivalent: "h")
+        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(beginHotkeyCapture(_:)), keyEquivalent: "")
         setHotkeyItem.target = self
         menu.addItem(setHotkeyItem)
 
-        menu.addItem(.separator())
+        let historyItem = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
+        let historySubmenu = NSMenu()
+        historyItem.submenu = historySubmenu
+        self.historySubmenu = historySubmenu
+        menu.addItem(historyItem)
 
+        // Permissions — hidden once both are granted
         let micItem = NSMenuItem(title: "", action: #selector(requestMicrophonePermission(_:)), keyEquivalent: "")
         micItem.target = self
         menu.addItem(micItem)
@@ -329,39 +322,32 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         menu.addItem(axItem)
         self.accessibilityItem = axItem
 
-        menu.addItem(.separator())
+        // Debug tools — only visible with SCRAWL_DEBUG=1
+        if ProcessInfo.processInfo.environment["SCRAWL_DEBUG"] != nil {
+            menu.addItem(.separator())
 
-        let startManualItem = NSMenuItem(title: "Start Recording (Manual)", action: #selector(startManualRecording(_:)), keyEquivalent: "r")
-        startManualItem.target = self
-        menu.addItem(startManualItem)
-        self.startManualItem = startManualItem
+            let startManualItem = NSMenuItem(title: "Start Recording", action: #selector(startManualRecording(_:)), keyEquivalent: "r")
+            startManualItem.target = self
+            menu.addItem(startManualItem)
+            self.startManualItem = startManualItem
 
-        let stopManualItem = NSMenuItem(title: "Stop + Transcribe (Manual)", action: #selector(stopManualRecordingAndTranscribe(_:)), keyEquivalent: "s")
-        stopManualItem.target = self
-        menu.addItem(stopManualItem)
-        self.stopManualItem = stopManualItem
+            let stopManualItem = NSMenuItem(title: "Stop + Transcribe", action: #selector(stopManualRecordingAndTranscribe(_:)), keyEquivalent: "s")
+            stopManualItem.target = self
+            menu.addItem(stopManualItem)
+            self.stopManualItem = stopManualItem
 
-        menu.addItem(.separator())
+            let idleState = NSMenuItem(title: "Preview Idle", action: #selector(showIdleState(_:)), keyEquivalent: "")
+            idleState.target = self
+            menu.addItem(idleState)
 
-        let historyItem = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
-        let historySubmenu = NSMenu()
-        historyItem.submenu = historySubmenu
-        self.historySubmenu = historySubmenu
-        menu.addItem(historyItem)
+            let recordingState = NSMenuItem(title: "Preview Recording", action: #selector(showRecordingState(_:)), keyEquivalent: "")
+            recordingState.target = self
+            menu.addItem(recordingState)
 
-        menu.addItem(.separator())
-
-        let idleState = NSMenuItem(title: "Preview Idle Indicator", action: #selector(showIdleState(_:)), keyEquivalent: "")
-        idleState.target = self
-        menu.addItem(idleState)
-
-        let recordingState = NSMenuItem(title: "Preview Recording Indicator", action: #selector(showRecordingState(_:)), keyEquivalent: "")
-        recordingState.target = self
-        menu.addItem(recordingState)
-
-        let transcribingState = NSMenuItem(title: "Preview Transcribing Indicator", action: #selector(showTranscribingState(_:)), keyEquivalent: "")
-        transcribingState.target = self
-        menu.addItem(transcribingState)
+            let transcribingState = NSMenuItem(title: "Preview Transcribing", action: #selector(showTranscribingState(_:)), keyEquivalent: "")
+            transcribingState.target = self
+            menu.addItem(transcribingState)
+        }
 
         menu.addItem(.separator())
 
@@ -607,8 +593,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func refreshSettingsRows() {
         let settings = runtime.settingsStore.load()
-        modelLineItem?.title = "Model: \(settings.modelID)"
-        hotkeyLineItem?.title = "Hotkey: \(settings.hotkey.displayName)"
+        let modelName = settings.modelID
+            .replacingOccurrences(of: "ggml-", with: "")
+        infoLineItem?.title = "\(modelName) · \(settings.hotkey.displayName)"
     }
 
     private func refreshModelMenu() {
@@ -685,8 +672,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func updatePermissionRows() {
-        microphoneItem?.title = permissionMenuTitle(for: "Microphone", status: runtime.permissionManager.microphoneStatus())
-        accessibilityItem?.title = permissionMenuTitle(for: "Accessibility", status: runtime.permissionManager.accessibilityStatus())
+        let micStatus = runtime.permissionManager.microphoneStatus()
+        let axStatus = runtime.permissionManager.accessibilityStatus()
+
+        microphoneItem?.title = permissionMenuTitle(for: "Microphone", status: micStatus)
+        accessibilityItem?.title = permissionMenuTitle(for: "Accessibility", status: axStatus)
+
+        // Hide permission rows once both are granted
+        let bothGranted = micStatus == .authorized && axStatus == .authorized
+        microphoneItem?.isHidden = bothGranted
+        accessibilityItem?.isHidden = bothGranted
     }
 
     private func updateRecordingActionRows() {
@@ -696,7 +691,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func setStatus(_ text: String) {
-        statusLineItem?.title = "Status: \(text)"
+        // Status is now communicated via the overlay + menubar icon.
+        // This method is kept as a hook for debug logging.
+        #if DEBUG
+        print("[Scrawl] \(text)")
+        #endif
     }
 
     @MainActor
@@ -725,7 +724,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         case .idle:
             symbolName = "mic.fill"
         case .recording:
-            symbolName = "record.circle.fill"
+            symbolName = "waveform.circle.fill"
         case .transcribing:
             symbolName = "ellipsis.circle.fill"
         }
@@ -818,7 +817,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         runtime.overlayController.setState(.idle)
         addTranscriptToHistory(transcript)
         updateStatusIcon()
-        setStatus("Pasted in \(latencyMS)ms")
+        setStatus("Done")
     }
 
     @MainActor
