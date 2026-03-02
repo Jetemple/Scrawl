@@ -45,6 +45,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var rootMenu: NSMenu?
 
     private var infoLineItem: NSMenuItem?
+    private var statusLineItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
     private var accessibilityItem: NSMenuItem?
     private var startManualItem: NSMenuItem?
@@ -66,9 +67,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var hotkeyCaptureGlobalMonitor: Any?
     private var hotkeyCaptureLocalMonitor: Any?
     private var hotkeyCaptureTimeoutTimer: Timer?
+    private var statusAutoClearTimer: Timer?
     private var isCapturingHotkey = false
 
     private var isModelDownloadInProgress = false
+    private var latestStatusText = ""
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -100,6 +103,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         teardownHotkeyHandling()
         stopHotkeyCapture()
         stopObservingWorkspaceActivations()
+        statusAutoClearTimer?.invalidate()
+        statusAutoClearTimer = nil
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -259,7 +264,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.modelManager.download(model: model)
+                _ = try await self.modelManager.download(model: model) { [weak self] receivedBytes, totalBytes in
+                    guard let self else { return }
+                    self.setStatus(self.downloadProgressText(for: model, receivedBytes: receivedBytes, totalBytes: totalBytes))
+                }
                 var workingSettings = self.runtime.settingsStore.load()
                 workingSettings.selectedModelID = model.id
                 if workingSettings.defaultModelID.isEmpty {
@@ -271,13 +279,49 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     self.setStatus("Downloaded \(model.id)")
                 }
             } catch {
-                await self.setStatusOnMain("Download failed: \(self.describe(error))")
+                await MainActor.run {
+                    let details = self.describe(error)
+                    self.setStatus("Download failed")
+                    _ = self.presentAlert(
+                        title: "Model download failed",
+                        message: """
+                        Could not download \(model.displayName).
+
+                        \(details)
+                        """
+                    )
+                }
             }
             await MainActor.run {
                 self.isModelDownloadInProgress = false
                 self.refreshModelMenu()
             }
         }
+    }
+
+    private func downloadProgressText(for model: DownloadableModel, receivedBytes: Int64, totalBytes: Int64?) -> String {
+        let modelName = model.id.replacingOccurrences(of: "ggml-", with: "")
+        let receivedMB = formatMegabytes(receivedBytes)
+
+        guard let totalBytes, totalBytes > 0 else {
+            return "Downloading \(modelName): \(receivedMB) MB"
+        }
+
+        let totalMB = formatMegabytes(totalBytes)
+        let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
+        let percent = Int((ratio * 100).rounded())
+        return "Downloading \(modelName): \(percent)% (\(receivedMB)/\(totalMB) MB)"
+    }
+
+    private func formatMegabytes(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / (1024 * 1024)
+        if mb >= 100 {
+            return String(format: "%.0f", mb)
+        }
+        if mb >= 10 {
+            return String(format: "%.1f", mb)
+        }
+        return String(format: "%.2f", mb)
     }
 
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
@@ -426,6 +470,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         infoLineItem.isEnabled = false
         menu.addItem(infoLineItem)
         self.infoLineItem = infoLineItem
+
+        let statusLineItem = NSMenuItem(title: "Status: Launching...", action: nil, keyEquivalent: "")
+        statusLineItem.isEnabled = false
+        statusLineItem.isHidden = true
+        menu.addItem(statusLineItem)
+        self.statusLineItem = statusLineItem
 
         menu.addItem(.separator())
 
@@ -844,11 +894,49 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func setStatus(_ text: String) {
-        // Status is now communicated via the overlay + menubar icon.
-        // This method is kept as a hook for debug logging.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            statusAutoClearTimer?.invalidate()
+            statusAutoClearTimer = nil
+            latestStatusText = text
+
+            if text == "Idle" {
+                statusLineItem?.isHidden = true
+                statusLineItem?.title = "Status: Idle"
+                return
+            }
+
+            statusLineItem?.isHidden = false
+            statusLineItem?.title = "Status: \(text)"
+
+            if text == "Done" {
+                scheduleStatusAutoClear(after: 2.5)
+            }
+        }
+
         #if DEBUG
         print("[Scrawl] \(text)")
         #endif
+    }
+
+    @MainActor
+    private func scheduleStatusAutoClear(after seconds: TimeInterval) {
+        statusAutoClearTimer?.invalidate()
+        statusAutoClearTimer = Timer.scheduledTimer(
+            timeInterval: seconds,
+            target: self,
+            selector: #selector(handleStatusAutoClearTimer(_:)),
+            userInfo: nil,
+            repeats: false
+        )
+        if let statusAutoClearTimer {
+            RunLoop.main.add(statusAutoClearTimer, forMode: .common)
+        }
+    }
+
+    @objc private func handleStatusAutoClearTimer(_ timer: Timer) {
+        setStatus("Idle")
     }
 
     @MainActor

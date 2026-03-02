@@ -10,7 +10,7 @@ Local-first voice-to-text for macOS. Press a key, talk, text appears at your cur
 
 Or double-tap the hotkey to toggle recording on, then single-tap to stop.
 
-## Install
+## Install (App Bundle)
 
 Requires macOS 14+ and `whisper-cli` from whisper.cpp.
 
@@ -18,10 +18,19 @@ Requires macOS 14+ and `whisper-cli` from whisper.cpp.
 # install whisper.cpp (if you haven't)
 brew install whisper-cpp
 
-# clone and run
+# clone and install Scrawl.app into ~/Applications
 git clone https://github.com/Jetemple/Scrawl.git
 cd scrawl
-swift run ScrawlApp
+./scripts/install-app.sh
+open ~/Applications/Scrawl.app
+```
+
+Install system-wide instead:
+
+```bash
+./scripts/install-app.sh /Applications
+# if needed:
+sudo ./scripts/install-app.sh /Applications
 ```
 
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
@@ -38,7 +47,13 @@ Scrawl lives in your menubar. From there you can:
 
 ## Advanced
 
-Override paths via environment variables:
+Run directly from source (development):
+
+```bash
+swift run ScrawlApp
+```
+
+Override paths via environment variables (development):
 
 ```bash
 SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli swift run ScrawlApp
