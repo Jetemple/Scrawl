@@ -14,6 +14,12 @@ final class DictionaryReplacerTests: XCTestCase {
         XCTAssertEqual(result, "no changes expected")
     }
 
+    func testReplacementContainingSearchTermDoesNotLoop() {
+        let entries = [DictionaryEntry(wrong: "test", correct: "testing")]
+        let result = DictionaryReplacer.apply(entries: entries, to: "this is a test")
+        XCTAssertEqual(result, "this is a testing")
+    }
+
     func testAddOrReplaceUpsertsCaseInsensitive() throws {
         let store = InMemoryDictionaryStore(entries: [
             DictionaryEntry(wrong: "wispr", correct: "Whisper")

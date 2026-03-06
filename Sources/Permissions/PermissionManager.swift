@@ -34,7 +34,7 @@ public final class PermissionManager: @unchecked Sendable {
 
     @discardableResult
     public func requestAccessibilityAccess(prompt: Bool) -> Bool {
-        let key = kAXTrustedCheckOptionPrompt.takeRetainedValue() as String
+        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options = [key: prompt] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }

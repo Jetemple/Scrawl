@@ -117,10 +117,13 @@ public enum DictionaryReplacer {
 
     private static func replacingCaseInsensitive(_ source: String, with replacement: String, in text: String) -> String {
         var working = text
-        while let range = working.range(of: source, options: [.caseInsensitive]) {
+        var searchStart = working.startIndex
+        while searchStart < working.endIndex,
+              let range = working.range(of: source, options: [.caseInsensitive], range: searchStart..<working.endIndex) {
             let original = String(working[range])
             let replacementWithCase = applyCaseStyle(from: original, to: replacement)
             working.replaceSubrange(range, with: replacementWithCase)
+            searchStart = working.index(range.lowerBound, offsetBy: replacementWithCase.count, limitedBy: working.endIndex) ?? working.endIndex
         }
         return working
     }

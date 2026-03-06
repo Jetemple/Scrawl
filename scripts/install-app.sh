@@ -43,8 +43,10 @@ ensure_plist_key() {
     fi
 }
 
-echo "Building $EXECUTABLE_TARGET ($BUILD_CONFIGURATION)..."
-swift build -c "$BUILD_CONFIGURATION" --product "$EXECUTABLE_TARGET"
+if [[ "${SCRAWL_SKIP_BUILD:-0}" != "1" ]]; then
+    echo "Building $EXECUTABLE_TARGET ($BUILD_CONFIGURATION)..."
+    swift build -c "$BUILD_CONFIGURATION" --product "$EXECUTABLE_TARGET"
+fi
 
 if [[ ! -x "$BUILT_EXECUTABLE" ]]; then
     ALT_EXECUTABLE="$(find "$REPO_ROOT/.build" -type f -path "*/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET" -perm -111 | head -n 1 || true)"
@@ -105,9 +107,25 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 FINAL_APP_PATH="$INSTALL_DIR/$APP_BUNDLE_NAME"
-rm -rf "$FINAL_APP_PATH"
+
+# Quit running instance before replacing
+if pgrep -f "$FINAL_APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" >/dev/null 2>&1; then
+    echo "Stopping running Scrawl..."
+    pkill -f "$FINAL_APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" 2>/dev/null || true
+    sleep 0.5
+fi
+
+# Reset stale Accessibility entry so the new binary gets a fresh grant
+tccutil reset Accessibility com.jetemple.scrawl 2>/dev/null || true
+
+if [[ -e "$FINAL_APP_PATH" ]] && ! rm -rf "$FINAL_APP_PATH" 2>/dev/null; then
+    echo "Permission denied: cannot replace $FINAL_APP_PATH"
+    echo "Try: sudo make install PREFIX=$INSTALL_DIR"
+    exit 1
+fi
+
 cp -R "$STAGED_APP_PATH" "$FINAL_APP_PATH"
 
 echo "Installed: $FINAL_APP_PATH"
-echo "Launch with:"
-echo "  open \"$FINAL_APP_PATH\""
+echo "Launching Scrawl..."
+open "$FINAL_APP_PATH"

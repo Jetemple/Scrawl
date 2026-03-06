@@ -168,11 +168,21 @@ final class LocalModelManager: @unchecked Sendable {
                     return
                 }
 
+                // Move immediately — the temp file is only valid inside this callback.
+                let safeCopy = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("scrawl-download-\(UUID().uuidString).bin")
+                do {
+                    try FileManager.default.moveItem(at: temporaryURL, to: safeCopy)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
                 let expected = downloadTask?.countOfBytesExpectedToReceive ?? -1
                 let totalBytes = expected > 0 ? expected : nil
                 let receivedBytes = downloadTask?.countOfBytesReceived ?? 0
                 onProgress?(receivedBytes, totalBytes)
-                continuation.resume(returning: (temporaryURL, response))
+                continuation.resume(returning: (safeCopy, response))
             }
             downloadTask = task
 

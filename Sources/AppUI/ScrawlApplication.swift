@@ -366,22 +366,29 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         return alert.runModal()
     }
 
+    private func presentMicrophoneDeniedAlert() {
+        let response = presentAlert(
+            title: "Microphone Access Required",
+            message: """
+            Scrawl needs microphone access to record your voice for transcription.
+
+            Open System Settings → Privacy & Security → Microphone and enable Scrawl.
+            """,
+            primaryButton: "Open Settings",
+            secondaryButton: "Not Now"
+        )
+
+        if response == .alertFirstButtonReturn {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
     private func presentWhisperMissingAlert() {
-        let executablePath = runtime.whisperExecutableURL.path
-        let message = """
-        Scrawl could not find whisper-cli at:
-        \(executablePath)
-
-        Install whisper.cpp:
-        brew install whisper-cpp
-
-        Or set:
-        SCRAWL_WHISPER_EXECUTABLE=/absolute/path/to/whisper-cli
-        """
-
         _ = presentAlert(
-            title: "whisper-cli not found",
-            message: message
+            title: "whisper-cli Not Found",
+            message: "Scrawl requires whisper.cpp for transcription.\n\nInstall it with Homebrew:\nbrew install whisper-cpp"
         )
     }
 
@@ -412,29 +419,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             teardownHotkeyHandling()
             setupHotkeyHandling()
             setStatus("Hotkey ready")
-            return
-        }
-
-        setStatus("Accessibility permission required")
-        let message = """
-        Scrawl needs Accessibility permission to work correctly.
-
-        Why this is required:
-        - listen for your global hotkey while you are in other apps
-        - paste the transcript into the focused app (Cmd+V)
-
-        Scrawl does not read text from your apps or record your screen.
-        """
-
-        let response = presentAlert(
-            title: "Enable Accessibility for Scrawl",
-            message: message,
-            primaryButton: "Open Settings",
-            secondaryButton: "Not Now"
-        )
-
-        if response == .alertFirstButtonReturn {
-            openAccessibilitySettings()
+        } else {
+            setStatus("Accessibility permission required")
         }
     }
 
@@ -699,9 +685,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        if runtime.permissionManager.microphoneStatus() != .authorized {
-            if runtime.permissionManager.microphoneStatus() == .notDetermined {
+        let micStatus = runtime.permissionManager.microphoneStatus()
+        if micStatus != .authorized {
+            if micStatus == .notDetermined {
                 requestMicrophonePermission(nil)
+            } else {
+                presentMicrophoneDeniedAlert()
             }
             setStatus("Microphone permission required")
             return
@@ -997,6 +986,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         stopManualItem?.isEnabled = isRecording
     }
 
+    private static let ongoingStatuses: Set<String> = [
+        "Recording...", "Transcribing...", "Press desired hotkey now..."
+    ]
+
     private func setStatus(_ text: String) {
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1014,8 +1007,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             statusLineItem?.isHidden = false
             statusLineItem?.title = "Status: \(text)"
 
-            if text == "Done" {
-                scheduleStatusAutoClear(after: 2.5)
+            let isOngoing = Self.ongoingStatuses.contains(text) || text.hasPrefix("Downloading ")
+            if !isOngoing {
+                scheduleStatusAutoClear(after: text == "Done" ? 2.5 : 5.0)
             }
         }
 

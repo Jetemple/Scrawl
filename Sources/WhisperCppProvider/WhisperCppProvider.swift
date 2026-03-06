@@ -20,7 +20,7 @@ public struct WhisperCppConfig: Sendable {
     }
 }
 
-public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendable {
+public final class WhisperCppProvider: TranscriptionProvider, Sendable {
     public let config: WhisperCppConfig
 
     public init(config: WhisperCppConfig) {
@@ -187,13 +187,13 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
         try await withThrowingTaskGroup(of: Int32.self) { group in
             group.addTask {
                 try await withCheckedThrowingContinuation { continuation in
-                    process.terminationHandler = { process in
-                        continuation.resume(returning: process.terminationStatus)
-                    }
-
                     do {
+                        process.terminationHandler = { process in
+                            continuation.resume(returning: process.terminationStatus)
+                        }
                         try process.run()
                     } catch {
+                        process.terminationHandler = nil
                         continuation.resume(
                             throwing: TranscriptionError.executionFailed(
                                 "Failed to launch whisper.cpp: \(error.localizedDescription)"

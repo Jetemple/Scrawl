@@ -10,50 +10,38 @@ Local-first voice-to-text for macOS. Press a key, talk, text appears at your cur
 
 Or double-tap the hotkey to toggle recording on, then single-tap to stop.
 
-## Install (App Bundle)
+## Install
 
-Requires macOS 14+ and `whisper-cli` from whisper.cpp.
+Requires macOS 14+, Xcode command line tools, and `whisper-cli` from whisper.cpp.
 
 ```bash
-# install whisper.cpp (if you haven't)
 brew install whisper-cpp
 
-# clone and install Scrawl.app into ~/Applications
 git clone https://github.com/Jetemple/Scrawl.git
 cd scrawl
-make install
-open ~/Applications/Scrawl.app
-```
-
-Install system-wide instead:
-
-```bash
 make install PREFIX=/Applications
+open /Applications/Scrawl.app
 ```
 
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
 
-If you toggle Accessibility in System Settings while Scrawl is running, wait a second for it to refresh. If hotkeys still do not respond, quit and reopen Scrawl once.
+Download a model from the Models menu — `small.en` is recommended for daily use.
 
-### Stable Accessibility Permissions Across Updates
+### Permissions after reinstalling
 
-macOS tracks Accessibility grants by app identity. For local development, using a consistent signing identity helps permissions survive reinstalls.
+Building from source produces an unsigned binary. macOS tracks Accessibility permission by code signature, so **after every reinstall you'll need to toggle Accessibility off and back on** in System Settings → Privacy & Security → Accessibility.
+
+To avoid this, sign with a stable identity:
 
 ```bash
-# list available signing identities
+# find your identities
 security find-identity -v -p codesigning
 
-# install using a stable identity
-SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" ./scripts/install-app.sh
+# install with a consistent signature
+SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" make install
 ```
 
-If you prefer ad-hoc signing for a one-off build:
-
-```bash
-SCRAWL_ADHOC_SIGN=1 ./scripts/install-app.sh
-```
-
-Download a model from the Models menu — `small.en` is recommended for daily use.
+This makes permissions survive reinstalls.
 
 ## Configuration
 
@@ -63,15 +51,22 @@ Scrawl lives in your menubar. From there you can:
 - **Switch models** — tiny.en (fast), small.en (recommended), medium (multilingual)
 - **Repaste recent transcripts** — Recent Transcripts submenu
 
-## Advanced
+## Development
 
-Run directly from source (development):
+```bash
+make build      # build
+make test       # run tests
+make clean      # clean build artifacts
+make uninstall  # remove app
+```
+
+Run directly from source:
 
 ```bash
 swift run ScrawlApp
 ```
 
-Override paths via environment variables (development):
+Override paths via environment variables:
 
 ```bash
 SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli swift run ScrawlApp
@@ -83,19 +78,6 @@ Debug mode (shows manual record/stop controls and overlay previews):
 ```bash
 SCRAWL_DEBUG=1 swift run ScrawlApp
 ```
-
-## Development
-
-```bash
-make build    # build
-make test     # run tests
-make clean    # clean build artifacts
-make uninstall  # remove app
-```
-
-## Status
-
-Early build. Usable but rough around the edges.
 
 ## License
 
