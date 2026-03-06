@@ -8,8 +8,7 @@ final class AppSettingsDecodingTests: XCTestCase {
           "defaultModelID": "tiny.en",
           "selectedModelID": "tiny.en",
           "language": "en",
-          "hotkeyDescription": "Right Option",
-          "pasteOnlyModeEnabled": true
+          "hotkeyDescription": "Right Option"
         }
         """
 

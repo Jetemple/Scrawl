@@ -72,6 +72,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private var isModelDownloadInProgress = false
     private var latestStatusText = ""
+    private var cachedAccessibilityAuthorized = false
+    private var hasPromptedAccessibilityForHotkeyAttempt = false
+    private var wasHotkeyDownWithoutAccessibility = false
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -82,6 +85,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         observeWorkspaceActivations()
+        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
         setupHotkeyHandling()
 
         do {
@@ -124,13 +128,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @objc private func requestAccessibilityPermission(_ sender: Any?) {
-        _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
-        updatePermissionRows()
-        teardownHotkeyHandling()
-        setupHotkeyHandling()
-        if runtime.permissionManager.accessibilityStatus() == .authorized {
-            setStatus("Hotkey ready")
-        }
+        promptForAccessibilityPermission(force: true)
     }
 
     @objc private func beginHotkeyCapture(_ sender: Any?) {
@@ -387,6 +385,66 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         )
     }
 
+    private func promptForAccessibilityPermission(force: Bool) {
+        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        if cachedAccessibilityAuthorized {
+            hasPromptedAccessibilityForHotkeyAttempt = false
+            updatePermissionRows()
+            teardownHotkeyHandling()
+            setupHotkeyHandling()
+            setStatus("Hotkey ready")
+            return
+        }
+
+        if hasPromptedAccessibilityForHotkeyAttempt && !force {
+            setStatus("Accessibility permission required")
+            return
+        }
+
+        hasPromptedAccessibilityForHotkeyAttempt = true
+
+        _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
+        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        updatePermissionRows()
+
+        if cachedAccessibilityAuthorized {
+            hasPromptedAccessibilityForHotkeyAttempt = false
+            teardownHotkeyHandling()
+            setupHotkeyHandling()
+            setStatus("Hotkey ready")
+            return
+        }
+
+        setStatus("Accessibility permission required")
+        let message = """
+        Scrawl needs Accessibility permission to work correctly.
+
+        Why this is required:
+        - listen for your global hotkey while you are in other apps
+        - paste the transcript into the focused app (Cmd+V)
+
+        Scrawl does not read text from your apps or record your screen.
+        """
+
+        let response = presentAlert(
+            title: "Enable Accessibility for Scrawl",
+            message: message,
+            primaryButton: "Open Settings",
+            secondaryButton: "Not Now"
+        )
+
+        if response == .alertFirstButtonReturn {
+            openAccessibilitySettings()
+        }
+    }
+
+    private func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     private func presentMissingModelAlert(triggeredByHotkey: Bool) {
         guard let tinyModel = LocalModelManager.downloadableModels.first(where: { $0.id == "ggml-tiny.en" }) else {
             _ = presentAlert(
@@ -448,6 +506,46 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     @objc private func hotkeyTick(_ timer: Timer) {
         dispatchHotkeyActions(runtime.hotkeyStateMachine.tick(at: Date()))
+        reconcileAccessibilityAuthorization()
+        detectHotkeyAttemptWithoutAccessibility()
+    }
+
+    private func reconcileAccessibilityAuthorization() {
+        let isAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        guard isAuthorized != cachedAccessibilityAuthorized else {
+            return
+        }
+
+        cachedAccessibilityAuthorized = isAuthorized
+        if isAuthorized {
+            hasPromptedAccessibilityForHotkeyAttempt = false
+        }
+        updatePermissionRows()
+
+        guard !isCapturingHotkey else {
+            return
+        }
+
+        teardownHotkeyHandling()
+        setupHotkeyHandling()
+        if isAuthorized {
+            setStatus("Hotkey ready")
+        }
+    }
+
+    private func detectHotkeyAttemptWithoutAccessibility() {
+        guard !cachedAccessibilityAuthorized, !isCapturingHotkey else {
+            wasHotkeyDownWithoutAccessibility = false
+            return
+        }
+
+        let hotkey = runtime.settingsStore.load().hotkey
+        let isDown = CGEventSource.keyState(.hidSystemState, key: hotkey.keyCode)
+        defer { wasHotkeyDownWithoutAccessibility = isDown }
+
+        if isDown && !wasHotkeyDownWithoutAccessibility {
+            promptForAccessibilityPermission(force: false)
+        }
     }
 
     @objc private func quit(_ sender: Any?) {
@@ -609,6 +707,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
+        if runtime.permissionManager.accessibilityStatus() != .authorized {
+            promptForAccessibilityPermission(force: false)
+            return
+        }
+
         guard validateTranscriptionPrerequisites(origin: origin) else {
             return
         }
@@ -662,6 +765,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let insertionTargetApp = self.insertionTargetApp
 
         Task { [weak self] in
+            defer { try? FileManager.default.removeItem(at: audioURL) }
             do {
                 let request = TranscriptionRequest(
                     audioFileURL: audioURL,

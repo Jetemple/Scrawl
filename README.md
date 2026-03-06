@@ -21,19 +21,37 @@ brew install whisper-cpp
 # clone and install Scrawl.app into ~/Applications
 git clone https://github.com/Jetemple/Scrawl.git
 cd scrawl
-./scripts/install-app.sh
+make install
 open ~/Applications/Scrawl.app
 ```
 
 Install system-wide instead:
 
 ```bash
-./scripts/install-app.sh /Applications
-# if needed:
-sudo ./scripts/install-app.sh /Applications
+make install PREFIX=/Applications
 ```
 
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
+
+If you toggle Accessibility in System Settings while Scrawl is running, wait a second for it to refresh. If hotkeys still do not respond, quit and reopen Scrawl once.
+
+### Stable Accessibility Permissions Across Updates
+
+macOS tracks Accessibility grants by app identity. For local development, using a consistent signing identity helps permissions survive reinstalls.
+
+```bash
+# list available signing identities
+security find-identity -v -p codesigning
+
+# install using a stable identity
+SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" ./scripts/install-app.sh
+```
+
+If you prefer ad-hoc signing for a one-off build:
+
+```bash
+SCRAWL_ADHOC_SIGN=1 ./scripts/install-app.sh
+```
 
 Download a model from the Models menu — `small.en` is recommended for daily use.
 
@@ -69,8 +87,10 @@ SCRAWL_DEBUG=1 swift run ScrawlApp
 ## Development
 
 ```bash
-swift build   # build
-swift test    # run tests
+make build    # build
+make test     # run tests
+make clean    # clean build artifacts
+make uninstall  # remove app
 ```
 
 ## Status

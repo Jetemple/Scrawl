@@ -18,6 +18,7 @@ EXECUTABLE_NAME="Scrawl"
 BUILD_CONFIGURATION="${SCRAWL_BUILD_CONFIGURATION:-release}"
 APP_VERSION="${SCRAWL_APP_VERSION:-0.0.3}"
 INSTALL_DIR="${1:-$HOME/Applications}"
+CODESIGN_IDENTITY="${SCRAWL_CODESIGN_IDENTITY:-}"
 
 BUILD_OUTPUT_DIR="$REPO_ROOT/.build/$BUILD_CONFIGURATION"
 BUILT_EXECUTABLE="$BUILD_OUTPUT_DIR/$EXECUTABLE_TARGET"
@@ -83,9 +84,23 @@ ensure_plist_key "CFBundleShortVersionString" string "$APP_VERSION"
 ensure_plist_key "LSMinimumSystemVersion" string "14.0"
 ensure_plist_key "LSUIElement" bool "true"
 
-if [[ "${SCRAWL_SKIP_ADHOC_SIGN:-0}" != "1" ]] && command -v codesign >/dev/null 2>&1; then
+if [[ -n "$CODESIGN_IDENTITY" ]]; then
+    if ! command -v codesign >/dev/null 2>&1; then
+        echo "codesign is not available, but SCRAWL_CODESIGN_IDENTITY was set."
+        exit 1
+    fi
+    echo "Signing app bundle with identity: $CODESIGN_IDENTITY"
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$STAGED_APP_PATH"
+elif [[ "${SCRAWL_ADHOC_SIGN:-0}" == "1" ]]; then
+    if ! command -v codesign >/dev/null 2>&1; then
+        echo "codesign is not available, but SCRAWL_ADHOC_SIGN=1 was requested."
+        exit 1
+    fi
     echo "Ad-hoc signing app bundle..."
     codesign --force --deep --sign - "$STAGED_APP_PATH"
+else
+    echo "Skipping code signing (local dev mode)."
+    echo "Tip: set SCRAWL_CODESIGN_IDENTITY for more stable permission identity across updates."
 fi
 
 mkdir -p "$INSTALL_DIR"

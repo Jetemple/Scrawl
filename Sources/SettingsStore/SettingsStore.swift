@@ -21,7 +21,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var selectedModelID: String
     public var language: String
     public var hotkey: HotkeySetting
-    public var pasteOnlyModeEnabled: Bool
     public var modelsDirectoryPath: String?
 
     public init(
@@ -29,14 +28,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         selectedModelID: String = "ggml-small",
         language: String = "en",
         hotkey: HotkeySetting = HotkeySetting(),
-        pasteOnlyModeEnabled: Bool = true,
         modelsDirectoryPath: String? = nil
     ) {
         self.defaultModelID = defaultModelID
         self.selectedModelID = selectedModelID
         self.language = language
         self.hotkey = hotkey
-        self.pasteOnlyModeEnabled = pasteOnlyModeEnabled
         self.modelsDirectoryPath = modelsDirectoryPath
     }
 
@@ -50,7 +47,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case language
         case hotkey
         case hotkeyDescription
-        case pasteOnlyModeEnabled
         case modelsDirectoryPath
     }
 
@@ -60,7 +56,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         defaultModelID = try container.decodeIfPresent(String.self, forKey: .defaultModelID) ?? "ggml-small"
         selectedModelID = try container.decodeIfPresent(String.self, forKey: .selectedModelID) ?? defaultModelID
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "en"
-        pasteOnlyModeEnabled = try container.decodeIfPresent(Bool.self, forKey: .pasteOnlyModeEnabled) ?? true
         modelsDirectoryPath = try container.decodeIfPresent(String.self, forKey: .modelsDirectoryPath)
 
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
@@ -77,7 +72,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try container.encode(selectedModelID, forKey: .selectedModelID)
         try container.encode(language, forKey: .language)
         try container.encode(hotkey, forKey: .hotkey)
-        try container.encode(pasteOnlyModeEnabled, forKey: .pasteOnlyModeEnabled)
         try container.encodeIfPresent(modelsDirectoryPath, forKey: .modelsDirectoryPath)
     }
 }
