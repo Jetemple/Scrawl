@@ -27,9 +27,17 @@ On first launch, grant **Microphone** and **Accessibility** permissions when pro
 
 Download a model from the Models menu — `small.en` is recommended for daily use.
 
+### Verify install in 30 seconds
+
+1. Click the Scrawl menubar icon.
+2. In **Models**, download `tiny.en` or `small.en`.
+3. Focus any text field.
+4. Hold **Right Option**, speak, release.
+5. Transcript should paste at cursor.
+
 ### Permissions after reinstalling
 
-Building from source produces an unsigned binary. macOS tracks Accessibility permission by code signature, so **after every reinstall you'll need to toggle Accessibility off and back on** in System Settings → Privacy & Security → Accessibility.
+By default, source installs are unsigned (or ad-hoc signed), so Accessibility permission is reset on reinstall to avoid stale grants.
 
 To avoid this, sign with a stable identity:
 
@@ -41,7 +49,7 @@ security find-identity -v -p codesigning
 SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" make install
 ```
 
-This makes permissions survive reinstalls.
+With a stable signature, Scrawl keeps its Accessibility grant across reinstalls.
 
 ## Configuration
 
@@ -55,6 +63,7 @@ Scrawl lives in your menubar. From there you can:
 
 ```bash
 make build      # build
+make doctor     # check local toolchain/dependencies
 make test       # run tests
 make clean      # clean build artifacts
 make uninstall  # remove app

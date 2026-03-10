@@ -19,6 +19,7 @@ BUILD_CONFIGURATION="${SCRAWL_BUILD_CONFIGURATION:-release}"
 APP_VERSION="${SCRAWL_APP_VERSION:-0.0.3}"
 INSTALL_DIR="${1:-$HOME/Applications}"
 CODESIGN_IDENTITY="${SCRAWL_CODESIGN_IDENTITY:-}"
+KEEP_ACCESSIBILITY_GRANT=0
 
 BUILD_OUTPUT_DIR="$REPO_ROOT/.build/$BUILD_CONFIGURATION"
 BUILT_EXECUTABLE="$BUILD_OUTPUT_DIR/$EXECUTABLE_TARGET"
@@ -93,6 +94,7 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
     fi
     echo "Signing app bundle with identity: $CODESIGN_IDENTITY"
     codesign --force --deep --sign "$CODESIGN_IDENTITY" "$STAGED_APP_PATH"
+    KEEP_ACCESSIBILITY_GRANT=1
 elif [[ "${SCRAWL_ADHOC_SIGN:-0}" == "1" ]]; then
     if ! command -v codesign >/dev/null 2>&1; then
         echo "codesign is not available, but SCRAWL_ADHOC_SIGN=1 was requested."
@@ -115,8 +117,13 @@ if pgrep -f "$FINAL_APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" >/dev/null 2>&1; t
     sleep 0.5
 fi
 
-# Reset stale Accessibility entry so the new binary gets a fresh grant
-tccutil reset Accessibility com.jetemple.scrawl 2>/dev/null || true
+if [[ "$KEEP_ACCESSIBILITY_GRANT" == "1" ]]; then
+    echo "Keeping existing Accessibility permission (stable code signature)."
+else
+    # Unsigned and ad-hoc signed builds frequently get a new identity after rebuild.
+    tccutil reset Accessibility com.jetemple.scrawl 2>/dev/null || true
+    echo "Accessibility permission was reset for this install."
+fi
 
 if [[ -e "$FINAL_APP_PATH" ]] && ! rm -rf "$FINAL_APP_PATH" 2>/dev/null; then
     echo "Permission denied: cannot replace $FINAL_APP_PATH"
