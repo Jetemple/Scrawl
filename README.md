@@ -12,21 +12,44 @@ Or double-tap the hotkey to toggle recording on, then single-tap to stop.
 
 ## Install
 
-Requires macOS 14+ and `whisper-cli` from whisper.cpp.
+Requires macOS 14+, Xcode command line tools, and `whisper-cli` from whisper.cpp.
 
 ```bash
-# install whisper.cpp (if you haven't)
 brew install whisper-cpp
 
-# clone and run
 git clone https://github.com/Jetemple/Scrawl.git
 cd scrawl
-swift run ScrawlApp
+make install PREFIX=/Applications
+open /Applications/Scrawl.app
 ```
 
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
 
 Download a model from the Models menu — `small.en` is recommended for daily use.
+
+### Verify install in 30 seconds
+
+1. Click the Scrawl menubar icon.
+2. In **Models**, download `tiny.en` or `small.en`.
+3. Focus any text field.
+4. Hold **Right Option**, speak, release.
+5. Transcript should paste at cursor.
+
+### Permissions after reinstalling
+
+By default, source installs are unsigned (or ad-hoc signed), so Accessibility permission is reset on reinstall to avoid stale grants.
+
+To avoid this, sign with a stable identity:
+
+```bash
+# find your identities
+security find-identity -v -p codesigning
+
+# install with a consistent signature
+SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" make install
+```
+
+With a stable signature, Scrawl keeps its Accessibility grant across reinstalls.
 
 ## Configuration
 
@@ -36,7 +59,21 @@ Scrawl lives in your menubar. From there you can:
 - **Switch models** — tiny.en (fast), small.en (recommended), medium (multilingual)
 - **Repaste recent transcripts** — Recent Transcripts submenu
 
-## Advanced
+## Development
+
+```bash
+make build      # build
+make doctor     # check local toolchain/dependencies
+make test       # run tests
+make clean      # clean build artifacts
+make uninstall  # remove app
+```
+
+Run directly from source:
+
+```bash
+swift run ScrawlApp
+```
 
 Override paths via environment variables:
 
@@ -50,17 +87,6 @@ Debug mode (shows manual record/stop controls and overlay previews):
 ```bash
 SCRAWL_DEBUG=1 swift run ScrawlApp
 ```
-
-## Development
-
-```bash
-swift build   # build
-swift test    # run tests
-```
-
-## Status
-
-Early build. Usable but rough around the edges.
 
 ## License
 

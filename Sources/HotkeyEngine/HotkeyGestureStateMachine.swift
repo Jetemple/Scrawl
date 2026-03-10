@@ -62,11 +62,7 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
 
     public func keyUp(at time: Date) -> [HotkeyGestureAction] {
         switch state {
-        case .pressed(let down):
-            if time.timeIntervalSince(down) >= config.holdThreshold {
-                state = .idle
-                return [.startHoldRecording, .stopHoldRecording]
-            }
+        case .pressed:
             state = .waitingForSecondTap(time)
             return []
 

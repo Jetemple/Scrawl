@@ -41,6 +41,19 @@ final class HotkeyGestureStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.56)), [.stopToggleRecording])
     }
 
+    func testKeyUpAtThresholdWithoutTickDoesNotStartAndStop() {
+        let machine = HotkeyGestureStateMachine(
+            config: HotkeyGestureConfig(holdThreshold: 0.18, doubleTapGap: 0.30)
+        )
+        let t0 = Date(timeIntervalSinceReferenceDate: 500)
+
+        XCTAssertEqual(machine.keyDown(at: t0), [])
+        // Release after hold threshold but before tick fires — should not emit start+stop together
+        XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.20)), [])
+        // State should have gone to waitingForSecondTap, then expired
+        XCTAssertEqual(machine.tick(at: t0.addingTimeInterval(0.60)), [])
+    }
+
     func testSingleTapExpiresWithoutSideEffects() {
         let machine = HotkeyGestureStateMachine(
             config: HotkeyGestureConfig(holdThreshold: 0.18, doubleTapGap: 0.30)

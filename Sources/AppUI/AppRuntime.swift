@@ -93,13 +93,10 @@ public struct AppRuntime {
             return URL(filePath: override)
         }
 
-        let whisperRoot = home.appending(path: "code/whisper.cpp")
         let candidates = [
             URL(filePath: "/opt/homebrew/bin/whisper-cli"),
             URL(filePath: "/usr/local/bin/whisper-cli"),
-            URL(filePath: "/usr/bin/whisper-cli"),
-            whisperRoot.appending(path: "build/bin/whisper-cli"),
-            whisperRoot.appending(path: "build/bin/main")
+            URL(filePath: "/usr/bin/whisper-cli")
         ]
 
         if let existing = candidates.first(where: { fileManager.isExecutableFile(atPath: $0.path) }) {

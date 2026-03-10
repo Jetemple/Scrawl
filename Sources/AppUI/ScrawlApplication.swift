@@ -45,6 +45,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var rootMenu: NSMenu?
 
     private var infoLineItem: NSMenuItem?
+    private var statusLineItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
     private var accessibilityItem: NSMenuItem?
     private var startManualItem: NSMenuItem?
@@ -66,9 +67,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var hotkeyCaptureGlobalMonitor: Any?
     private var hotkeyCaptureLocalMonitor: Any?
     private var hotkeyCaptureTimeoutTimer: Timer?
+    private var statusAutoClearTimer: Timer?
     private var isCapturingHotkey = false
 
     private var isModelDownloadInProgress = false
+    private var latestStatusText = ""
+    private var cachedAccessibilityAuthorized = false
+    private var hasPromptedAccessibilityForHotkeyAttempt = false
+    private var wasHotkeyDownWithoutAccessibility = false
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -79,6 +85,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         observeWorkspaceActivations()
+        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
         setupHotkeyHandling()
 
         do {
@@ -100,6 +107,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         teardownHotkeyHandling()
         stopHotkeyCapture()
         stopObservingWorkspaceActivations()
+        statusAutoClearTimer?.invalidate()
+        statusAutoClearTimer = nil
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -119,13 +128,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @objc private func requestAccessibilityPermission(_ sender: Any?) {
-        _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
-        updatePermissionRows()
-        teardownHotkeyHandling()
-        setupHotkeyHandling()
-        if runtime.permissionManager.accessibilityStatus() == .authorized {
-            setStatus("Hotkey ready")
-        }
+        promptForAccessibilityPermission(force: true)
     }
 
     @objc private func beginHotkeyCapture(_ sender: Any?) {
@@ -259,7 +262,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.modelManager.download(model: model)
+                _ = try await self.modelManager.download(model: model) { [weak self] receivedBytes, totalBytes in
+                    guard let self else { return }
+                    self.setStatus(self.downloadProgressText(for: model, receivedBytes: receivedBytes, totalBytes: totalBytes))
+                }
                 var workingSettings = self.runtime.settingsStore.load()
                 workingSettings.selectedModelID = model.id
                 if workingSettings.defaultModelID.isEmpty {
@@ -271,13 +277,49 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     self.setStatus("Downloaded \(model.id)")
                 }
             } catch {
-                await self.setStatusOnMain("Download failed: \(self.describe(error))")
+                await MainActor.run {
+                    let details = self.describe(error)
+                    self.setStatus("Download failed")
+                    _ = self.presentAlert(
+                        title: "Model download failed",
+                        message: """
+                        Could not download \(model.displayName).
+
+                        \(details)
+                        """
+                    )
+                }
             }
             await MainActor.run {
                 self.isModelDownloadInProgress = false
                 self.refreshModelMenu()
             }
         }
+    }
+
+    private func downloadProgressText(for model: DownloadableModel, receivedBytes: Int64, totalBytes: Int64?) -> String {
+        let modelName = model.id.replacingOccurrences(of: "ggml-", with: "")
+        let receivedMB = formatMegabytes(receivedBytes)
+
+        guard let totalBytes, totalBytes > 0 else {
+            return "Downloading \(modelName): \(receivedMB) MB"
+        }
+
+        let totalMB = formatMegabytes(totalBytes)
+        let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
+        let percent = Int((ratio * 100).rounded())
+        return "Downloading \(modelName): \(percent)% (\(receivedMB)/\(totalMB) MB)"
+    }
+
+    private func formatMegabytes(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / (1024 * 1024)
+        if mb >= 100 {
+            return String(format: "%.0f", mb)
+        }
+        if mb >= 10 {
+            return String(format: "%.1f", mb)
+        }
+        return String(format: "%.2f", mb)
     }
 
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
@@ -324,23 +366,69 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         return alert.runModal()
     }
 
-    private func presentWhisperMissingAlert() {
-        let executablePath = runtime.whisperExecutableURL.path
-        let message = """
-        Scrawl could not find whisper-cli at:
-        \(executablePath)
+    private func presentMicrophoneDeniedAlert() {
+        let response = presentAlert(
+            title: "Microphone Access Required",
+            message: """
+            Scrawl needs microphone access to record your voice for transcription.
 
-        Install whisper.cpp:
-        brew install whisper-cpp
-
-        Or set:
-        SCRAWL_WHISPER_EXECUTABLE=/absolute/path/to/whisper-cli
-        """
-
-        _ = presentAlert(
-            title: "whisper-cli not found",
-            message: message
+            Open System Settings → Privacy & Security → Microphone and enable Scrawl.
+            """,
+            primaryButton: "Open Settings",
+            secondaryButton: "Not Now"
         )
+
+        if response == .alertFirstButtonReturn {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
+    private func presentWhisperMissingAlert() {
+        _ = presentAlert(
+            title: "whisper-cli Not Found",
+            message: "Scrawl requires whisper.cpp for transcription.\n\nInstall it with Homebrew:\nbrew install whisper-cpp"
+        )
+    }
+
+    private func promptForAccessibilityPermission(force: Bool) {
+        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        if cachedAccessibilityAuthorized {
+            hasPromptedAccessibilityForHotkeyAttempt = false
+            updatePermissionRows()
+            teardownHotkeyHandling()
+            setupHotkeyHandling()
+            setStatus("Hotkey ready")
+            return
+        }
+
+        if hasPromptedAccessibilityForHotkeyAttempt && !force {
+            setStatus("Accessibility permission required")
+            return
+        }
+
+        hasPromptedAccessibilityForHotkeyAttempt = true
+
+        _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
+        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        updatePermissionRows()
+
+        if cachedAccessibilityAuthorized {
+            hasPromptedAccessibilityForHotkeyAttempt = false
+            teardownHotkeyHandling()
+            setupHotkeyHandling()
+            setStatus("Hotkey ready")
+        } else {
+            setStatus("Accessibility permission required")
+        }
+    }
+
+    private func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     private func presentMissingModelAlert(triggeredByHotkey: Bool) {
@@ -404,6 +492,46 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     @objc private func hotkeyTick(_ timer: Timer) {
         dispatchHotkeyActions(runtime.hotkeyStateMachine.tick(at: Date()))
+        reconcileAccessibilityAuthorization()
+        detectHotkeyAttemptWithoutAccessibility()
+    }
+
+    private func reconcileAccessibilityAuthorization() {
+        let isAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        guard isAuthorized != cachedAccessibilityAuthorized else {
+            return
+        }
+
+        cachedAccessibilityAuthorized = isAuthorized
+        if isAuthorized {
+            hasPromptedAccessibilityForHotkeyAttempt = false
+        }
+        updatePermissionRows()
+
+        guard !isCapturingHotkey else {
+            return
+        }
+
+        teardownHotkeyHandling()
+        setupHotkeyHandling()
+        if isAuthorized {
+            setStatus("Hotkey ready")
+        }
+    }
+
+    private func detectHotkeyAttemptWithoutAccessibility() {
+        guard !cachedAccessibilityAuthorized, !isCapturingHotkey else {
+            wasHotkeyDownWithoutAccessibility = false
+            return
+        }
+
+        let hotkey = runtime.settingsStore.load().hotkey
+        let isDown = CGEventSource.keyState(.hidSystemState, key: hotkey.keyCode)
+        defer { wasHotkeyDownWithoutAccessibility = isDown }
+
+        if isDown && !wasHotkeyDownWithoutAccessibility {
+            promptForAccessibilityPermission(force: false)
+        }
     }
 
     @objc private func quit(_ sender: Any?) {
@@ -426,6 +554,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         infoLineItem.isEnabled = false
         menu.addItem(infoLineItem)
         self.infoLineItem = infoLineItem
+
+        let statusLineItem = NSMenuItem(title: "Status: Launching...", action: nil, keyEquivalent: "")
+        statusLineItem.isEnabled = false
+        statusLineItem.isHidden = true
+        menu.addItem(statusLineItem)
+        self.statusLineItem = statusLineItem
 
         menu.addItem(.separator())
 
@@ -551,11 +685,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        if runtime.permissionManager.microphoneStatus() != .authorized {
-            if runtime.permissionManager.microphoneStatus() == .notDetermined {
+        let micStatus = runtime.permissionManager.microphoneStatus()
+        if micStatus != .authorized {
+            if micStatus == .notDetermined {
                 requestMicrophonePermission(nil)
+            } else {
+                presentMicrophoneDeniedAlert()
             }
             setStatus("Microphone permission required")
+            return
+        }
+
+        if runtime.permissionManager.accessibilityStatus() != .authorized {
+            promptForAccessibilityPermission(force: false)
             return
         }
 
@@ -612,6 +754,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let insertionTargetApp = self.insertionTargetApp
 
         Task { [weak self] in
+            defer { try? FileManager.default.removeItem(at: audioURL) }
             do {
                 let request = TranscriptionRequest(
                     audioFileURL: audioURL,
@@ -843,12 +986,55 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         stopManualItem?.isEnabled = isRecording
     }
 
+    private static let ongoingStatuses: Set<String> = [
+        "Recording...", "Transcribing...", "Press desired hotkey now..."
+    ]
+
     private func setStatus(_ text: String) {
-        // Status is now communicated via the overlay + menubar icon.
-        // This method is kept as a hook for debug logging.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            statusAutoClearTimer?.invalidate()
+            statusAutoClearTimer = nil
+            latestStatusText = text
+
+            if text == "Idle" {
+                statusLineItem?.isHidden = true
+                statusLineItem?.title = "Status: Idle"
+                return
+            }
+
+            statusLineItem?.isHidden = false
+            statusLineItem?.title = "Status: \(text)"
+
+            let isOngoing = Self.ongoingStatuses.contains(text) || text.hasPrefix("Downloading ")
+            if !isOngoing {
+                scheduleStatusAutoClear(after: text == "Done" ? 2.5 : 5.0)
+            }
+        }
+
         #if DEBUG
         print("[Scrawl] \(text)")
         #endif
+    }
+
+    @MainActor
+    private func scheduleStatusAutoClear(after seconds: TimeInterval) {
+        statusAutoClearTimer?.invalidate()
+        statusAutoClearTimer = Timer.scheduledTimer(
+            timeInterval: seconds,
+            target: self,
+            selector: #selector(handleStatusAutoClearTimer(_:)),
+            userInfo: nil,
+            repeats: false
+        )
+        if let statusAutoClearTimer {
+            RunLoop.main.add(statusAutoClearTimer, forMode: .common)
+        }
+    }
+
+    @objc private func handleStatusAutoClearTimer(_ timer: Timer) {
+        setStatus("Idle")
     }
 
     @MainActor
