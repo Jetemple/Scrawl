@@ -100,7 +100,7 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
         exit 1
     fi
     echo "Signing app bundle with identity: $CODESIGN_IDENTITY"
-    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$STAGED_APP_PATH"
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" --options runtime "$STAGED_APP_PATH"
     KEEP_ACCESSIBILITY_GRANT=1
 elif [[ "${SCRAWL_ADHOC_SIGN:-0}" == "1" ]]; then
     if ! command -v codesign >/dev/null 2>&1; then

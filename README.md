@@ -16,6 +16,15 @@ Or double-tap the hotkey to toggle recording on, then single-tap to stop.
 
 ## Install
 
+### Homebrew (recommended)
+
+```bash
+brew tap jetemple/tap
+brew install --cask scrawl
+```
+
+### From source
+
 Requires macOS 14+, Xcode command line tools, and `whisper-cli` from whisper.cpp.
 
 ```bash
