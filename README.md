@@ -26,7 +26,7 @@ open /Applications/Scrawl.app
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
 
 Download a model from the Models menu:
-- `large-v3-turbo` is the default recommendation on GPU-enabled Macs.
+- `medium` is the default recommendation on GPU-enabled Macs.
 - `small.en` is the default recommendation when running CPU-only.
 
 ### Verify install in 30 seconds

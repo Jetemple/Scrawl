@@ -181,7 +181,7 @@ public struct AppRuntime {
         if disableGPU {
             return "ggml-small.en"
         }
-        return "ggml-large-v3-turbo"
+        return "ggml-medium"
     }
 
     private static func parseEnvironmentBool(_ rawValue: String) -> Bool? {
