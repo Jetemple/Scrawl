@@ -20,6 +20,8 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Scrawl needs microphone access to capture your voice for local transcription.</string>
 </dict>

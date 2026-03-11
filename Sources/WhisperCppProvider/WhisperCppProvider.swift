@@ -6,22 +6,27 @@ public struct WhisperCppConfig: Sendable {
     public var modelsDirectoryURL: URL
     public var transcriptionTimeoutSeconds: Int
     public var disableGPU: Bool
+    public var threads: Int?
 
     public init(
         executableURL: URL,
         modelsDirectoryURL: URL,
         transcriptionTimeoutSeconds: Int = 120,
-        disableGPU: Bool = true
+        disableGPU: Bool = false,
+        threads: Int? = nil
     ) {
         self.executableURL = executableURL
         self.modelsDirectoryURL = modelsDirectoryURL
         self.transcriptionTimeoutSeconds = transcriptionTimeoutSeconds
         self.disableGPU = disableGPU
+        self.threads = threads
     }
 }
 
-public final class WhisperCppProvider: TranscriptionProvider, Sendable {
+public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendable {
     public let config: WhisperCppConfig
+    private let fallbackLock = NSLock()
+    private var shouldForceCPUFallback = false
 
     public init(config: WhisperCppConfig) {
         self.config = config
@@ -41,22 +46,48 @@ public final class WhisperCppProvider: TranscriptionProvider, Sendable {
         }
 
         let startedAt = Date()
+        let forceNoGPU = config.disableGPU || isCPUFallbackForced()
+
+        do {
+            return try await transcribeOnce(
+                request: request,
+                modelPath: modelPath,
+                startedAt: startedAt,
+                forceNoGPU: forceNoGPU
+            )
+        } catch let transcriptionError as TranscriptionError {
+            guard shouldRetryWithCPU(after: transcriptionError, forceNoGPU: forceNoGPU) else {
+                throw transcriptionError
+            }
+
+            // Some systems advertise Metal support but still fail during GPU execution.
+            // Persisting a process-local CPU fallback avoids repeated failed launches.
+            setCPUFallbackForced(true)
+            return try await transcribeOnce(
+                request: request,
+                modelPath: modelPath,
+                startedAt: startedAt,
+                forceNoGPU: true
+            )
+        }
+    }
+
+    private func transcribeOnce(
+        request: TranscriptionRequest,
+        modelPath: URL,
+        startedAt: Date,
+        forceNoGPU: Bool
+    ) async throws -> TranscriptionResult {
         let outputPrefix = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-transcript-\(UUID().uuidString)")
+        let arguments = makeCLIArguments(
+            request: request,
+            modelPath: modelPath,
+            outputPrefix: outputPrefix,
+            forceNoGPU: forceNoGPU
+        )
 
         let process = Process()
         process.executableURL = config.executableURL
-        var arguments = [
-            "-m", modelPath.path,
-            "-f", request.audioFileURL.path,
-            "-l", request.language,
-            "-nt",
-            "-np",
-            "-otxt",
-            "-of", outputPrefix.path
-        ]
-        if config.disableGPU {
-            arguments.append("--no-gpu")
-        }
         process.arguments = arguments
 
         let outputID = UUID().uuidString
@@ -67,7 +98,6 @@ public final class WhisperCppProvider: TranscriptionProvider, Sendable {
 
         let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
         let stderrHandle = try FileHandle(forWritingTo: stderrURL)
-
         process.standardOutput = stdoutHandle
         process.standardError = stderrHandle
 
@@ -115,6 +145,29 @@ public final class WhisperCppProvider: TranscriptionProvider, Sendable {
 
         let latencyMS = Int(Date().timeIntervalSince(startedAt) * 1_000)
         return TranscriptionResult(text: cleaned, latencyMS: latencyMS)
+    }
+
+    private func shouldRetryWithCPU(after error: TranscriptionError, forceNoGPU: Bool) -> Bool {
+        guard !forceNoGPU else {
+            return false
+        }
+
+        if case .executionFailed = error {
+            return true
+        }
+        return false
+    }
+
+    private func isCPUFallbackForced() -> Bool {
+        fallbackLock.lock()
+        defer { fallbackLock.unlock() }
+        return shouldForceCPUFallback
+    }
+
+    private func setCPUFallbackForced(_ enabled: Bool) {
+        fallbackLock.lock()
+        shouldForceCPUFallback = enabled
+        fallbackLock.unlock()
     }
 
     static func isNoSpeechTranscript(_ transcript: String) -> Bool {
@@ -178,6 +231,33 @@ public final class WhisperCppProvider: TranscriptionProvider, Sendable {
             }
         }
         return nil
+    }
+
+    func makeCLIArguments(
+        request: TranscriptionRequest,
+        modelPath: URL,
+        outputPrefix: URL,
+        forceNoGPU: Bool = false
+    ) -> [String] {
+        var arguments = [
+            "-m", modelPath.path,
+            "-f", request.audioFileURL.path,
+            "-l", request.language,
+            "-nt",
+            "-np",
+            "-otxt",
+            "-of", outputPrefix.path
+        ]
+
+        if let threads = config.threads, threads > 0 {
+            arguments.append(contentsOf: ["-t", String(threads)])
+        }
+
+        if config.disableGPU || forceNoGPU {
+            arguments.append("--no-gpu")
+        }
+
+        return arguments
     }
 
     private func runAndWait(
