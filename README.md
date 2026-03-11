@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="Config/AppIcon.png" alt="Scrawl" width="128">
+</p>
+
 # Scrawl
 
 Local-first voice-to-text for macOS. Press a key, talk, text appears at your cursor. Everything runs on-device via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — nothing leaves your machine.
