@@ -16,10 +16,12 @@ EXECUTABLE_TARGET="ScrawlApp"
 EXECUTABLE_NAME="Scrawl"
 
 BUILD_CONFIGURATION="${SCRAWL_BUILD_CONFIGURATION:-release}"
-APP_VERSION="${SCRAWL_APP_VERSION:-0.0.3}"
+APP_VERSION="${SCRAWL_APP_VERSION:-0.0.5}"
 INSTALL_DIR="${1:-$HOME/Applications}"
 CODESIGN_IDENTITY="${SCRAWL_CODESIGN_IDENTITY:-}"
 KEEP_ACCESSIBILITY_GRANT=0
+SIGNED_APP=0
+SKIP_LAUNCH="${SCRAWL_SKIP_LAUNCH:-0}"
 
 BUILD_OUTPUT_DIR="$REPO_ROOT/.build/$BUILD_CONFIGURATION"
 BUILT_EXECUTABLE="$BUILD_OUTPUT_DIR/$EXECUTABLE_TARGET"
@@ -32,6 +34,7 @@ STAGED_RESOURCES_DIR="$STAGED_CONTENTS_DIR/Resources"
 STAGED_INFO_PLIST="$STAGED_CONTENTS_DIR/Info.plist"
 
 TEMPLATE_INFO_PLIST="$REPO_ROOT/Config/ScrawlApp-Info.plist"
+ENTITLEMENTS_FILE="$REPO_ROOT/Config/Scrawl.entitlements"
 
 ensure_plist_key() {
     local key="$1"
@@ -42,6 +45,14 @@ ensure_plist_key() {
         /usr/libexec/PlistBuddy -c "Set :$key $value" "$STAGED_INFO_PLIST"
     else
         /usr/libexec/PlistBuddy -c "Add :$key $type $value" "$STAGED_INFO_PLIST"
+    fi
+}
+
+verify_signed_app() {
+    local app_path="$1"
+    if ! codesign --verify --deep --strict --verbose=2 "$app_path"; then
+        echo "Code-sign verification failed for: $app_path"
+        exit 1
     fi
 }
 
@@ -99,9 +110,23 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
         echo "codesign is not available, but SCRAWL_CODESIGN_IDENTITY was set."
         exit 1
     fi
+    if [[ ! -f "$ENTITLEMENTS_FILE" ]]; then
+        echo "Missing entitlements file: $ENTITLEMENTS_FILE"
+        echo "Refusing to produce a hardened runtime build without explicit entitlements."
+        exit 1
+    fi
     echo "Signing app bundle with identity: $CODESIGN_IDENTITY"
-    codesign --force --deep --sign "$CODESIGN_IDENTITY" --options runtime "$STAGED_APP_PATH"
+    codesign \
+        --force \
+        --deep \
+        --sign "$CODESIGN_IDENTITY" \
+        --options runtime \
+        --timestamp \
+        --entitlements "$ENTITLEMENTS_FILE" \
+        "$STAGED_APP_PATH"
+    verify_signed_app "$STAGED_APP_PATH"
     KEEP_ACCESSIBILITY_GRANT=1
+    SIGNED_APP=1
 elif [[ "${SCRAWL_ADHOC_SIGN:-0}" == "1" ]]; then
     if ! command -v codesign >/dev/null 2>&1; then
         echo "codesign is not available, but SCRAWL_ADHOC_SIGN=1 was requested."
@@ -109,6 +134,8 @@ elif [[ "${SCRAWL_ADHOC_SIGN:-0}" == "1" ]]; then
     fi
     echo "Ad-hoc signing app bundle..."
     codesign --force --deep --sign - "$STAGED_APP_PATH"
+    verify_signed_app "$STAGED_APP_PATH"
+    SIGNED_APP=1
 else
     echo "Skipping code signing (local dev mode)."
     echo "Tip: set SCRAWL_CODESIGN_IDENTITY for more stable permission identity across updates."
@@ -138,8 +165,16 @@ if [[ -e "$FINAL_APP_PATH" ]] && ! rm -rf "$FINAL_APP_PATH" 2>/dev/null; then
     exit 1
 fi
 
-cp -R "$STAGED_APP_PATH" "$FINAL_APP_PATH"
+ditto "$STAGED_APP_PATH" "$FINAL_APP_PATH"
+
+if [[ "$SIGNED_APP" == "1" ]]; then
+    verify_signed_app "$FINAL_APP_PATH"
+fi
 
 echo "Installed: $FINAL_APP_PATH"
-echo "Launching Scrawl..."
-open "$FINAL_APP_PATH"
+if [[ "$SKIP_LAUNCH" == "1" ]]; then
+    echo "Skipping launch (SCRAWL_SKIP_LAUNCH=1)."
+else
+    echo "Launching Scrawl..."
+    open "$FINAL_APP_PATH"
+fi

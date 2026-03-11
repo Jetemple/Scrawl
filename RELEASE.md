@@ -10,7 +10,7 @@ SCRAWL_CODESIGN_IDENTITY="Developer ID Application: Jack Temple (4RUT26EY4D)" \
   SCRAWL_SKIP_BUILD=1 ./scripts/install-app.sh /tmp/scrawl-release
 
 cd /tmp/scrawl-release
-zip -r /tmp/Scrawl-<version>.zip Scrawl.app
+ditto -c -k --sequesterRsrc --keepParent Scrawl.app /tmp/Scrawl-<version>.zip
 
 xcrun notarytool submit /tmp/Scrawl-<version>.zip \
   --apple-id temple2697@gmail.com \
@@ -23,7 +23,11 @@ xcrun stapler staple /tmp/scrawl-release/Scrawl.app
 # Re-zip after stapling
 cd /tmp/scrawl-release
 rm /tmp/Scrawl-<version>.zip
-zip -r /tmp/Scrawl-<version>.zip Scrawl.app
+ditto -c -k --sequesterRsrc --keepParent Scrawl.app /tmp/Scrawl-<version>.zip
+
+# Verify signature and Gatekeeper acceptance before uploading
+codesign --verify --deep --strict --verbose=2 /tmp/scrawl-release/Scrawl.app
+spctl -a -t exec -vv /tmp/scrawl-release/Scrawl.app
 
 shasum -a 256 /tmp/Scrawl-<version>.zip
 ```

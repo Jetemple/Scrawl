@@ -66,6 +66,14 @@ SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" make install
 
 With a stable signature, Scrawl keeps its Accessibility grant across reinstalls.
 
+If microphone access seems stuck after a cask upgrade, reset permissions and relaunch:
+
+```bash
+tccutil reset Microphone com.jetemple.scrawl
+tccutil reset Accessibility com.jetemple.scrawl
+open /Applications/Scrawl.app
+```
+
 ## Configuration
 
 Scrawl lives in your menubar. From there you can:
