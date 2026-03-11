@@ -25,12 +25,14 @@ open /Applications/Scrawl.app
 
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
 
-Download a model from the Models menu — `small.en` is recommended for daily use.
+Download a model from the Models menu:
+- `large-v3-turbo` is the default recommendation on GPU-enabled Macs.
+- `small.en` is the default recommendation when running CPU-only.
 
 ### Verify install in 30 seconds
 
 1. Click the Scrawl menubar icon.
-2. In **Models**, download `tiny.en` or `small.en`.
+2. In **Models**, download `small.en`, `medium`, or `large-v3-turbo`.
 3. Focus any text field.
 4. Hold **Right Option**, speak, release.
 5. Transcript should paste at cursor.
@@ -56,7 +58,7 @@ With a stable signature, Scrawl keeps its Accessibility grant across reinstalls.
 Scrawl lives in your menubar. From there you can:
 
 - **Change the hotkey** — Set Hotkey, then press any key or modifier
-- **Switch models** — tiny.en (fast), small.en (recommended), medium (multilingual)
+- **Switch models** — tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy)
 - **Repaste recent transcripts** — Recent Transcripts submenu
 
 ## Development
@@ -81,6 +83,18 @@ Override paths via environment variables:
 SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli swift run ScrawlApp
 SCRAWL_MODELS_DIR=/path/to/models swift run ScrawlApp
 ```
+
+Performance tuning:
+
+```bash
+# cap whisper threads (default auto-selects up to 8)
+SCRAWL_WHISPER_THREADS=8 swift run ScrawlApp
+
+# force CPU-only mode (GPU is enabled by default)
+SCRAWL_DISABLE_GPU=1 swift run ScrawlApp
+```
+
+Scrawl automatically uses GPU acceleration when available and falls back to CPU mode if GPU execution fails.
 
 Debug mode (shows manual record/stop controls and overlay previews):
 

@@ -94,6 +94,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             setStatus("Model dir error: \(describe(error))")
         }
 
+        applyRecommendedModelDefaultsIfNeeded()
         refreshSettingsRows()
         refreshModelMenu()
         refreshHistoryMenu()
@@ -432,7 +433,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func presentMissingModelAlert(triggeredByHotkey: Bool) {
-        guard let tinyModel = LocalModelManager.downloadableModels.first(where: { $0.id == "ggml-tiny.en" }) else {
+        let recommendedModel = preferredInitialDownloadModel()
+        guard let recommendedModel else {
             _ = presentAlert(
                 title: "No model installed",
                 message: "Scrawl needs a Whisper model in Models before transcription can run."
@@ -440,13 +442,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
+        let recommendedModelName = recommendedModel.id
+            .replacingOccurrences(of: "ggml-", with: "")
+
         let alert = NSAlert()
         alert.messageText = "Set Up Speech Recognition"
         alert.informativeText = """
             Scrawl transcribes audio locally on your Mac using OpenAI's \
             Whisper model. No data leaves your device.
 
-            To get started, download the tiny.en model (75 MB). \
+            To get started, download the \(recommendedModelName) model. \
             You can switch to a larger model later for improved accuracy.
             """
         alert.alertStyle = .informational
@@ -458,7 +463,49 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         NSApplication.shared.activate(ignoringOtherApps: true)
 
         if alert.runModal() == .alertFirstButtonReturn {
-            startModelDownload(tinyModel)
+            startModelDownload(recommendedModel)
+        }
+    }
+
+    private func preferredInitialDownloadModel() -> DownloadableModel? {
+        let preferredOrder = [
+            runtime.recommendedDefaultModelID,
+            "ggml-small.en",
+            "ggml-medium",
+            "ggml-tiny.en"
+        ]
+
+        for modelID in preferredOrder {
+            if let model = LocalModelManager.downloadableModels.first(where: { $0.id == modelID }) {
+                return model
+            }
+        }
+        return LocalModelManager.downloadableModels.first
+    }
+
+    private func applyRecommendedModelDefaultsIfNeeded() {
+        let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
+        var settings = runtime.settingsStore.load()
+        var changed = false
+
+        if !hasStoredSettings {
+            settings.defaultModelID = runtime.recommendedDefaultModelID
+            settings.selectedModelID = runtime.recommendedDefaultModelID
+            changed = true
+        }
+
+        if settings.defaultModelID.isEmpty || settings.defaultModelID == "ggml-small" {
+            settings.defaultModelID = runtime.recommendedDefaultModelID
+            changed = true
+        }
+
+        if settings.selectedModelID.isEmpty || settings.selectedModelID == "ggml-small" {
+            settings.selectedModelID = settings.defaultModelID
+            changed = true
+        }
+
+        if changed {
+            saveSettings(settings)
         }
     }
 
@@ -1156,7 +1203,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         runtime.overlayController.setState(.idle)
         addTranscriptToHistory(transcript)
         updateStatusIcon()
-        setStatus("Done")
+        if latencyMS >= 1_000 {
+            setStatus(String(format: "Done (%.1fs)", Double(latencyMS) / 1_000))
+        } else {
+            setStatus("Done (\(latencyMS)ms)")
+        }
     }
 
     @MainActor

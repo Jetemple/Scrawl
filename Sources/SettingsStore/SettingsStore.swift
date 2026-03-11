@@ -24,8 +24,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var modelsDirectoryPath: String?
 
     public init(
-        defaultModelID: String = "ggml-small",
-        selectedModelID: String = "ggml-small",
+        defaultModelID: String = "ggml-small.en",
+        selectedModelID: String = "ggml-small.en",
         language: String = "en",
         hotkey: HotkeySetting = HotkeySetting(),
         modelsDirectoryPath: String? = nil
@@ -53,7 +53,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        defaultModelID = try container.decodeIfPresent(String.self, forKey: .defaultModelID) ?? "ggml-small"
+        defaultModelID = try container.decodeIfPresent(String.self, forKey: .defaultModelID) ?? "ggml-small.en"
         selectedModelID = try container.decodeIfPresent(String.self, forKey: .selectedModelID) ?? defaultModelID
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "en"
         modelsDirectoryPath = try container.decodeIfPresent(String.self, forKey: .modelsDirectoryPath)
@@ -82,6 +82,10 @@ public final class SettingsStore: @unchecked Sendable {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+    }
+
+    public func hasStoredSettings() -> Bool {
+        defaults.data(forKey: key) != nil
     }
 
     public func load() -> AppSettings {

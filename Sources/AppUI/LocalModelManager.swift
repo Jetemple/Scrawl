@@ -268,6 +268,12 @@ extension LocalModelManager {
             fileName: "ggml-medium.bin",
             displayName: "medium — multilingual, 1.5 GB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")!
+        ),
+        DownloadableModel(
+            id: "ggml-large-v3-turbo",
+            fileName: "ggml-large-v3-turbo.bin",
+            displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
+            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!
         )
     ]
 }

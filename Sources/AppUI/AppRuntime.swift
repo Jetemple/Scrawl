@@ -2,6 +2,7 @@ import AudioCapture
 import DictionaryStore
 import Foundation
 import HotkeyEngine
+import Metal
 import Permissions
 import RecordingOverlay
 import SettingsStore
@@ -20,6 +21,8 @@ public struct AppRuntime {
     public let whisperProvider: any TranscriptionProvider
     public let modelsDirectoryURL: URL
     public let whisperExecutableURL: URL
+    public let disableGPU: Bool
+    public let recommendedDefaultModelID: String
 
     public init(
         permissionManager: PermissionManager,
@@ -31,7 +34,9 @@ public struct AppRuntime {
         dictionaryStore: any DictionaryStoring,
         whisperProvider: any TranscriptionProvider,
         modelsDirectoryURL: URL,
-        whisperExecutableURL: URL
+        whisperExecutableURL: URL,
+        disableGPU: Bool,
+        recommendedDefaultModelID: String
     ) {
         self.permissionManager = permissionManager
         self.settingsStore = settingsStore
@@ -43,6 +48,8 @@ public struct AppRuntime {
         self.whisperProvider = whisperProvider
         self.modelsDirectoryURL = modelsDirectoryURL
         self.whisperExecutableURL = whisperExecutableURL
+        self.disableGPU = disableGPU
+        self.recommendedDefaultModelID = recommendedDefaultModelID
     }
 
     public static func live() -> AppRuntime {
@@ -52,6 +59,9 @@ public struct AppRuntime {
         let appSupportDirectory = resolveAppSupportDirectory(home: home)
         let modelsDir = resolveModelsDirectory(appSupportDirectory: appSupportDirectory, settings: settings)
         let executableURL = resolveWhisperExecutable(home: home)
+        let disableGPU = resolveDisableGPU()
+        let recommendedDefaultModelID = resolveRecommendedDefaultModelID(disableGPU: disableGPU)
+        let threadCount = resolveWhisperThreadCount()
         let dictionaryURL = appSupportDirectory.appending(path: "dictionary.json")
 
         return AppRuntime(
@@ -65,11 +75,15 @@ public struct AppRuntime {
             whisperProvider: WhisperCppProvider(
                 config: WhisperCppConfig(
                     executableURL: executableURL,
-                    modelsDirectoryURL: modelsDir
+                    modelsDirectoryURL: modelsDir,
+                    disableGPU: disableGPU,
+                    threads: threadCount
                 )
             ),
             modelsDirectoryURL: modelsDir,
-            whisperExecutableURL: executableURL
+            whisperExecutableURL: executableURL,
+            disableGPU: disableGPU,
+            recommendedDefaultModelID: recommendedDefaultModelID
         )
     }
 
@@ -117,6 +131,72 @@ public struct AppRuntime {
             return URL(filePath: configured)
         }
         return appSupportDirectory.appending(path: "models")
+    }
+
+    private static func resolveDisableGPU() -> Bool {
+        let env = ProcessInfo.processInfo.environment
+        let keys = [
+            "SCRAWL_DISABLE_GPU",
+            "WHISPER_CPP_NO_GPU",
+            "WHISPER_NO_GPU"
+        ]
+
+        for key in keys {
+            guard let rawValue = env[key], !rawValue.isEmpty else {
+                continue
+            }
+            if let value = parseEnvironmentBool(rawValue) {
+                return value
+            }
+        }
+
+        return !hasSupportedMetalDevice()
+    }
+
+    private static func resolveWhisperThreadCount() -> Int? {
+        let env = ProcessInfo.processInfo.environment
+        let keys = [
+            "SCRAWL_WHISPER_THREADS",
+            "WHISPER_CPP_THREADS",
+            "WHISPER_THREADS"
+        ]
+
+        for key in keys {
+            guard let rawValue = env[key], !rawValue.isEmpty else {
+                continue
+            }
+            if let threadCount = Int(rawValue), threadCount > 0 {
+                return threadCount
+            }
+        }
+
+        let cpuCount = ProcessInfo.processInfo.activeProcessorCount
+        guard cpuCount > 0 else {
+            return nil
+        }
+        return max(4, min(cpuCount, 8))
+    }
+
+    private static func resolveRecommendedDefaultModelID(disableGPU: Bool) -> String {
+        if disableGPU {
+            return "ggml-small.en"
+        }
+        return "ggml-large-v3-turbo"
+    }
+
+    private static func parseEnvironmentBool(_ rawValue: String) -> Bool? {
+        switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "y", "on":
+            return true
+        case "0", "false", "no", "n", "off":
+            return false
+        default:
+            return nil
+        }
+    }
+
+    private static func hasSupportedMetalDevice() -> Bool {
+        MTLCreateSystemDefaultDevice() != nil
     }
 
     private static func resolveAppSupportDirectory(home: URL) -> URL {
