@@ -38,6 +38,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         case hotkeyToggle
     }
 
+    private static let hotkeyCapturePrompt = "Press a key, Fn, or a modifier. Esc cancels."
+
     private let runtime: AppRuntime
     private let modelManager: LocalModelManager
 
@@ -45,11 +47,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var rootMenu: NSMenu?
 
     private var infoLineItem: NSMenuItem?
+    private var hotkeyLineItem: NSMenuItem?
     private var statusLineItem: NSMenuItem?
     private var microphoneItem: NSMenuItem?
     private var accessibilityItem: NSMenuItem?
     private var startManualItem: NSMenuItem?
     private var stopManualItem: NSMenuItem?
+    private var setHotkeyItem: NSMenuItem?
 
     private var modelsSubmenu: NSMenu?
     private var historySubmenu: NSMenu?
@@ -132,14 +136,26 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         promptForAccessibilityPermission(force: true)
     }
 
-    @objc private func beginHotkeyCapture(_ sender: Any?) {
+    @objc private func toggleHotkeyCapture(_ sender: Any?) {
+        if isCapturingHotkey {
+            cancelHotkeyCapture(status: "Hotkey capture cancelled")
+            return
+        }
+
+        beginHotkeyCapture()
+    }
+
+    private func beginHotkeyCapture() {
         guard !isCapturingHotkey else {
             return
         }
 
         teardownHotkeyHandling()
         isCapturingHotkey = true
-        setStatus("Press desired hotkey now...")
+        refreshSettingsRows()
+        runtime.overlayController.setState(.hotkeyCapture)
+        updateStatusIcon()
+        setStatus(Self.hotkeyCapturePrompt)
 
         let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown]
 
@@ -158,9 +174,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         hotkeyCaptureTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
             guard let self else { return }
-            self.setStatus("Hotkey capture timed out")
-            self.stopHotkeyCapture()
-            self.setupHotkeyHandling()
+            self.cancelHotkeyCapture(status: "Hotkey capture timed out")
         }
         if let hotkeyCaptureTimeoutTimer {
             RunLoop.main.add(hotkeyCaptureTimeoutTimer, forMode: .common)
@@ -602,6 +616,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         menu.addItem(infoLineItem)
         self.infoLineItem = infoLineItem
 
+        let hotkeyLineItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        hotkeyLineItem.isEnabled = false
+        menu.addItem(hotkeyLineItem)
+        self.hotkeyLineItem = hotkeyLineItem
+
         let statusLineItem = NSMenuItem(title: "Status: Launching...", action: nil, keyEquivalent: "")
         statusLineItem.isEnabled = false
         statusLineItem.isHidden = true
@@ -662,9 +681,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         menu.addItem(.separator())
 
-        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(beginHotkeyCapture(_:)), keyEquivalent: "")
+        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(toggleHotkeyCapture(_:)), keyEquivalent: "")
         setHotkeyItem.target = self
         menu.addItem(setHotkeyItem)
+        self.setHotkeyItem = setHotkeyItem
 
         let quitItem = NSMenuItem(title: "Quit Scrawl", action: #selector(quit(_:)), keyEquivalent: "q")
         quitItem.target = self
@@ -864,32 +884,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         if let captured = capturedHotkey(from: event) {
-            applyHotkey(captured)
             stopHotkeyCapture()
-            setupHotkeyHandling()
+            applyHotkey(captured)
         }
     }
 
     private func capturedHotkey(from event: NSEvent) -> HotkeySetting? {
         if event.type == .flagsChanged {
-            switch event.keyCode {
-            case 56: return HotkeySetting(keyCode: 56, isModifierKey: true, displayName: "Left \u{21E7} Shift")
-            case 60: return HotkeySetting(keyCode: 60, isModifierKey: true, displayName: "Right \u{21E7} Shift")
-            case 58: return HotkeySetting(keyCode: 58, isModifierKey: true, displayName: "Left \u{2325} Option")
-            case 61: return HotkeySetting(keyCode: 61, isModifierKey: true, displayName: "Right \u{2325} Option")
-            case 59: return HotkeySetting(keyCode: 59, isModifierKey: true, displayName: "Left \u{2303} Control")
-            case 62: return HotkeySetting(keyCode: 62, isModifierKey: true, displayName: "Right \u{2303} Control")
-            case 55: return HotkeySetting(keyCode: 55, isModifierKey: true, displayName: "Left \u{2318} Command")
-            case 54: return HotkeySetting(keyCode: 54, isModifierKey: true, displayName: "Right \u{2318} Command")
-            default: return nil
-            }
+            return SupportedHotkeyModifiers.hotkey(for: event.keyCode)
         }
 
         if event.type == .keyDown, !event.isARepeat {
             if event.keyCode == 53 { // Escape
-                setStatus("Hotkey capture cancelled")
-                stopHotkeyCapture()
-                setupHotkeyHandling()
+                cancelHotkeyCapture(status: "Hotkey capture cancelled")
                 return nil
             }
             let label = (event.charactersIgnoringModifiers ?? "")
@@ -910,6 +917,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         settings.hotkey = hotkey
         saveSettings(settings)
         setStatus("Hotkey set: \(hotkey.displayName)")
+        runtime.overlayController.showTransientMessage("Hotkey set to \(hotkey.displayName)")
+    }
+
+    private func cancelHotkeyCapture(status: String) {
+        setStatus(status)
+        runtime.overlayController.showTransientMessage(status)
+        stopHotkeyCapture()
+        setupHotkeyHandling()
     }
 
     private func stopHotkeyCapture() {
@@ -924,13 +939,20 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         hotkeyCaptureTimeoutTimer?.invalidate()
         hotkeyCaptureTimeoutTimer = nil
         isCapturingHotkey = false
+        runtime.overlayController.setState(.idle)
+        updateStatusIcon()
+        refreshSettingsRows()
     }
 
     private func refreshSettingsRows() {
         let settings = runtime.settingsStore.load()
         let modelName = settings.modelID
             .replacingOccurrences(of: "ggml-", with: "")
-        infoLineItem?.title = "\(modelName) · \(settings.hotkey.displayName)"
+        infoLineItem?.title = "Model: \(modelName)"
+        hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input..." : "Hotkey: \(settings.hotkey.displayName)"
+        setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey..."
+        setHotkeyItem?.state = isCapturingHotkey ? .on : .off
+        statusItem?.button?.toolTip = isCapturingHotkey ? "Scrawl: waiting for hotkey input" : "Scrawl: Hotkey \(settings.hotkey.displayName)"
     }
 
     private func refreshModelMenu() {
@@ -1034,7 +1056,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private static let ongoingStatuses: Set<String> = [
-        "Recording...", "Transcribing...", "Press desired hotkey now..."
+        "Recording...", "Transcribing...", hotkeyCapturePrompt
     ]
 
     private func setStatus(_ text: String) {
@@ -1109,6 +1131,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         switch runtime.overlayController.state {
         case .idle:
             symbolName = "quote.bubble.fill"
+        case .hotkeyCapture:
+            symbolName = "keyboard.fill"
         case .recording:
             symbolName = "waveform.circle.fill"
         case .transcribing:
@@ -1124,6 +1148,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             switch runtime.overlayController.state {
             case .idle:
                 button.title = "Sc"
+            case .hotkeyCapture:
+                button.title = "⌨"
             case .recording:
                 button.title = "R"
             case .transcribing:

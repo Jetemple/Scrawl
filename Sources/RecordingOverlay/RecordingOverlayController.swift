@@ -4,6 +4,7 @@ import QuartzCore
 
 public enum RecordingOverlayState: Equatable, Sendable {
     case idle
+    case hotkeyCapture
     case recording
     case transcribing
 }
@@ -12,6 +13,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
     public private(set) var state: RecordingOverlayState = .idle
     private var panel: NSPanel?
     private var dotView: NSView?
+    private var symbolView: NSImageView?
     private var titleLabel: NSTextField?
     private var spinner: NSProgressIndicator?
     private var transientDismissWorkItem: DispatchWorkItem?
@@ -51,22 +53,43 @@ public final class RecordingOverlayController: @unchecked Sendable {
         let previous = self.state
         self.state = state
         ensurePanel()
-        guard let panel, let dotView, let titleLabel, let spinner else {
+        guard let panel, let dotView, let symbolView, let titleLabel, let spinner else {
             return
         }
 
         switch state {
         case .idle:
-            dotView.layer?.removeAnimation(forKey: "pulse")
+            stopIndicatorAnimations()
             dotView.isHidden = true
+            symbolView.isHidden = true
             spinner.stopAnimation(nil)
             spinner.isHidden = true
             if Self.notchVisualizerEnabled { hideNotchWaveform() }
             fadeOut(panel)
 
+        case .hotkeyCapture:
+            titleLabel.stringValue = "Press Hotkey"
+            titleLabel.textColor = .labelColor
+            dotView.isHidden = true
+            spinner.stopAnimation(nil)
+            spinner.isHidden = true
+            configureSymbolView(
+                symbolView,
+                symbolName: "keyboard.fill",
+                fallbackSymbolName: "keyboard",
+                tintColor: .systemOrange
+            )
+            symbolView.isHidden = false
+            startSymbolPulse()
+            if Self.notchVisualizerEnabled { hideNotchWaveform() }
+            layoutSubviews()
+            positionPanel(panel)
+            fadeIn(panel, wasHidden: previous == .idle)
+
         case .recording:
             titleLabel.stringValue = "Recording"
             titleLabel.textColor = .labelColor
+            symbolView.isHidden = true
             dotView.isHidden = false
             spinner.stopAnimation(nil)
             spinner.isHidden = true
@@ -79,8 +102,9 @@ public final class RecordingOverlayController: @unchecked Sendable {
         case .transcribing:
             titleLabel.stringValue = "Transcribing"
             titleLabel.textColor = .secondaryLabelColor
-            dotView.layer?.removeAnimation(forKey: "pulse")
+            stopIndicatorAnimations()
             dotView.isHidden = true
+            symbolView.isHidden = true
             spinner.isHidden = false
             spinner.startAnimation(nil)
             if Self.notchVisualizerEnabled { hideNotchWaveform() }
@@ -92,12 +116,13 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
     private func applyTransientMessage(_ text: String, duration: TimeInterval) {
         ensurePanel()
-        guard let panel, let dotView, let titleLabel, let spinner else {
+        guard let panel, let dotView, let symbolView, let titleLabel, let spinner else {
             return
         }
 
-        dotView.layer?.removeAnimation(forKey: "pulse")
+        stopIndicatorAnimations()
         dotView.isHidden = true
+        symbolView.isHidden = true
         spinner.stopAnimation(nil)
         spinner.isHidden = true
         titleLabel.stringValue = text
@@ -179,6 +204,12 @@ public final class RecordingOverlayController: @unchecked Sendable {
         dot.layer?.cornerRadius = 4
         dot.isHidden = true
 
+        let symbolView = NSImageView(frame: .zero)
+        symbolView.imageScaling = .scaleProportionallyUpOrDown
+        symbolView.contentTintColor = .systemOrange
+        symbolView.wantsLayer = true
+        symbolView.isHidden = true
+
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         label.textColor = .labelColor
@@ -192,6 +223,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         spinner.isHidden = true
 
         visual.addSubview(dot)
+        visual.addSubview(symbolView)
         visual.addSubview(label)
         visual.addSubview(spinner)
 
@@ -203,6 +235,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
         self.panel = panel
         self.dotView = dot
+        self.symbolView = symbolView
         self.titleLabel = label
         self.spinner = spinner
     }
@@ -210,7 +243,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
     // MARK: - Layout
 
     private func layoutSubviews() {
-        guard let panel, let dotView, let titleLabel, let spinner else {
+        guard let panel, let dotView, let symbolView, let titleLabel, let spinner else {
             return
         }
 
@@ -228,6 +261,22 @@ public final class RecordingOverlayController: @unchecked Sendable {
             dotView.layer?.cornerRadius = dotSize / 2
 
             let labelX = padding + dotSize + 8
+            titleLabel.frame = NSRect(
+                x: labelX,
+                y: (h - 16) / 2,
+                width: panel.frame.width - labelX - padding,
+                height: 16
+            )
+        } else if !symbolView.isHidden {
+            let symbolSize: CGFloat = 15
+            symbolView.frame = NSRect(
+                x: padding,
+                y: (h - symbolSize) / 2,
+                width: symbolSize,
+                height: symbolSize
+            )
+
+            let labelX = padding + symbolSize + 8
             titleLabel.frame = NSRect(
                 x: labelX,
                 y: (h - 16) / 2,
@@ -266,7 +315,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         guard let dotView, let layer = dotView.layer else {
             return
         }
-        layer.removeAnimation(forKey: "pulse")
+        stopIndicatorAnimations()
 
         let pulse = CABasicAnimation(keyPath: "opacity")
         pulse.fromValue = 0.3
@@ -276,6 +325,58 @@ public final class RecordingOverlayController: @unchecked Sendable {
         pulse.repeatCount = .infinity
         pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         layer.add(pulse, forKey: "pulse")
+    }
+
+    private func startSymbolPulse() {
+        guard let symbolView, let layer = symbolView.layer else {
+            return
+        }
+        stopIndicatorAnimations()
+
+        let opacity = CABasicAnimation(keyPath: "opacity")
+        opacity.fromValue = 0.45
+        opacity.toValue = 1.0
+        opacity.duration = 0.8
+        opacity.autoreverses = true
+        opacity.repeatCount = .infinity
+
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 0.92
+        scale.toValue = 1.02
+        scale.duration = 0.8
+        scale.autoreverses = true
+        scale.repeatCount = .infinity
+
+        let group = CAAnimationGroup()
+        group.animations = [opacity, scale]
+        group.duration = 0.8
+        group.autoreverses = true
+        group.repeatCount = .infinity
+        group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(group, forKey: "waiting")
+    }
+
+    private func stopIndicatorAnimations() {
+        dotView?.layer?.removeAnimation(forKey: "pulse")
+        symbolView?.layer?.removeAnimation(forKey: "waiting")
+    }
+
+    private func configureSymbolView(
+        _ symbolView: NSImageView,
+        symbolName: String,
+        fallbackSymbolName: String,
+        tintColor: NSColor
+    ) {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        let image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: "Waiting for hotkey"
+        ) ?? NSImage(
+            systemSymbolName: fallbackSymbolName,
+            accessibilityDescription: "Waiting for hotkey"
+        )
+        symbolView.image = image?.withSymbolConfiguration(configuration)
+        symbolView.contentTintColor = tintColor
     }
 
     private func fadeIn(_ panel: NSPanel, wasHidden: Bool) {

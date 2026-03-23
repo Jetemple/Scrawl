@@ -1,0 +1,241 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: swift-actions/setup-swift@v2
+
+      - name: Determine release version
+        id: version
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Config/ScrawlApp-Info.plist)
+          echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+
+          SHOULD_RELEASE=false
+          PREVIOUS_VERSION=""
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            SHOULD_RELEASE=true
+          elif [[ -n "$BEFORE_SHA" ]] && git cat-file -e "${BEFORE_SHA}:Config/ScrawlApp-Info.plist" 2>/dev/null; then
+            PREVIOUS_PLIST="$(mktemp)"
+            git show "${BEFORE_SHA}:Config/ScrawlApp-Info.plist" > "$PREVIOUS_PLIST"
+            PREVIOUS_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PREVIOUS_PLIST")
+            rm -f "$PREVIOUS_PLIST"
+
+            if [[ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]]; then
+              SHOULD_RELEASE=true
+            fi
+          else
+            SHOULD_RELEASE=true
+          fi
+
+          echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Skip release
+        if: steps.version.outputs.should_release != 'true'
+        run: |
+          echo "Skipping release."
+          echo "Current version: ${{ steps.version.outputs.version }}"
+          echo "Previous version: ${{ steps.version.outputs.previous_version }}"
+
+      - name: Validate release secrets
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in DEVELOPER_ID_APPLICATION DEVELOPER_ID_PASSWORD APPLE_ID APPLE_TEAM_ID NOTARY_PASSWORD HOMEBREW_TAP_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing required secrets: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Run tests
+        if: steps.version.outputs.should_release == 'true'
+        run: swift test
+
+      - name: Build release binary
+        if: steps.version.outputs.should_release == 'true'
+        run: swift build -c release --product ScrawlApp
+
+      - name: Import signing certificate
+        if: steps.version.outputs.should_release == 'true'
+        id: signing
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          CERT_PATH="$RUNNER_TEMP/developer-id-application.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/scrawl-release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "$DEVELOPER_ID_APPLICATION" | openssl base64 -d -A -out "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$DEVELOPER_ID_PASSWORD" -A -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security default-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F'"' '/Developer ID Application:/ { print $2; exit }')"
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "No Developer ID Application identity was imported."
+            exit 1
+          fi
+
+          echo "keychain_path=$KEYCHAIN_PATH" >> "$GITHUB_OUTPUT"
+          echo "signing_identity=$SIGNING_IDENTITY" >> "$GITHUB_OUTPUT"
+
+      - name: Package and notarize release
+        if: steps.version.outputs.should_release == 'true'
+        id: package
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          SCRAWL_CODESIGN_IDENTITY: ${{ steps.signing.outputs.signing_identity }}
+          SCRAWL_SKIP_BUILD: 1
+          SCRAWL_SKIP_LAUNCH: 1
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_DIR="$RUNNER_TEMP/scrawl-release"
+          APP_PATH="$RELEASE_DIR/Scrawl.app"
+          ZIP_PATH="$RUNNER_TEMP/Scrawl-$VERSION.zip"
+          SHA_PATH="$RUNNER_TEMP/Scrawl-$VERSION.sha256.txt"
+
+          ./scripts/install-app.sh "$RELEASE_DIR"
+
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+
+          xcrun notarytool submit "$ZIP_PATH" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --wait
+
+          xcrun stapler staple "$APP_PATH"
+
+          rm -f "$ZIP_PATH"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
+
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          spctl -a -t exec -vv "$APP_PATH"
+          shasum -a 256 "$ZIP_PATH" > "$SHA_PATH"
+
+          echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+          echo "sha_path=$SHA_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release artifacts
+        if: steps.version.outputs.should_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Scrawl-${{ steps.version.outputs.version }}
+          path: |
+            ${{ steps.package.outputs.zip_path }}
+            ${{ steps.package.outputs.sha_path }}
+
+      - name: Publish GitHub release
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP_PATH: ${{ steps.package.outputs.zip_path }}
+          SHA_PATH: ${{ steps.package.outputs.sha_path }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP_PATH" "$SHA_PATH" --clobber
+          else
+            gh release create "$TAG" "$ZIP_PATH" "$SHA_PATH" \
+              --title "$TAG" \
+              --generate-notes \
+              --target "$GITHUB_SHA"
+          fi
+
+      - name: Checkout Homebrew tap
+        if: steps.version.outputs.should_release == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: Jetemple/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew cask
+        if: steps.version.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA_PATH: ${{ steps.package.outputs.sha_path }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          CASK_PATH="homebrew-tap/Casks/scrawl.rb"
+          SHA256_VALUE="$(awk '{ print $1 }' "$SHA_PATH")"
+          RELEASE_URL="https://github.com/$REPOSITORY/releases/download/$TAG/Scrawl-$VERSION.zip"
+
+          ruby scripts/update-homebrew-cask.rb "$CASK_PATH" "$VERSION" "$SHA256_VALUE" "$RELEASE_URL"
+
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- Casks/scrawl.rb; then
+            echo "Homebrew cask already up to date."
+            exit 0
+          fi
+
+          git add Casks/scrawl.rb
+          git commit -m "scrawl $VERSION"
+          git push origin HEAD:main
+
+      - name: Cleanup signing keychain
+        if: always() && steps.signing.outputs.keychain_path != ''
+        run: security delete-keychain "${{ steps.signing.outputs.keychain_path }}" || true

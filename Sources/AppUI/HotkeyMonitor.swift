@@ -63,7 +63,7 @@ final class HotkeyMonitor {
             return
         }
 
-        let expectedFlag = modifierFlag(for: hotkey.keyCode)
+        let expectedFlag = SupportedHotkeyModifiers.modifierFlag(for: hotkey.keyCode)
         let downFromEvent = expectedFlag.map { event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains($0) } ?? false
         let downFromSource = CGEventSource.keyState(.hidSystemState, key: hotkey.keyCode)
         let downNow = downFromEvent || downFromSource
@@ -102,21 +102,6 @@ final class HotkeyMonitor {
             Task { @MainActor in
                 onKeyUp()
             }
-        }
-    }
-
-    private func modifierFlag(for keyCode: UInt16) -> NSEvent.ModifierFlags? {
-        switch keyCode {
-        case 56, 60:
-            return .shift
-        case 58, 61:
-            return .option
-        case 59, 62:
-            return .control
-        case 54, 55:
-            return .command
-        default:
-            return nil
         }
     }
 
