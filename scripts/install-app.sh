@@ -16,7 +16,6 @@ EXECUTABLE_TARGET="ScrawlApp"
 EXECUTABLE_NAME="Scrawl"
 
 BUILD_CONFIGURATION="${SCRAWL_BUILD_CONFIGURATION:-release}"
-APP_VERSION="${SCRAWL_APP_VERSION:-0.0.5}"
 INSTALL_DIR="${1:-$HOME/Applications}"
 CODESIGN_IDENTITY="${SCRAWL_CODESIGN_IDENTITY:-}"
 KEEP_ACCESSIBILITY_GRANT=0
@@ -35,6 +34,14 @@ STAGED_INFO_PLIST="$STAGED_CONTENTS_DIR/Info.plist"
 
 TEMPLATE_INFO_PLIST="$REPO_ROOT/Config/ScrawlApp-Info.plist"
 ENTITLEMENTS_FILE="$REPO_ROOT/Config/Scrawl.entitlements"
+
+if [[ ! -f "$TEMPLATE_INFO_PLIST" ]]; then
+    echo "Missing Info.plist template: $TEMPLATE_INFO_PLIST"
+    exit 1
+fi
+
+PLIST_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$TEMPLATE_INFO_PLIST")"
+APP_VERSION="${SCRAWL_APP_VERSION:-$PLIST_VERSION}"
 
 ensure_plist_key() {
     local key="$1"
@@ -85,15 +92,7 @@ if [[ -f "$ICON_FILE" ]]; then
     cp "$ICON_FILE" "$STAGED_RESOURCES_DIR/AppIcon.icns"
 fi
 
-if [[ -f "$TEMPLATE_INFO_PLIST" ]]; then
-    cp "$TEMPLATE_INFO_PLIST" "$STAGED_INFO_PLIST"
-else
-    cat > "$STAGED_INFO_PLIST" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict></dict></plist>
-EOF
-fi
+cp "$TEMPLATE_INFO_PLIST" "$STAGED_INFO_PLIST"
 
 ensure_plist_key "CFBundleName" string "$APP_DISPLAY_NAME"
 ensure_plist_key "CFBundleDisplayName" string "$APP_DISPLAY_NAME"

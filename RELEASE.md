@@ -7,7 +7,7 @@
 ```bash
 make build
 SCRAWL_CODESIGN_IDENTITY="Developer ID Application: Jack Temple (4RUT26EY4D)" \
-  SCRAWL_SKIP_BUILD=1 ./scripts/install-app.sh /tmp/scrawl-release
+  SCRAWL_SKIP_BUILD=1 SCRAWL_SKIP_LAUNCH=1 ./scripts/install-app.sh /tmp/scrawl-release
 
 cd /tmp/scrawl-release
 ditto -c -k --sequesterRsrc --keepParent Scrawl.app /tmp/Scrawl-<version>.zip
@@ -41,9 +41,19 @@ shasum -a 256 /tmp/Scrawl-<version>.zip
    - Set new `version` and `sha256`
    - Push to main
 
-## Automated release (TODO)
+## Automated release
 
-Add a GitHub Action that runs on tag push. Requires these repo secrets:
+`.github/workflows/release.yml` creates a signed, notarized GitHub release when either `main` or `master` receives a push that changes `CFBundleShortVersionString` in `Config/ScrawlApp-Info.plist`.
+
+That means:
+
+- Merge `v0.0.6` into `main` or `master`
+- Make sure `Config/ScrawlApp-Info.plist` is bumped to `0.0.6`
+- GitHub Actions will build, sign, notarize, tag `v0.0.6`, and publish the release zip automatically
+
+Normal merges that do not change the app version do not create a release.
+
+Required repo secrets:
 
 | Secret | Value |
 |---|---|
@@ -52,4 +62,6 @@ Add a GitHub Action that runs on tag push. Requires these repo secrets:
 | `APPLE_ID` | `temple2697@gmail.com` |
 | `APPLE_TEAM_ID` | `4RUT26EY4D` |
 | `NOTARY_PASSWORD` | App-specific password from https://appleid.apple.com/account/manage |
-| `HOMEBREW_TAP_TOKEN` | GitHub personal access token with repo access to `Jetemple/homebrew-tap` |
+| `HOMEBREW_TAP_TOKEN` | GitHub personal access token with repo write access to `Jetemple/homebrew-tap` |
+
+After the GitHub release is published, the workflow also updates `Jetemple/homebrew-tap/Casks/scrawl.rb` with the new version, sha256, and release asset URL.

@@ -55,6 +55,13 @@ let package = Package(
         .target(name: "Permissions"),
         .target(name: "RecordingOverlay"),
         .testTarget(
+            name: "AppUITests",
+            dependencies: [
+                "AppUI",
+                "SettingsStore"
+            ]
+        ),
+        .testTarget(
             name: "HotkeyEngineTests",
             dependencies: [
                 "HotkeyEngine"

@@ -78,7 +78,7 @@ open /Applications/Scrawl.app
 
 Scrawl lives in your menubar. From there you can:
 
-- **Change the hotkey** — Set Hotkey, then press any key or modifier
+- **Change the hotkey** — Set Hotkey, then press any single key, `Fn`, or modifier. Press `Esc` to cancel.
 - **Switch models** — tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy)
 - **Repaste recent transcripts** — Recent Transcripts submenu
 
