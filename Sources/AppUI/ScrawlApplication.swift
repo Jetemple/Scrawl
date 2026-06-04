@@ -960,7 +960,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 let request = TranscriptionRequest(
                     audioFileURL: audioURL,
                     modelID: settings.modelID,
-                    language: settings.language
+                    language: settings.language,
+                    progressHandler: { [weak self] event in
+                        self?.handleTranscriptionProgress(event)
+                    }
                 )
                 let result = try await runtime.whisperProvider.transcribe(request)
                 let correctedText = runtime.dictionaryStore.apply(to: result.text)
@@ -1216,7 +1219,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             statusLineItem?.isHidden = false
             statusLineItem?.title = "Status: \(text)"
 
-            let isOngoing = Self.ongoingStatuses.contains(text) || text.hasPrefix("Downloading ")
+            let isOngoing = Self.ongoingStatuses.contains(text)
+                || text.hasPrefix("Downloading ")
+                || text.hasPrefix("Loading model:")
+                || text.hasPrefix("Transcribing with ")
+                || text.hasPrefix("Retrying on CPU")
             if !isOngoing {
                 scheduleStatusAutoClear(after: text == "Done" ? 2.5 : 5.0)
             }
@@ -1251,6 +1258,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setStatus(text)
     }
 
+    private func handleTranscriptionProgress(_ event: TranscriptionProgressEvent) {
+        switch event.phase {
+        case .loadingModel:
+            setStatus("Loading model: \(displayModelName(event.modelID))...")
+        case .transcribing:
+            setStatus("Transcribing with \(displayModelName(event.modelID))...")
+        case .retryingOnCPU:
+            setStatus("Retrying on CPU: \(displayModelName(event.modelID))...")
+        }
+    }
+
     private func permissionMenuTitle(for name: String, status: PermissionStatus) -> String {
         switch status {
         case .authorized:
@@ -1260,6 +1278,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         case .notDetermined:
             return "\(name): Not Requested (click to request)"
         }
+    }
+
+    private func displayModelName(_ modelID: String) -> String {
+        modelID.replacingOccurrences(of: "ggml-", with: "")
     }
 
     private func updateStatusIcon() {

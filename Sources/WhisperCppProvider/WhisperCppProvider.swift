@@ -63,6 +63,13 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
             // Some systems advertise Metal support but still fail during GPU execution.
             // Persisting a process-local CPU fallback avoids repeated failed launches.
             setCPUFallbackForced(true)
+            request.progressHandler?(
+                TranscriptionProgressEvent(
+                    phase: .retryingOnCPU,
+                    modelID: request.modelID,
+                    elapsedMS: Self.elapsedMS(since: startedAt)
+                )
+            )
             return try await transcribeOnce(
                 request: request,
                 modelPath: modelPath,
@@ -80,6 +87,13 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
     ) async throws -> TranscriptionResult {
         let outputPrefix = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-transcript-\(UUID().uuidString)")
         let transcriptFile = outputPrefix.appendingPathExtension("txt")
+        let progressReporter = TranscriptionProgressReporter(
+            modelID: request.modelID,
+            startedAt: startedAt,
+            handler: request.progressHandler
+        )
+        progressReporter.emit(.loadingModel)
+
         let arguments = makeCLIArguments(
             request: request,
             modelPath: modelPath,
@@ -93,20 +107,29 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
 
         let outputID = UUID().uuidString
         let stdoutURL = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-whisper-\(outputID).stdout.log")
-        let stderrURL = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-whisper-\(outputID).stderr.log")
         FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
-        FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
 
         let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
-        let stderrHandle = try FileHandle(forWritingTo: stderrURL)
+        let stderrPipe = Pipe()
+        let stderrCapture = ProcessOutputCapture()
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                return
+            }
+            stderrCapture.append(data)
+            progressReporter.observeCLIOutput(stderrCapture.string())
+        }
+
         process.standardOutput = stdoutHandle
-        process.standardError = stderrHandle
+        process.standardError = stderrPipe
 
         defer {
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
             try? stdoutHandle.close()
-            try? stderrHandle.close()
+            try? stderrPipe.fileHandleForReading.close()
+            try? stderrPipe.fileHandleForWriting.close()
             try? FileManager.default.removeItem(at: stdoutURL)
-            try? FileManager.default.removeItem(at: stderrURL)
             // Clean up the transcript file on every exit path — including the no-speech / empty /
             // non-zero-exit throws below — so blank-audio recordings don't leak temp files.
             try? FileManager.default.removeItem(at: transcriptFile)
@@ -118,7 +141,7 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
         )
 
         let stdout = (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
-        let stderr = (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? ""
+        let stderr = stderrCapture.string()
 
         guard exitCode == 0 else {
             throw TranscriptionError.executionFailed(
@@ -146,6 +169,18 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
 
         let latencyMS = Int(Date().timeIntervalSince(startedAt) * 1_000)
         return TranscriptionResult(text: cleaned, latencyMS: latencyMS)
+    }
+
+    static func progressPhase(forCLIOutput output: String) -> TranscriptionProgressPhase? {
+        let lowercased = output.lowercased()
+        guard lowercased.contains(": processing '") || lowercased.contains(": processing \"") else {
+            return nil
+        }
+        return .transcribing
+    }
+
+    private static func elapsedMS(since startedAt: Date) -> Int {
+        Int(Date().timeIntervalSince(startedAt) * 1_000)
     }
 
     private func shouldRetryWithCPU(after error: TranscriptionError, forceNoGPU: Bool) -> Bool {
@@ -332,5 +367,66 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
             }
             return result
         }
+    }
+}
+
+private final class ProcessOutputCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    func string() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+}
+
+private final class TranscriptionProgressReporter: @unchecked Sendable {
+    private let lock = NSLock()
+    private let modelID: String
+    private let startedAt: Date
+    private let handler: (@Sendable (TranscriptionProgressEvent) -> Void)?
+    private var didEmitTranscribing = false
+
+    init(
+        modelID: String,
+        startedAt: Date,
+        handler: (@Sendable (TranscriptionProgressEvent) -> Void)?
+    ) {
+        self.modelID = modelID
+        self.startedAt = startedAt
+        self.handler = handler
+    }
+
+    func emit(_ phase: TranscriptionProgressPhase) {
+        handler?(
+            TranscriptionProgressEvent(
+                phase: phase,
+                modelID: modelID,
+                elapsedMS: Int(Date().timeIntervalSince(startedAt) * 1_000)
+            )
+        )
+    }
+
+    func observeCLIOutput(_ output: String) {
+        guard WhisperCppProvider.progressPhase(forCLIOutput: output) == .transcribing else {
+            return
+        }
+
+        lock.lock()
+        guard !didEmitTranscribing else {
+            lock.unlock()
+            return
+        }
+        didEmitTranscribing = true
+        lock.unlock()
+
+        emit(.transcribing)
     }
 }

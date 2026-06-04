@@ -119,4 +119,22 @@ final class WhisperCppPostProcessingTests: XCTestCase {
 
         XCTAssertTrue(arguments.contains("--no-gpu"))
     }
+
+    func testTranscriptionRequestCarriesOptionalProgressHandler() {
+        let request = TranscriptionRequest(
+            audioFileURL: URL(filePath: "/tmp/input.wav"),
+            modelID: "ggml-large-v3-turbo",
+            language: "en",
+            progressHandler: { _ in }
+        )
+
+        XCTAssertNotNil(request.progressHandler)
+    }
+
+    func testProgressPhaseDetectsWhisperProcessingLogLine() {
+        let line = "main: processing '/tmp/input.wav' (16000 samples, 1.0 sec), 8 threads, 8 processors, 1 beams + best of 5, lang = en, task = transcribe, timestamps = 0 ..."
+
+        XCTAssertEqual(WhisperCppProvider.progressPhase(forCLIOutput: line), .transcribing)
+        XCTAssertNil(WhisperCppProvider.progressPhase(forCLIOutput: "system_info: n_threads = 8 / 8"))
+    }
 }
