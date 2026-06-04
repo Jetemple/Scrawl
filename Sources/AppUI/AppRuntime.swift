@@ -60,7 +60,7 @@ public struct AppRuntime {
         let modelsDir = resolveModelsDirectory(appSupportDirectory: appSupportDirectory, settings: settings)
         let executableURL = resolveWhisperExecutable(home: home)
         let disableGPU = resolveDisableGPU()
-        let recommendedDefaultModelID = resolveRecommendedDefaultModelID(disableGPU: disableGPU)
+        let recommendedDefaultModelID = resolveRecommendedDefaultModelID()
         let threadCount = resolveWhisperThreadCount()
         let dictionaryURL = appSupportDirectory.appending(path: "dictionary.json")
 
@@ -177,11 +177,12 @@ public struct AppRuntime {
         return max(4, min(cpuCount, 8))
     }
 
-    private static func resolveRecommendedDefaultModelID(disableGPU: Bool) -> String {
-        if disableGPU {
-            return "ggml-small.en"
-        }
-        return "ggml-medium"
+    static func resolveRecommendedDefaultModelID() -> String {
+        // First-run onboarding favors a fast, lightweight download. `small.en` (466 MB) is far
+        // smaller and faster than the multilingual `medium` (1.5 GB), and the app is English-only
+        // today, so `medium` would be strictly heavier with no benefit. Larger/multilingual models
+        // remain one-click upgrades in the Models menu.
+        return "ggml-small.en"
     }
 
     private static func parseEnvironmentBool(_ rawValue: String) -> Bool? {

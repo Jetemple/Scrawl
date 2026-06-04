@@ -27,6 +27,7 @@ public enum TranscriptionError: Error {
     case modelMissing(String)
     case noSpeechDetected
     case executionFailed(String)
+    case timedOut(seconds: Int)
 }
 
 extension TranscriptionError: LocalizedError {
@@ -40,6 +41,8 @@ extension TranscriptionError: LocalizedError {
             return "No speech was detected. Try again and speak a little longer."
         case let .executionFailed(message):
             return message
+        case let .timedOut(seconds):
+            return "Transcription timed out after \(seconds)s. Try a shorter clip or a smaller model."
         }
     }
 }

@@ -68,6 +68,12 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "AudioCaptureTests",
+            dependencies: [
+                "AudioCapture"
+            ]
+        ),
+        .testTarget(
             name: "DictionaryStoreTests",
             dependencies: [
                 "DictionaryStore"

@@ -29,7 +29,7 @@ public final class PermissionManager: @unchecked Sendable {
     }
 
     public func accessibilityStatus() -> PermissionStatus {
-        AXIsProcessTrusted() ? .authorized : .notDetermined
+        AXIsProcessTrusted() ? .authorized : .denied
     }
 
     @discardableResult

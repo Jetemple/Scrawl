@@ -5,9 +5,9 @@
 1. Build, sign, and notarize:
 
 ```bash
-make build
+make build BUILD_ARCHS="arm64 x86_64"
 SCRAWL_CODESIGN_IDENTITY="Developer ID Application: Jack Temple (4RUT26EY4D)" \
-  SCRAWL_SKIP_BUILD=1 SCRAWL_SKIP_LAUNCH=1 ./scripts/install-app.sh /tmp/scrawl-release
+  SCRAWL_BUILD_ARCHS="arm64 x86_64" SCRAWL_SKIP_BUILD=1 SCRAWL_SKIP_LAUNCH=1 ./scripts/install-app.sh /tmp/scrawl-release
 
 cd /tmp/scrawl-release
 ditto -c -k --sequesterRsrc --keepParent Scrawl.app /tmp/Scrawl-<version>.zip
@@ -47,9 +47,9 @@ shasum -a 256 /tmp/Scrawl-<version>.zip
 
 That means:
 
-- Merge `v0.0.6` into `main` or `master`
-- Make sure `Config/ScrawlApp-Info.plist` is bumped to `0.0.6`
-- GitHub Actions will build, sign, notarize, tag `v0.0.6`, and publish the release zip automatically
+- Merge the release branch into `main` or `master`
+- Make sure `Config/ScrawlApp-Info.plist` is bumped to the release version
+- GitHub Actions will build, sign, notarize, tag `v<version>`, and publish the release zip automatically
 
 Normal merges that do not change the app version do not create a release.
 

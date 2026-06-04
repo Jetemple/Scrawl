@@ -16,6 +16,7 @@ EXECUTABLE_TARGET="ScrawlApp"
 EXECUTABLE_NAME="Scrawl"
 
 BUILD_CONFIGURATION="${SCRAWL_BUILD_CONFIGURATION:-release}"
+BUILD_ARCHS="${SCRAWL_BUILD_ARCHS:-}"
 INSTALL_DIR="${1:-$HOME/Applications}"
 CODESIGN_IDENTITY="${SCRAWL_CODESIGN_IDENTITY:-}"
 KEEP_ACCESSIBILITY_GRANT=0
@@ -55,6 +56,51 @@ ensure_plist_key() {
     fi
 }
 
+capitalized_build_configuration() {
+    case "$BUILD_CONFIGURATION" in
+        release)
+            printf 'Release\n'
+            ;;
+        debug)
+            printf 'Debug\n'
+            ;;
+        *)
+            printf '%s\n' "$BUILD_CONFIGURATION"
+            ;;
+    esac
+}
+
+resolve_built_executable() {
+    local capitalized_configuration
+    capitalized_configuration="$(capitalized_build_configuration)"
+    local candidates=(
+        "$REPO_ROOT/.build/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET"
+        "$REPO_ROOT/.build/apple/Products/$capitalized_configuration/$EXECUTABLE_TARGET"
+    )
+
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    candidate="$(find "$REPO_ROOT/.build" -type f -path "*/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1)"
+    if [[ -n "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    candidate="$(find "$REPO_ROOT/.build" -type f -path "*/$capitalized_configuration/$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1)"
+    if [[ -n "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    find "$REPO_ROOT/.build" -type f -name "$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1
+}
+
 verify_signed_app() {
     local app_path="$1"
     if ! codesign --verify --deep --strict --verbose=2 "$app_path"; then
@@ -65,15 +111,15 @@ verify_signed_app() {
 
 if [[ "${SCRAWL_SKIP_BUILD:-0}" != "1" ]]; then
     echo "Building $EXECUTABLE_TARGET ($BUILD_CONFIGURATION)..."
-    swift build -c "$BUILD_CONFIGURATION" --product "$EXECUTABLE_TARGET"
+    BUILD_ARGS=(-c "$BUILD_CONFIGURATION")
+    for arch in $BUILD_ARCHS; do
+        BUILD_ARGS+=(--arch "$arch")
+    done
+    BUILD_ARGS+=(--product "$EXECUTABLE_TARGET")
+    swift build "${BUILD_ARGS[@]}"
 fi
 
-if [[ ! -x "$BUILT_EXECUTABLE" ]]; then
-    ALT_EXECUTABLE="$(find "$REPO_ROOT/.build" -type f -path "*/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET" -perm -111 | head -n 1 || true)"
-    if [[ -n "$ALT_EXECUTABLE" ]]; then
-        BUILT_EXECUTABLE="$ALT_EXECUTABLE"
-    fi
-fi
+BUILT_EXECUTABLE="$(resolve_built_executable)"
 
 if [[ ! -x "$BUILT_EXECUTABLE" ]]; then
     echo "Build succeeded but executable was not found at:"
