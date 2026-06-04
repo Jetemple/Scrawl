@@ -65,4 +65,31 @@ final class HotkeyGestureStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.tick(at: t0.addingTimeInterval(0.50)), [])
         XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.51)), [])
     }
+
+    func testNextDeadlineTracksHoldThreshold() throws {
+        let machine = HotkeyGestureStateMachine(
+            config: HotkeyGestureConfig(holdThreshold: 0.18, doubleTapGap: 0.30)
+        )
+        let t0 = Date(timeIntervalSinceReferenceDate: 600)
+
+        XCTAssertEqual(machine.keyDown(at: t0), [])
+        let deadline = try XCTUnwrap(machine.nextActionDeadline(at: t0))
+        XCTAssertEqual(deadline.timeIntervalSinceReferenceDate, t0.addingTimeInterval(0.18).timeIntervalSinceReferenceDate, accuracy: 0.000_001)
+        XCTAssertEqual(machine.tick(at: deadline.addingTimeInterval(0.001)), [.startHoldRecording])
+        XCTAssertNil(machine.nextActionDeadline(at: deadline.addingTimeInterval(0.001)))
+    }
+
+    func testNextDeadlineTracksSecondTapExpiry() throws {
+        let machine = HotkeyGestureStateMachine(
+            config: HotkeyGestureConfig(holdThreshold: 0.18, doubleTapGap: 0.30)
+        )
+        let t0 = Date(timeIntervalSinceReferenceDate: 700)
+
+        XCTAssertEqual(machine.keyDown(at: t0), [])
+        XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.05)), [])
+        let deadline = try XCTUnwrap(machine.nextActionDeadline(at: t0.addingTimeInterval(0.05)))
+        XCTAssertEqual(deadline.timeIntervalSinceReferenceDate, t0.addingTimeInterval(0.35).timeIntervalSinceReferenceDate, accuracy: 0.000_001)
+        XCTAssertEqual(machine.tick(at: t0.addingTimeInterval(0.36)), [])
+        XCTAssertNil(machine.nextActionDeadline(at: t0.addingTimeInterval(0.36)))
+    }
 }

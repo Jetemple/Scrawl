@@ -13,6 +13,18 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("Hello this is a test"))
     }
 
+    func testBareNoiseWordsAreNotTreatedAsNoSpeech() {
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("Music"))
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("Noise"))
+    }
+
+    func testCommonNoInputGhostTranscriptsAreTreatedAsNoSpeech() {
+        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("you"))
+        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("You."))
+        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("-"))
+        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("—"))
+    }
+
     func testTimeoutIsNotRetriedOnCPU() {
         // A timeout means the run was too slow, not that the GPU is broken. Re-running the same
         // long input on CPU is typically slower and can time out again (~2x the stall), so a

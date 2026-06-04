@@ -1,8 +1,10 @@
 PREFIX ?= $(HOME)/Applications
 BUILD_CONFIG ?= release
+BUILD_ARCHS ?=
 APP_NAME := Scrawl
 APP_BUNDLE := $(APP_NAME).app
 EXECUTABLE_TARGET := ScrawlApp
+SWIFT_ARCH_FLAGS := $(foreach arch,$(BUILD_ARCHS),--arch $(arch))
 
 .PHONY: build install uninstall clean test check-deps doctor
 
@@ -17,7 +19,7 @@ doctor:
 	@echo "Install prefix: $(PREFIX)"
 
 build: check-deps
-	swift build -c $(BUILD_CONFIG) --product $(EXECUTABLE_TARGET)
+	swift build -c $(BUILD_CONFIG) $(SWIFT_ARCH_FLAGS) --product $(EXECUTABLE_TARGET)
 
 test:
 	swift test

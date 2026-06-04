@@ -5,15 +5,18 @@ public struct AudioCaptureConfig: Sendable {
     public var sampleRate: Double
     public var channels: Int
     public var minimumDurationSeconds: Double
+    public var silenceThresholdRMS: Double
 
     public init(
         sampleRate: Double = 16_000,
         channels: Int = 1,
-        minimumDurationSeconds: Double = 0.18
+        minimumDurationSeconds: Double = 0.18,
+        silenceThresholdRMS: Double = 0.001
     ) {
         self.sampleRate = sampleRate
         self.channels = channels
         self.minimumDurationSeconds = minimumDurationSeconds
+        self.silenceThresholdRMS = silenceThresholdRMS
     }
 }
 
@@ -24,6 +27,7 @@ public enum AudioCaptureError: Error {
     case recorderStartFailed
     case captureTooShort(durationSeconds: Double)
     case outputFileEmpty
+    case audioLevelTooLow
 }
 
 extension AudioCaptureError: LocalizedError {
@@ -41,6 +45,8 @@ extension AudioCaptureError: LocalizedError {
             return String(format: "Recording was too short (%.2fs).", durationSeconds)
         case .outputFileEmpty:
             return "Recorded audio was empty."
+        case .audioLevelTooLow:
+            return "No audio was captured. Check your microphone and try again."
         }
     }
 }
@@ -86,7 +92,7 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.recorderCreationFailed
         }
 
-        recorder.isMeteringEnabled = false
+        recorder.isMeteringEnabled = true
         guard recorder.record() else {
             throw AudioCaptureError.recorderStartFailed
         }
@@ -117,6 +123,14 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
         if fileSize <= 44 {
             try? FileManager.default.removeItem(at: outputURL)
             throw AudioCaptureError.outputFileEmpty
+        }
+
+        if (try? AudioLevelAnalyzer.isLikelySilent(
+            fileURL: outputURL,
+            minimumRMS: config.silenceThresholdRMS
+        )) == true {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw AudioCaptureError.audioLevelTooLow
         }
 
         return outputURL

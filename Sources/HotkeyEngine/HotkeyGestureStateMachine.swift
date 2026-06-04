@@ -87,6 +87,19 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
         }
     }
 
+    public func nextActionDeadline(at time: Date) -> Date? {
+        switch state {
+        case .pressed(let down):
+            let deadline = down.addingTimeInterval(config.holdThreshold)
+            return deadline > time ? deadline : time
+        case .waitingForSecondTap(let firstTapRelease):
+            let deadline = firstTapRelease.addingTimeInterval(config.doubleTapGap)
+            return deadline > time ? deadline : time
+        default:
+            return nil
+        }
+    }
+
     public func tick(at time: Date) -> [HotkeyGestureAction] {
         switch state {
         case .pressed(let down):

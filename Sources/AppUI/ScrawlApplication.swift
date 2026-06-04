@@ -10,6 +10,19 @@ public final class ScrawlApplication {
     public init() {}
 
     public func run() {
+        do {
+            let instanceLock = try SingleInstanceLock()
+            if try !instanceLock.tryAcquire() {
+                Self.activateExistingInstance()
+                return
+            }
+            DelegateRetainer.shared.instanceLock = instanceLock
+        } catch {
+            #if DEBUG
+            print("[Scrawl] Single-instance lock unavailable: \(error)")
+            #endif
+        }
+
         let app = NSApplication.shared
         let delegate = StatusBarAppDelegate(runtime: .live())
 
@@ -19,11 +32,22 @@ public final class ScrawlApplication {
         app.delegate = delegate
         app.run()
     }
+
+    private static func activateExistingInstance() {
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.jetemple.scrawl"
+        let existing = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleID)
+            .first { $0.processIdentifier != currentPID }
+
+        _ = existing?.activate(options: [.activateAllWindows])
+    }
 }
 
 private final class DelegateRetainer {
     static let shared = DelegateRetainer()
     var delegate: NSApplicationDelegate?
+    var instanceLock: SingleInstanceLock?
 }
 
 private struct TranscriptRecord: Sendable {
@@ -67,7 +91,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private var workspaceActivationObserver: NSObjectProtocol?
     private var hotkeyMonitor: HotkeyMonitor?
-    private var hotkeyTickTimer: Timer?
+    private var hotkeyGestureTimer: Timer?
 
     private var hotkeyCaptureGlobalMonitor: Any?
     private var hotkeyCaptureLocalMonitor: Any?
@@ -79,7 +103,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var latestStatusText = ""
     private var cachedAccessibilityAuthorized = false
     private var hasPromptedAccessibilityForHotkeyAttempt = false
-    private var wasHotkeyDownWithoutAccessibility = false
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
@@ -115,9 +138,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         stopObservingWorkspaceActivations()
         statusAutoClearTimer?.invalidate()
         statusAutoClearTimer = nil
+        DelegateRetainer.shared.instanceLock?.release()
+        DelegateRetainer.shared.instanceLock = nil
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        reconcileAccessibilityAuthorization()
         refreshSettingsRows()
         refreshModelMenu()
         refreshHistoryMenu()
@@ -420,7 +446,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         if hasPromptedAccessibilityForHotkeyAttempt && !force {
-            setStatus("Accessibility permission required")
+            openAccessibilitySettings()
+            runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
+            setStatus("Enable Accessibility in System Settings")
             return
         }
 
@@ -436,7 +464,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             setupHotkeyHandling()
             setStatus("Hotkey ready")
         } else {
-            setStatus("Accessibility permission required")
+            openAccessibilitySettings()
+            runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
+            setStatus("Enable Accessibility in System Settings")
         }
     }
 
@@ -529,6 +559,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setStatus("No speech detected")
     }
 
+    private func presentNoAudioCapturedMessage() {
+        runtime.overlayController.showTransientMessage("No audio captured. Check your mic.")
+        setStatus("No audio captured")
+    }
+
     /// Surfaces user-facing guidance for a transcription failure. Returns `true` if it already showed
     /// something the user can see (alert or overlay message); `false` means the caller should show a
     /// generic visible fallback so the failure is never silent.
@@ -564,12 +599,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    @objc private func hotkeyTick(_ timer: Timer) {
-        dispatchHotkeyActions(runtime.hotkeyStateMachine.tick(at: Date()))
-        reconcileAccessibilityAuthorization()
-        detectHotkeyAttemptWithoutAccessibility()
-    }
-
     private func reconcileAccessibilityAuthorization() {
         let isAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
         guard isAuthorized != cachedAccessibilityAuthorized else {
@@ -590,21 +619,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setupHotkeyHandling()
         if isAuthorized {
             setStatus("Hotkey ready")
-        }
-    }
-
-    private func detectHotkeyAttemptWithoutAccessibility() {
-        guard !cachedAccessibilityAuthorized, !isCapturingHotkey else {
-            wasHotkeyDownWithoutAccessibility = false
-            return
-        }
-
-        let hotkey = runtime.settingsStore.load().hotkey
-        let isDown = CGEventSource.keyState(.hidSystemState, key: hotkey.keyCode)
-        defer { wasHotkeyDownWithoutAccessibility = isDown }
-
-        if isDown && !wasHotkeyDownWithoutAccessibility {
-            promptForAccessibilityPermission(force: false)
         }
     }
 
@@ -715,18 +729,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let monitor = HotkeyMonitor(
             hotkey: hotkey,
             onKeyDown: { [weak self] in
-                self?.dispatchHotkeyActions(self?.runtime.hotkeyStateMachine.keyDown(at: Date()) ?? [])
+                guard let self else { return }
+                self.dispatchHotkeyActionsAndScheduleNext(self.runtime.hotkeyStateMachine.keyDown(at: Date()))
             },
             onKeyUp: { [weak self] in
-                self?.dispatchHotkeyActions(self?.runtime.hotkeyStateMachine.keyUp(at: Date()) ?? [])
+                guard let self else { return }
+                self.dispatchHotkeyActionsAndScheduleNext(self.runtime.hotkeyStateMachine.keyUp(at: Date()))
             }
         )
         monitor.start()
         hotkeyMonitor = monitor
-
-        let tickTimer = Timer.scheduledTimer(timeInterval: 0.02, target: self, selector: #selector(hotkeyTick(_:)), userInfo: nil, repeats: true)
-        RunLoop.main.add(tickTimer, forMode: .common)
-        hotkeyTickTimer = tickTimer
 
         if runtime.permissionManager.accessibilityStatus() != .authorized {
             setStatus("Hotkey limited until Accessibility is enabled")
@@ -734,11 +746,41 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func teardownHotkeyHandling() {
-        hotkeyTickTimer?.invalidate()
-        hotkeyTickTimer = nil
+        hotkeyGestureTimer?.invalidate()
+        hotkeyGestureTimer = nil
         hotkeyMonitor?.stop()
         hotkeyMonitor = nil
         runtime.hotkeyStateMachine.reset()
+    }
+
+    private func dispatchHotkeyActionsAndScheduleNext(_ actions: [HotkeyGestureAction]) {
+        dispatchHotkeyActions(actions)
+        scheduleNextHotkeyGestureTimer()
+    }
+
+    private func scheduleNextHotkeyGestureTimer() {
+        hotkeyGestureTimer?.invalidate()
+        hotkeyGestureTimer = nil
+
+        let now = Date()
+        guard let deadline = runtime.hotkeyStateMachine.nextActionDeadline(at: now) else {
+            return
+        }
+
+        let timer = Timer(
+            fireAt: deadline,
+            interval: 0,
+            target: self,
+            selector: #selector(handleHotkeyGestureTimer(_:)),
+            userInfo: nil,
+            repeats: false
+        )
+        RunLoop.main.add(timer, forMode: .common)
+        hotkeyGestureTimer = timer
+    }
+
+    @objc private func handleHotkeyGestureTimer(_ timer: Timer) {
+        dispatchHotkeyActionsAndScheduleNext(runtime.hotkeyStateMachine.tick(at: Date()))
     }
 
     private func dispatchHotkeyActions(_ actions: [HotkeyGestureAction]) {
@@ -817,7 +859,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             runtime.overlayController.setState(.idle)
             updateStatusIcon()
             setStatus("Stop error: \(describe(error))")
-            if case AudioCaptureError.captureTooShort = error, activeOrigin != .manual {
+            if case AudioCaptureError.audioLevelTooLow = error {
+                presentNoAudioCapturedMessage()
+            } else if case AudioCaptureError.captureTooShort = error, activeOrigin != .manual {
                 presentNoSpeechDetectedAlert()
             }
             return

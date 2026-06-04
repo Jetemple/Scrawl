@@ -191,26 +191,50 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
         }
 
         return lines.allSatisfy { line in
-            let condensed = line
-                .uppercased()
-                .replacingOccurrences(of: " ", with: "")
-                .replacingOccurrences(of: "-", with: "")
-                .replacingOccurrences(of: "_", with: "")
+            Self.isNoSpeechLine(line)
+        }
+    }
 
-            switch condensed {
-            case "[BLANKAUDIO]", "(BLANKAUDIO)", "BLANKAUDIO":
-                return true
-            case "[NOSPEECH]", "(NOSPEECH)", "NOSPEECH":
-                return true
-            case "[SILENCE]", "(SILENCE)", "SILENCE":
-                return true
-            case "[NOISE]", "(NOISE)", "NOISE":
-                return true
-            case "[MUSIC]", "(MUSIC)", "MUSIC":
-                return true
-            default:
-                return false
-            }
+    private static func isNoSpeechLine(_ line: String) -> Bool {
+        let nonDecorativeScalars = line.unicodeScalars.filter { scalar in
+            !CharacterSet.whitespacesAndNewlines.contains(scalar)
+                && !CharacterSet.punctuationCharacters.contains(scalar)
+                && !CharacterSet.symbols.contains(scalar)
+        }
+
+        if nonDecorativeScalars.isEmpty {
+            return true
+        }
+
+        let wordOnly = nonDecorativeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init)
+            .joined()
+            .uppercased()
+
+        if wordOnly == "YOU" {
+            return true
+        }
+
+        let condensed = line
+            .uppercased()
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+
+        switch condensed {
+        case "[BLANKAUDIO]", "(BLANKAUDIO)", "BLANKAUDIO":
+            return true
+        case "[NOSPEECH]", "(NOSPEECH)", "NOSPEECH":
+            return true
+        case "[SILENCE]", "(SILENCE)", "SILENCE":
+            return true
+        case "[NOISE]", "(NOISE)":
+            return true
+        case "[MUSIC]", "(MUSIC)":
+            return true
+        default:
+            return false
         }
     }
 
