@@ -13,6 +13,26 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("Hello this is a test"))
     }
 
+    func testTimeoutIsNotRetriedOnCPU() {
+        // A timeout means the run was too slow, not that the GPU is broken. Re-running the same
+        // long input on CPU is typically slower and can time out again (~2x the stall), so a
+        // timeout must fail fast to the user instead of triggering a CPU fallback.
+        XCTAssertFalse(WhisperCppProvider.isRetryableWithCPU(error: .timedOut(seconds: 120), forceNoGPU: false))
+    }
+
+    func testGenuineExecutionFailureIsRetriedOnCPU() {
+        XCTAssertTrue(WhisperCppProvider.isRetryableWithCPU(error: .executionFailed("metal error"), forceNoGPU: false))
+    }
+
+    func testNoRetryWhenAlreadyForcedToCPU() {
+        XCTAssertFalse(WhisperCppProvider.isRetryableWithCPU(error: .executionFailed("metal error"), forceNoGPU: true))
+    }
+
+    func testNonExecutionErrorsAreNotRetriedOnCPU() {
+        XCTAssertFalse(WhisperCppProvider.isRetryableWithCPU(error: .noSpeechDetected, forceNoGPU: false))
+        XCTAssertFalse(WhisperCppProvider.isRetryableWithCPU(error: .modelMissing("ggml-small.en"), forceNoGPU: false))
+    }
+
     func testMakeCLIArgumentsIncludesThreadsAndNoGPUWhenConfigured() {
         let config = WhisperCppConfig(
             executableURL: URL(filePath: "/usr/local/bin/whisper-cli"),

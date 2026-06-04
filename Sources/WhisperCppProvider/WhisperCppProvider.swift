@@ -79,6 +79,7 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
         forceNoGPU: Bool
     ) async throws -> TranscriptionResult {
         let outputPrefix = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-transcript-\(UUID().uuidString)")
+        let transcriptFile = outputPrefix.appendingPathExtension("txt")
         let arguments = makeCLIArguments(
             request: request,
             modelPath: modelPath,
@@ -106,6 +107,9 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
             try? stderrHandle.close()
             try? FileManager.default.removeItem(at: stdoutURL)
             try? FileManager.default.removeItem(at: stderrURL)
+            // Clean up the transcript file on every exit path — including the no-speech / empty /
+            // non-zero-exit throws below — so blank-audio recordings don't leak temp files.
+            try? FileManager.default.removeItem(at: transcriptFile)
         }
 
         let exitCode = try await runAndWait(
@@ -122,7 +126,6 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
             )
         }
 
-        let transcriptFile = outputPrefix.appendingPathExtension("txt")
         let transcriptText: String
         if let text = try? String(contentsOf: transcriptFile, encoding: .utf8) {
             transcriptText = text
@@ -141,21 +144,28 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
             throw TranscriptionError.noSpeechDetected
         }
 
-        try? FileManager.default.removeItem(at: transcriptFile)
-
         let latencyMS = Int(Date().timeIntervalSince(startedAt) * 1_000)
         return TranscriptionResult(text: cleaned, latencyMS: latencyMS)
     }
 
     private func shouldRetryWithCPU(after error: TranscriptionError, forceNoGPU: Bool) -> Bool {
+        Self.isRetryableWithCPU(error: error, forceNoGPU: forceNoGPU)
+    }
+
+    /// A GPU run should only fall back to CPU when the GPU genuinely failed to execute. A timeout
+    /// means the run was merely too slow — retrying the same long input on CPU is typically slower
+    /// and can time out again, doubling the user's stall — so timeouts (and non-execution errors)
+    /// are not retryable.
+    static func isRetryableWithCPU(error: TranscriptionError, forceNoGPU: Bool) -> Bool {
         guard !forceNoGPU else {
             return false
         }
-
-        if case .executionFailed = error {
+        switch error {
+        case .executionFailed:
             return true
+        case .timedOut, .providerUnavailable, .modelMissing, .noSpeechDetected:
+            return false
         }
-        return false
     }
 
     private func isCPUFallbackForced() -> Bool {
@@ -288,7 +298,7 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
                 if process.isRunning {
                     process.terminate()
                 }
-                throw TranscriptionError.executionFailed("whisper.cpp timed out after \(timeoutSeconds)s")
+                throw TranscriptionError.timedOut(seconds: timeoutSeconds)
             }
 
             defer { group.cancelAll() }

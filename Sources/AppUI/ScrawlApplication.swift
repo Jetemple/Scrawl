@@ -3,6 +3,7 @@ import AudioCapture
 import HotkeyEngine
 import Permissions
 import SettingsStore
+import TextOutput
 import TranscriptionCore
 
 public final class ScrawlApplication {
@@ -528,18 +529,28 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setStatus("No speech detected")
     }
 
-    private func presentTranscriptionGuidanceIfNeeded(for error: Error) {
+    /// Surfaces user-facing guidance for a transcription failure. Returns `true` if it already showed
+    /// something the user can see (alert or overlay message); `false` means the caller should show a
+    /// generic visible fallback so the failure is never silent.
+    @discardableResult
+    private func presentTranscriptionGuidanceIfNeeded(for error: Error) -> Bool {
         guard let transcriptionError = error as? TranscriptionError else {
-            return
+            return false
         }
 
         switch transcriptionError {
         case .providerUnavailable:
             presentWhisperMissingAlert()
+            return true
         case .modelMissing:
             presentMissingModelAlert(triggeredByHotkey: true)
+            return true
         case .noSpeechDetected:
             presentNoSpeechDetectedAlert()
+            return true
+        case .timedOut:
+            runtime.overlayController.showTransientMessage("Transcription timed out. Try a shorter clip or a smaller model.")
+            return true
         case let .executionFailed(message):
             let normalized = message.uppercased()
             if normalized.contains("BLANK_AUDIO")
@@ -547,7 +558,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 || normalized.contains("NO SPEECH")
             {
                 presentNoSpeechDetectedAlert()
+                return true
             }
+            return false
         }
     }
 
@@ -916,6 +929,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         var settings = runtime.settingsStore.load()
         settings.hotkey = hotkey
         saveSettings(settings)
+        // The hotkey changed, so rebuild the monitors to listen for the new key. This is also the
+        // path that re-arms hotkey handling after a capture session (which tore it down).
+        teardownHotkeyHandling()
+        setupHotkeyHandling()
         setStatus("Hotkey set: \(hotkey.displayName)")
         runtime.overlayController.showTransientMessage("Hotkey set to \(hotkey.displayName)")
     }
@@ -1178,8 +1195,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         try? await Task.sleep(nanoseconds: 180_000_000)
         do {
             try await runtime.textOutputTarget.output(text)
+        } catch TextOutputError.secureInputActive {
+            setStatus("Secure field — transcript copied to clipboard")
+            runtime.overlayController.showTransientMessage("Secure field detected — transcript copied to clipboard")
         } catch {
             setStatus("Paste error: \(describe(error))")
+            runtime.overlayController.showTransientMessage("Couldn't paste — \(describe(error))")
         }
     }
 
@@ -1202,8 +1223,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             try runtime.settingsStore.save(settings)
             refreshSettingsRows()
             refreshModelMenu()
-            teardownHotkeyHandling()
-            setupHotkeyHandling()
+            // NOTE: hotkey monitors are intentionally NOT rebuilt here. Only applyHotkey changes the
+            // hotkey, so rebuilding on every save (model select, download completion, launch defaults)
+            // was needless churn — and worse, teardownHotkeyHandling resets the gesture state machine,
+            // which could strand an in-progress recording until the 90s safety timeout. The rebuild now
+            // lives in applyHotkey, the one place the hotkey actually changes.
         } catch {
             setStatus("Settings error: \(describe(error))")
         }
@@ -1241,6 +1265,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         runtime.overlayController.setState(.idle)
         updateStatusIcon()
         setStatus("\(reason): \(describe(error))")
-        presentTranscriptionGuidanceIfNeeded(for: error)
+        // Make sure every failure is visible without opening the menu. If no specific guidance was
+        // shown, fall back to a transient overlay message in the pill the user is already watching.
+        if !presentTranscriptionGuidanceIfNeeded(for: error) {
+            runtime.overlayController.showTransientMessage("Transcription failed — \(describe(error))")
+        }
     }
 }

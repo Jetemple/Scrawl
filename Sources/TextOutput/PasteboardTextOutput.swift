@@ -1,11 +1,15 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import Foundation
 
 public enum TextOutputError: Error {
     case accessibilityPermissionRequired
     case failedToWritePasteboard
     case failedToCreateEventSource
+    /// A secure input field (e.g. a password field) is focused. The transcript was left on the
+    /// clipboard for the user to paste deliberately rather than auto-pasted into a sensitive field.
+    case secureInputActive
 }
 
 public protocol TextOutputTarget: Sendable {
@@ -22,6 +26,16 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
     public func output(_ text: String) async throws {
         guard AXIsProcessTrusted() else {
             throw TextOutputError.accessibilityPermissionRequired
+        }
+
+        if IsSecureEventInputEnabled() {
+            // A secure input field (password) is focused. Synthesized Cmd+V is unreliable while secure
+            // input is active, and pasting spoken text into a password field would silently leak it.
+            // Instead, leave the transcript on the clipboard (do NOT restore the previous contents) so
+            // the user can paste it deliberately, and signal the caller to surface a message.
+            pasteboard.clearContents()
+            _ = pasteboard.setString(text, forType: .string)
+            throw TextOutputError.secureInputActive
         }
 
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
