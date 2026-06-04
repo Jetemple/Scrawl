@@ -79,6 +79,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var startManualItem: NSMenuItem?
     private var stopManualItem: NSMenuItem?
     private var setHotkeyItem: NSMenuItem?
+    private var preferencesWindowController: PreferencesWindowController?
 
     private var modelsSubmenu: NSMenu?
     private var historySubmenu: NSMenu?
@@ -100,6 +101,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var isCapturingHotkey = false
 
     private var isModelDownloadInProgress = false
+    private var downloadingModelID: String?
     private var latestStatusText = ""
     private var cachedAccessibilityAuthorized = false
     private var hasPromptedAccessibilityForHotkeyAttempt = false
@@ -170,6 +172,67 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         beginHotkeyCapture()
+    }
+
+    @objc private func openPreferences(_ sender: Any?) {
+        if preferencesWindowController == nil {
+            preferencesWindowController = makePreferencesWindowController()
+        }
+        refreshPreferencesWindow()
+        preferencesWindowController?.showWindow(sender)
+    }
+
+    private func makePreferencesWindowController() -> PreferencesWindowController {
+        PreferencesWindowController(
+            actions: PreferencesWindowController.Actions(
+                selectModel: { [weak self] modelID in
+                    self?.selectModel(id: modelID)
+                },
+                downloadModel: { [weak self] model in
+                    self?.startModelDownload(model)
+                },
+                deleteSelectedModel: { [weak self] in
+                    self?.deleteSelectedModel(nil)
+                },
+                setHotkey: { [weak self] in
+                    self?.toggleHotkeyCapture(nil)
+                },
+                requestMicrophone: { [weak self] in
+                    self?.requestMicrophonePermission(nil)
+                },
+                requestAccessibility: { [weak self] in
+                    self?.requestAccessibilityPermission(nil)
+                }
+            )
+        )
+    }
+
+    private func refreshPreferencesWindow() {
+        guard let preferencesWindowController else {
+            return
+        }
+
+        let settings = runtime.settingsStore.load()
+        let installedModelIDs = modelManager.installedModelIDs()
+        let downloadableModels = LocalModelManager.downloadableModels
+        let modelRows = PreferencesModelState.rows(
+            downloadableModels: downloadableModels,
+            installedModelIDs: installedModelIDs,
+            selectedModelID: settings.modelID,
+            downloadingModelID: downloadingModelID
+        )
+
+        preferencesWindowController.update(
+            snapshot: PreferencesWindowController.Snapshot(
+                settings: settings,
+                downloadableModels: downloadableModels,
+                modelRows: modelRows,
+                microphoneStatus: runtime.permissionManager.microphoneStatus(),
+                accessibilityStatus: runtime.permissionManager.accessibilityStatus(),
+                isCapturingHotkey: isCapturingHotkey,
+                isModelDownloadInProgress: isModelDownloadInProgress
+            )
+        )
     }
 
     private func beginHotkeyCapture() {
@@ -251,6 +314,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         guard let modelID = sender.representedObject as? String else {
             return
         }
+        selectModel(id: modelID)
+    }
+
+    private func selectModel(id modelID: String) {
         var settings = runtime.settingsStore.load()
         settings.selectedModelID = modelID
         if settings.defaultModelID.isEmpty {
@@ -298,7 +365,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         isModelDownloadInProgress = true
+        downloadingModelID = model.id
         refreshModelMenu()
+        refreshPreferencesWindow()
         setStatus("Downloading \(model.displayName)...")
 
         Task { [weak self] in
@@ -334,7 +403,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             }
             await MainActor.run {
                 self.isModelDownloadInProgress = false
+                self.downloadingModelID = nil
                 self.refreshModelMenu()
+                self.refreshPreferencesWindow()
             }
         }
     }
@@ -653,6 +724,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         statusLineItem.isHidden = true
         menu.addItem(statusLineItem)
         self.statusLineItem = statusLineItem
+
+        menu.addItem(.separator())
+
+        let preferencesItem = NSMenuItem(title: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
+        preferencesItem.target = self
+        menu.addItem(preferencesItem)
 
         menu.addItem(.separator())
 
@@ -1014,6 +1091,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey..."
         setHotkeyItem?.state = isCapturingHotkey ? .on : .off
         statusItem?.button?.toolTip = isCapturingHotkey ? "Scrawl: waiting for hotkey input" : "Scrawl: Hotkey \(settings.hotkey.displayName)"
+        refreshPreferencesWindow()
     }
 
     private func refreshModelMenu() {
@@ -1108,6 +1186,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let bothGranted = micStatus == .authorized && axStatus == .authorized
         microphoneItem?.isHidden = bothGranted
         accessibilityItem?.isHidden = bothGranted
+        refreshPreferencesWindow()
     }
 
     private func updateRecordingActionRows() {
@@ -1267,6 +1346,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             try runtime.settingsStore.save(settings)
             refreshSettingsRows()
             refreshModelMenu()
+            refreshPreferencesWindow()
             // NOTE: hotkey monitors are intentionally NOT rebuilt here. Only applyHotkey changes the
             // hotkey, so rebuilding on every save (model select, download completion, launch defaults)
             // was needless churn — and worse, teardownHotkeyHandling resets the gesture state machine,
