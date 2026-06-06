@@ -101,6 +101,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var isModelDownloadInProgress = false
     private var downloadingModelID: String?
     private var latestStatusText = ""
+    private var activeOperationGeneration = ActiveOperationGeneration()
     private var cachedAccessibilityAuthorized = false
     private var hasPromptedAccessibilityForHotkeyAttempt = false
 
@@ -240,6 +241,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         teardownHotkeyHandling()
         isCapturingHotkey = true
+        activeOperationGeneration.beginActiveOperation()
         refreshSettingsRows()
         runtime.overlayController.setState(.hotkeyCapture)
         updateStatusIcon()
@@ -907,6 +909,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         do {
             try runtime.audioCaptureService.startCapture()
             recordingOrigin = origin
+            activeOperationGeneration.beginActiveOperation()
             updateRecordingActionRows()
             scheduleSafetyStopTimer()
             runtime.overlayController.setState(.recording)
@@ -951,6 +954,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let settings = runtime.settingsStore.load()
         let runtime = self.runtime
         let insertionTargetApp = self.insertionTargetApp
+        let operationGeneration = activeOperationGeneration.current
 
         Task { [weak self] in
             defer { try? FileManager.default.removeItem(at: audioURL) }
@@ -966,7 +970,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 let result = try await runtime.whisperProvider.transcribe(request)
                 let correctedText = runtime.dictionaryStore.apply(to: result.text)
                 await self?.pasteToTargetApp(correctedText, target: insertionTargetApp)
-                await self?.handleTranscriptionSuccess(latencyMS: result.latencyMS, transcript: correctedText)
+                await self?.handleTranscriptionSuccess(
+                    latencyMS: result.latencyMS,
+                    transcript: correctedText,
+                    operationGeneration: operationGeneration
+                )
             } catch {
                 await self?.handleTranscriptionFailure(error, reason: reason)
             }
@@ -1335,6 +1343,15 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
+    private var hasActiveOperation: Bool {
+        switch runtime.overlayController.state {
+        case .idle:
+            return false
+        case .hotkeyCapture, .recording, .transcribing:
+            return true
+        }
+    }
+
     private func scheduleSafetyStopTimer() {
         recordingSafetyTimer?.invalidate()
         recordingSafetyTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: false) { [weak self] _ in
@@ -1401,13 +1418,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @MainActor
-    private func handleTranscriptionSuccess(latencyMS: Int, transcript: String) async {
-        runtime.overlayController.setState(.idle)
-        updateStatusIcon()
-        if latencyMS >= 1_000 {
-            applyStatus(String(format: "Done (%.1fs)", Double(latencyMS) / 1_000))
-        } else {
-            applyStatus("Done (\(latencyMS)ms)")
+    private func handleTranscriptionSuccess(
+        latencyMS: Int,
+        transcript: String,
+        operationGeneration: UInt64
+    ) async {
+        if operationGeneration == activeOperationGeneration.current {
+            runtime.overlayController.setState(.idle)
+            updateStatusIcon()
+            if latencyMS >= 1_000 {
+                applyStatus(String(format: "Done (%.1fs)", Double(latencyMS) / 1_000))
+            } else {
+                applyStatus("Done (\(latencyMS)ms)")
+            }
         }
 
         let coordinator = transcriptHistoryCoordinator
@@ -1420,8 +1443,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         } catch {
             refreshHistoryMenu()
             refreshPreferencesWindow()
-            applyStatus("History unavailable: \(describe(error))", autoClear: false)
-            runtime.overlayController.showTransientMessage("Transcript history could not be saved")
+            if activeOperationGeneration.shouldPresentDelayedFailure(
+                for: operationGeneration,
+                hasActiveOperation: hasActiveOperation
+            ) {
+                applyStatus("History unavailable: \(describe(error))", autoClear: false)
+                runtime.overlayController.showTransientMessage("Transcript history could not be saved")
+            }
         }
     }
 
