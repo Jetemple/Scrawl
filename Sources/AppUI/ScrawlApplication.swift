@@ -102,6 +102,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var downloadingModelID: String?
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
+    private var historyActionGeneration: UInt64 = 0
+    private let historyActionQueue = DispatchQueue(label: "Scrawl.HistoryActions", qos: .utility)
+    private let dictionaryActionQueue = DispatchQueue(label: "Scrawl.DictionaryActions", qos: .utility)
     private var cachedAccessibilityAuthorized = false
     private var hasPromptedAccessibilityForHotkeyAttempt = false
 
@@ -201,6 +204,21 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 },
                 requestAccessibility: { [weak self] in
                     self?.requestAccessibilityPermission(nil)
+                },
+                setTranscriptHistoryEnabled: { [weak self] enabled in
+                    self?.setTranscriptHistoryEnabled(enabled)
+                },
+                copyTranscript: { [weak self] id in
+                    self?.copyTranscript(id: id)
+                },
+                repasteTranscript: { [weak self] id in
+                    self?.repasteTranscript(id: id)
+                },
+                deleteTranscripts: { [weak self] ids in
+                    self?.deleteTranscripts(ids: ids)
+                },
+                addDictionaryEntry: { [weak self] wrong, correct, completion in
+                    self?.addDictionaryEntry(wrong: wrong, correct: correct, completion: completion)
                 }
             )
         )
@@ -229,9 +247,116 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 microphoneStatus: runtime.permissionManager.microphoneStatus(),
                 accessibilityStatus: runtime.permissionManager.accessibilityStatus(),
                 isCapturingHotkey: isCapturingHotkey,
-                isModelDownloadInProgress: isModelDownloadInProgress
+                isModelDownloadInProgress: isModelDownloadInProgress,
+                transcriptHistory: runtime.transcriptHistoryStore.records(),
+                transcriptHistoryLoadErrorDescription: runtime.transcriptHistoryStore.loadErrorDescription,
+                dictionaryEntries: runtime.dictionaryStore.entries()
             )
         )
+    }
+
+    private func setTranscriptHistoryEnabled(_ enabled: Bool) {
+        if !enabled {
+            let alert = NSAlert()
+            alert.alertStyle = .critical
+            alert.messageText = "Turn Off Transcript History?"
+            alert.informativeText = "This permanently deletes all saved transcripts on this Mac."
+            alert.addButton(withTitle: "Turn Off and Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                refreshPreferencesWindow()
+                return
+            }
+        }
+
+        historyActionGeneration &+= 1
+        let generation = historyActionGeneration
+        let coordinator = transcriptHistoryCoordinator
+        historyActionQueue.async { [weak self] in
+            let result = Result { try coordinator.setEnabled(enabled) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshHistoryMenu()
+                self.refreshPreferencesWindow()
+                guard generation == self.historyActionGeneration else { return }
+                switch result {
+                case .success:
+                    self.setStatus(enabled ? "Transcript history enabled" : "Transcript history disabled and deleted")
+                case let .failure(error):
+                    self.presentHistoryFailure("Could not update transcript history", error: error)
+                }
+            }
+        }
+    }
+
+    private func copyTranscript(id: UUID) {
+        guard let record = runtime.transcriptHistoryStore.records().first(where: { $0.id == id }) else {
+            setStatus("Transcript not found")
+            refreshPreferencesWindow()
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(record.text, forType: .string)
+        setStatus("Copied transcript")
+    }
+
+    private func repasteTranscript(id: UUID) {
+        guard let record = runtime.transcriptHistoryStore.records().first(where: { $0.id == id }) else {
+            setStatus("Transcript not found")
+            refreshPreferencesWindow()
+            return
+        }
+        Task { [weak self] in
+            await self?.pasteToPreviousApp(record.text)
+            await self?.setStatusOnMain("Repasted transcript")
+        }
+    }
+
+    private func deleteTranscripts(ids: Set<UUID>) {
+        historyActionGeneration &+= 1
+        let generation = historyActionGeneration
+        let store = runtime.transcriptHistoryStore
+        historyActionQueue.async { [weak self] in
+            let result = Result { try store.delete(ids: ids) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshHistoryMenu()
+                self.refreshPreferencesWindow()
+                guard generation == self.historyActionGeneration else { return }
+                switch result {
+                case .success:
+                    self.setStatus("Deleted transcript")
+                case let .failure(error):
+                    self.presentHistoryFailure("Could not delete transcript", error: error)
+                }
+            }
+        }
+    }
+
+    private func addDictionaryEntry(
+        wrong: String,
+        correct: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        let store = runtime.dictionaryStore
+        dictionaryActionQueue.async { [weak self] in
+            let result = Result { try store.addOrReplace(wrong: wrong, correct: correct) }
+            DispatchQueue.main.async {
+                self?.refreshPreferencesWindow()
+                completion(result)
+            }
+        }
+    }
+
+    private func presentHistoryFailure(_ title: String, error: Error) {
+        let description = describe(error)
+        setStatus("History unavailable: \(description)", autoClear: false)
+        runtime.overlayController.showTransientMessage(title)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = description
+        alert.runModal()
     }
 
     private func beginHotkeyCapture() {

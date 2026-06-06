@@ -1,5 +1,8 @@
 import AppKit
+import DictionaryStore
 @testable import AppUI
+import SettingsStore
+import TranscriptHistoryStore
 import XCTest
 
 final class PreferencesWindowControllerTests: XCTestCase {
@@ -73,6 +76,86 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryPageShowsDisabledAndUnavailableStates() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        controller.update(snapshot: makeSnapshot(isHistoryEnabled: false))
+        XCTAssertEqual(controller.historyState, .disabled)
+
+        controller.update(snapshot: makeSnapshot(historyLoadErrorDescription: "corrupt"))
+        XCTAssertEqual(controller.historyState, .unavailable)
+    }
+
+    @MainActor
+    func testHistoryPageFiltersAndFallsBackToFirstVisibleSelection() {
+        let first = TranscriptRecord(id: UUID(), createdAt: Date(timeIntervalSince1970: 2), text: "Swift notes")
+        let second = TranscriptRecord(id: UUID(), createdAt: Date(timeIntervalSince1970: 1), text: "Kubernetes notes")
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(records: [first, second]))
+        controller.selectSection(.history)
+
+        XCTAssertEqual(controller.historySelectedRecordID, first.id)
+        controller.setHistorySearchQuery("kubernetes")
+
+        XCTAssertEqual(controller.historyVisibleRecordIDs, [second.id])
+        XCTAssertEqual(controller.historySelectedRecordID, second.id)
+
+        controller.setHistorySearchQuery("missing")
+        XCTAssertEqual(controller.historyState, .noSearchResults)
+        XCTAssertNil(controller.historySelectedRecordID)
+
+        controller.setHistorySearchQuery("")
+        XCTAssertEqual(controller.historyState, .records)
+        XCTAssertEqual(controller.historySelectedRecordID, first.id)
+    }
+
+    @MainActor
+    func testHistoryAddDictionaryRequiresSelectedText() {
+        let record = TranscriptRecord(id: UUID(), createdAt: .now, text: "Kubernetes notes")
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(records: [record]))
+
+        XCTAssertFalse(controller.isHistoryAddDictionaryEnabled)
+        controller.selectHistoryText(range: NSRange(location: 0, length: 10))
+        XCTAssertTrue(controller.isHistoryAddDictionaryEnabled)
+    }
+
+    @MainActor
+    func testHistoryPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
+        controller.update(snapshot: makeSnapshot(records: [
+            TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")
+        ]))
+        controller.selectSection(.history)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(controller.visibleSectionHasAmbiguousLayout)
+        XCTAssertTrue(controller.isVisibleSectionWithinContentBounds)
+    }
+
+    @MainActor
+    private func makeSnapshot(
+        isHistoryEnabled: Bool = true,
+        historyLoadErrorDescription: String? = nil,
+        records: [TranscriptRecord] = []
+    ) -> PreferencesWindowController.Snapshot {
+        PreferencesWindowController.Snapshot(
+            settings: AppSettings(isTranscriptHistoryEnabled: isHistoryEnabled),
+            downloadableModels: [],
+            modelRows: [],
+            microphoneStatus: .notDetermined,
+            accessibilityStatus: .notDetermined,
+            isCapturingHotkey: false,
+            isModelDownloadInProgress: false,
+            transcriptHistory: records,
+            transcriptHistoryLoadErrorDescription: historyLoadErrorDescription,
+            dictionaryEntries: []
+        )
+    }
+
+    @MainActor
     private func makeActions() -> PreferencesWindowController.Actions {
         PreferencesWindowController.Actions(
             selectModel: { _ in },
@@ -80,7 +163,12 @@ final class PreferencesWindowControllerTests: XCTestCase {
             deleteSelectedModel: {},
             setHotkey: {},
             requestMicrophone: {},
-            requestAccessibility: {}
+            requestAccessibility: {},
+            setTranscriptHistoryEnabled: { _ in },
+            copyTranscript: { _ in },
+            repasteTranscript: { _ in },
+            deleteTranscripts: { _ in },
+            addDictionaryEntry: { _, _, completion in completion(.success(())) }
         )
     }
 }

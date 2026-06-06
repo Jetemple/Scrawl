@@ -1,6 +1,8 @@
 import AppKit
+import DictionaryStore
 import Permissions
 import SettingsStore
+import TranscriptHistoryStore
 
 final class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     struct Actions {
@@ -10,6 +12,11 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let setHotkey: () -> Void
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
+        let setTranscriptHistoryEnabled: (Bool) -> Void
+        let copyTranscript: (UUID) -> Void
+        let repasteTranscript: (UUID) -> Void
+        let deleteTranscripts: (Set<UUID>) -> Void
+        let addDictionaryEntry: (String, String, @escaping (Result<Void, Error>) -> Void) -> Void
     }
 
     struct Snapshot {
@@ -20,6 +27,9 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let accessibilityStatus: PermissionStatus
         let isCapturingHotkey: Bool
         let isModelDownloadInProgress: Bool
+        let transcriptHistory: [TranscriptRecord]
+        let transcriptHistoryLoadErrorDescription: String?
+        let dictionaryEntries: [DictionaryEntry]
     }
 
     enum Section: Int, CaseIterable {
@@ -56,6 +66,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     private let generalView: PreferencesGeneralView
     private let modelsView: PreferencesModelsView
     private let keyboardView: PreferencesKeyboardView
+    private let historyView: PreferencesHistoryView
     private let aboutView: PreferencesAboutView
     private let sidebarTable = NSTableView()
     private let contentContainer = PreferencesPageSupport.makeContentBackground()
@@ -84,6 +95,11 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         window?.contentView?.containsSplitView ?? false
     }
 
+    var historyState: PreferencesHistoryView.State { historyView.state }
+    var historyVisibleRecordIDs: [UUID] { historyView.visibleRecordIDs }
+    var historySelectedRecordID: UUID? { historyView.selectedRecordID }
+    var isHistoryAddDictionaryEnabled: Bool { historyView.isAddDictionaryEnabled }
+
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
             requestMicrophone: actions.requestMicrophone,
@@ -95,6 +111,13 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             deleteSelectedModel: actions.deleteSelectedModel
         )
         keyboardView = PreferencesKeyboardView(setHotkey: actions.setHotkey)
+        historyView = PreferencesHistoryView(actions: .init(
+            setEnabled: actions.setTranscriptHistoryEnabled,
+            copy: actions.copyTranscript,
+            repaste: actions.repasteTranscript,
+            delete: actions.deleteTranscripts,
+            addDictionaryEntry: actions.addDictionaryEntry
+        ))
         aboutView = PreferencesAboutView {
             guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
             NSWorkspace.shared.open(url)
@@ -144,6 +167,11 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             isDownloadInProgress: snapshot.isModelDownloadInProgress
         )
         keyboardView.update(hotkey: snapshot.settings.hotkey, isCapturing: snapshot.isCapturingHotkey)
+        historyView.update(
+            records: snapshot.transcriptHistory,
+            isEnabled: snapshot.settings.isTranscriptHistoryEnabled,
+            loadErrorDescription: snapshot.transcriptHistoryLoadErrorDescription
+        )
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -186,15 +214,20 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         showSelectedSection()
     }
 
+    func setHistorySearchQuery(_ query: String) {
+        historyView.setSearchQuery(query)
+    }
+
+    func selectHistoryText(range: NSRange) {
+        historyView.selectText(range: range)
+    }
+
     private func makeContentView() -> NSView {
         sectionViews = [
             .general: generalView,
             .models: modelsView,
             .keyboard: keyboardView,
-            .history: PreferencesPageSupport.makeEmptyState(
-                title: "No transcript history yet",
-                detail: "Saved transcripts will appear here."
-            ),
+            .history: historyView,
             .dictionary: PreferencesPageSupport.makeEmptyState(
                 title: "No dictionary entries yet",
                 detail: "Custom heard-text replacements will appear here."
