@@ -58,10 +58,31 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     private let keyboardView: PreferencesKeyboardView
     private let aboutView: PreferencesAboutView
     private let sidebarTable = NSTableView()
-    private let contentContainer = NSView()
+    private let contentContainer = PreferencesPageSupport.makeContentBackground()
     private var sectionViews: [Section: NSView] = [:]
     private var selectedSection = Section.general
     private var didCenterWindow = false
+
+    var visibleSection: Section {
+        selectedSection
+    }
+
+    var isVisibleSectionWithinContentBounds: Bool {
+        guard let view = sectionViews[selectedSection] else { return false }
+        return contentContainer.bounds.contains(view.frame)
+    }
+
+    var visibleSectionHasAmbiguousLayout: Bool {
+        sectionViews[selectedSection]?.hasAmbiguousLayout ?? true
+    }
+
+    var isVisibleSectionCriticalContentWithinBounds: Bool {
+        selectedSection != .models || modelsView.isCriticalContentWithinBounds
+    }
+
+    var hasDraggableSidebarDivider: Bool {
+        window?.contentView?.containsSplitView ?? false
+    }
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
@@ -159,6 +180,12 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         showSelectedSection()
     }
 
+    func selectSection(_ section: Section) {
+        selectedSection = section
+        sidebarTable.selectRowIndexes(IndexSet(integer: section.rawValue), byExtendingSelection: false)
+        showSelectedSection()
+    }
+
     private func makeContentView() -> NSView {
         sectionViews = [
             .general: generalView,
@@ -175,17 +202,11 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             .about: aboutView
         ]
 
-        let splitView = NSSplitView()
-        splitView.isVertical = true
-        splitView.dividerStyle = .thin
-        splitView.translatesAutoresizingMaskIntoConstraints = false
-
         let sidebar = makeSidebar()
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
-        contentContainer.wantsLayer = true
-        contentContainer.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        splitView.addArrangedSubview(sidebar)
-        splitView.addArrangedSubview(contentContainer)
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
 
         for (section, view) in sectionViews {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -200,13 +221,23 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         }
 
         let root = NSView()
-        root.addSubview(splitView)
+        sidebar.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(sidebar)
+        root.addSubview(divider)
+        root.addSubview(contentContainer)
         NSLayoutConstraint.activate([
             sidebar.widthAnchor.constraint(equalToConstant: 150),
-            splitView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            splitView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            splitView.topAnchor.constraint(equalTo: root.topAnchor),
-            splitView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            sidebar.topAnchor.constraint(equalTo: root.topAnchor),
+            sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            divider.topAnchor.constraint(equalTo: root.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            contentContainer.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
+            contentContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            contentContainer.topAnchor.constraint(equalTo: root.topAnchor),
+            contentContainer.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
         return root
     }
@@ -249,5 +280,11 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         for (section, view) in sectionViews {
             view.isHidden = section != selectedSection
         }
+    }
+}
+
+private extension NSView {
+    var containsSplitView: Bool {
+        self is NSSplitView || subviews.contains(where: \.containsSplitView)
     }
 }

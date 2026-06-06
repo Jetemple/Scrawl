@@ -7,7 +7,14 @@ final class PreferencesModelsView: NSView {
     private var downloadableModelsByID: [String: DownloadableModel] = [:]
 
     private let modelsStack = NSStackView()
+    private let listView = PreferencesPageSupport.makeRoundedBackground()
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
+
+    var isCriticalContentWithinBounds: Bool {
+        [listView, deleteButton].allSatisfy {
+            bounds.contains(convert($0.bounds, from: $0))
+        }
+    }
 
     init(
         selectModel: @escaping (String) -> Void,
@@ -34,15 +41,14 @@ final class PreferencesModelsView: NSView {
         scrollView.borderType = .noBorder
         scrollView.documentView = documentView
 
-        let list = PreferencesPageSupport.makeRoundedBackground()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        list.addSubview(scrollView)
+        listView.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            list.heightAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            scrollView.leadingAnchor.constraint(equalTo: list.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: list.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: list.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: list.bottomAnchor),
+            listView.heightAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            scrollView.leadingAnchor.constraint(equalTo: listView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: listView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: listView.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: listView.bottomAnchor),
             modelsStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
             modelsStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
             modelsStack.topAnchor.constraint(equalTo: documentView.topAnchor),
@@ -57,9 +63,10 @@ final class PreferencesModelsView: NSView {
         let page = PreferencesPageSupport.makePage(
             title: "Models",
             description: "Select an installed model or download another.",
-            content: [list, PreferencesPageSupport.makeButtonRow(deleteButton)]
+            content: [listView, PreferencesPageSupport.makeButtonRow(deleteButton)]
         )
         PreferencesPageSupport.fill(self, with: page)
+        update(rows: [], downloadableModels: [], isDownloadInProgress: false)
     }
 
     @available(*, unavailable)

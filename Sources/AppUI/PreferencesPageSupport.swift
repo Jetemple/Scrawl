@@ -1,5 +1,49 @@
 import AppKit
 
+final class PreferencesBackgroundView: NSView {
+    enum Style {
+        case content
+        case group
+    }
+
+    private let style: Style
+
+    init(style: Style) {
+        self.style = style
+        super.init(frame: .zero)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var wantsUpdateLayer: Bool {
+        true
+    }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            switch style {
+            case .content:
+                layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+                layer?.borderWidth = 0
+            case .group:
+                layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+                layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
+                layer?.borderWidth = 1
+                layer?.cornerRadius = 8
+            }
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+}
+
 enum PreferencesPageSupport {
     static func fill(_ container: NSView, with view: NSView) {
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -19,8 +63,11 @@ enum PreferencesPageSupport {
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(makePageHeader(title: title, description: description))
-        content.forEach(stack.addArrangedSubview)
-        stack.addArrangedSubview(NSView())
+        content.forEach {
+            $0.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            stack.addArrangedSubview($0)
+            $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
 
         let container = NSView()
         container.addSubview(stack)
@@ -28,7 +75,7 @@ enum PreferencesPageSupport {
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 28),
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -28),
             stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -24)
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -24)
         ])
         return container
     }
@@ -108,13 +155,11 @@ enum PreferencesPageSupport {
     }
 
     static func makeRoundedBackground() -> NSView {
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.cornerRadius = 8
-        view.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
-        view.layer?.borderWidth = 1
-        return view
+        PreferencesBackgroundView(style: .group)
+    }
+
+    static func makeContentBackground() -> NSView {
+        PreferencesBackgroundView(style: .content)
     }
 
     static func configureSecondaryButton(_ button: NSButton) {
@@ -123,9 +168,15 @@ enum PreferencesPageSupport {
     }
 
     static func makeButtonRow(_ button: NSButton) -> NSView {
-        let row = NSStackView(views: [button, NSView()])
-        row.orientation = .horizontal
-        row.alignment = .centerY
+        let row = NSView()
+        button.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            button.topAnchor.constraint(equalTo: row.topAnchor),
+            button.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+            button.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor)
+        ])
         return row
     }
 
