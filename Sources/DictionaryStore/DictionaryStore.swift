@@ -12,7 +12,7 @@ public struct DictionaryEntry: Codable, Equatable, Sendable {
 
 public protocol DictionaryStoring: Sendable {
     func entries() -> [DictionaryEntry]
-    func save(_ entries: [DictionaryEntry]) throws
+    func mutateEntries(_ mutation: (inout [DictionaryEntry]) -> Void) throws
     func apply(to text: String) -> String
 }
 
@@ -24,22 +24,23 @@ public extension DictionaryStoring {
             return
         }
 
-        var current = entries()
-        if let index = current.firstIndex(where: { $0.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame }) {
-            current[index] = DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect)
-        } else {
-            current.append(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect))
+        try mutateEntries { current in
+            if let index = current.firstIndex(where: { $0.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame }) {
+                current[index] = DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect)
+            } else {
+                current.append(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect))
+            }
         }
-        try save(current)
     }
 
     func delete(wrongValues: Set<String>) throws {
-        let remaining = entries().filter { entry in
-            !wrongValues.contains { wrongValue in
-                entry.wrong.caseInsensitiveCompare(wrongValue) == .orderedSame
+        try mutateEntries { current in
+            current.removeAll { entry in
+                wrongValues.contains { wrongValue in
+                    entry.wrong.caseInsensitiveCompare(wrongValue) == .orderedSame
+                }
             }
         }
-        try save(remaining)
     }
 
     func replace(originalWrong: String, wrong: String, correct: String) throws {
@@ -50,12 +51,25 @@ public extension DictionaryStoring {
             return
         }
 
-        var current = entries().filter { entry in
-            entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) != .orderedSame
-                && entry.wrong.caseInsensitiveCompare(trimmedWrong) != .orderedSame
+        try mutateEntries { current in
+            let originalIndex = current.firstIndex {
+                $0.wrong.caseInsensitiveCompare(trimmedOriginalWrong) == .orderedSame
+            }
+            let collisionIndex = current.firstIndex {
+                $0.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame
+            }
+            let preferredIndex = originalIndex ?? collisionIndex ?? current.endIndex
+            let insertionIndex = current[..<preferredIndex].count { entry in
+                entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) != .orderedSame
+                    && entry.wrong.caseInsensitiveCompare(trimmedWrong) != .orderedSame
+            }
+
+            current.removeAll { entry in
+                entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) == .orderedSame
+                    || entry.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame
+            }
+            current.insert(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect), at: insertionIndex)
         }
-        current.append(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect))
-        try save(current)
     }
 }
 
@@ -73,10 +87,10 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
         return storedEntries
     }
 
-    public func save(_ entries: [DictionaryEntry]) throws {
+    public func mutateEntries(_ mutation: (inout [DictionaryEntry]) -> Void) throws {
         lock.lock()
         defer { lock.unlock() }
-        storedEntries = entries
+        mutation(&storedEntries)
     }
 
     public func apply(to text: String) -> String {
@@ -105,16 +119,19 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
         return cachedEntries
     }
 
-    public func save(_ entries: [DictionaryEntry]) throws {
+    public func mutateEntries(_ mutation: (inout [DictionaryEntry]) -> Void) throws {
         lock.lock()
         defer { lock.unlock() }
+
+        var updatedEntries = cachedEntries
+        mutation(&updatedEntries)
 
         let directory = fileURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let data = try JSONEncoder().encode(entries)
+        let data = try JSONEncoder().encode(updatedEntries)
         try data.write(to: fileURL, options: .atomic)
-        cachedEntries = entries
+        cachedEntries = updatedEntries
     }
 
     public func apply(to text: String) -> String {
