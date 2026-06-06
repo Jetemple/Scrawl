@@ -2,28 +2,59 @@
 import XCTest
 
 final class ActiveOperationGenerationTests: XCTestCase {
-    func testDelayedFailureMayPresentWhenNoNewerActiveOperationStarted() {
-        let generation = ActiveOperationGeneration()
-        let token = generation.current
+    func testDelayedFailureMayPresentWhileOriginatingStatusIsStillCurrent() {
+        var generation = ActiveOperationGeneration()
+        let statusToken = generation.applyStatus()
 
-        XCTAssertTrue(generation.shouldPresentDelayedFailure(for: token, hasActiveOperation: false))
+        XCTAssertTrue(
+            generation.shouldPresentDelayedFailure(
+                for: generation.current,
+                originatingStatusGeneration: statusToken,
+                hasActiveOperation: false
+            )
+        )
     }
 
     func testDelayedFailureIsSuppressedAfterNewerActiveOperationStarts() {
         var generation = ActiveOperationGeneration()
-        let token = generation.current
+        let operationToken = generation.current
+        let statusToken = generation.applyStatus()
 
         generation.beginActiveOperation()
 
-        XCTAssertFalse(generation.shouldPresentDelayedFailure(for: token, hasActiveOperation: false))
+        XCTAssertFalse(
+            generation.shouldPresentDelayedFailure(
+                for: operationToken,
+                originatingStatusGeneration: statusToken,
+                hasActiveOperation: false
+            )
+        )
+    }
+
+    func testDelayedFailureIsSuppressedAfterNewerNonActiveStatus() {
+        var generation = ActiveOperationGeneration()
+        let operationToken = generation.current
+        let originatingStatusToken = generation.applyStatus()
+
+        _ = generation.applyStatus()
+
+        XCTAssertFalse(
+            generation.shouldPresentDelayedFailure(
+                for: operationToken,
+                originatingStatusGeneration: originatingStatusToken,
+                hasActiveOperation: false
+            )
+        )
     }
 
     func testDelayedFailureIsSuppressedWhileAnActiveOperationIsVisible() {
-        let generation = ActiveOperationGeneration()
+        var generation = ActiveOperationGeneration()
+        let statusToken = generation.applyStatus()
 
         XCTAssertFalse(
             generation.shouldPresentDelayedFailure(
                 for: generation.current,
+                originatingStatusGeneration: statusToken,
                 hasActiveOperation: true
             )
         )
@@ -33,18 +64,22 @@ final class ActiveOperationGenerationTests: XCTestCase {
         var generation = ActiveOperationGeneration()
         generation.beginActiveOperation()
         let firstOperationToken = generation.current
+        let firstStatusToken = generation.applyStatus()
 
         generation.beginActiveOperation()
+        let secondStatusToken = generation.applyStatus()
 
         XCTAssertFalse(
             generation.shouldPresentDelayedFailure(
                 for: firstOperationToken,
+                originatingStatusGeneration: firstStatusToken,
                 hasActiveOperation: false
             )
         )
         XCTAssertTrue(
             generation.shouldPresentDelayedFailure(
                 for: generation.current,
+                originatingStatusGeneration: secondStatusToken,
                 hasActiveOperation: false
             )
         )

@@ -1229,7 +1229,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @MainActor
-    private func applyStatus(_ text: String, autoClear: Bool = true) {
+    @discardableResult
+    private func applyStatus(_ text: String, autoClear: Bool = true) -> UInt64 {
+        let statusGeneration = activeOperationGeneration.applyStatus()
         statusAutoClearTimer?.invalidate()
         statusAutoClearTimer = nil
         latestStatusText = text
@@ -1237,7 +1239,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         if text == "Idle" {
             statusLineItem?.isHidden = true
             statusLineItem?.title = "Status: Idle"
-            return
+            return statusGeneration
         }
 
         statusLineItem?.isHidden = false
@@ -1255,6 +1257,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         #if DEBUG
         print("[Scrawl] \(text)")
         #endif
+        return statusGeneration
     }
 
     @MainActor
@@ -1423,14 +1426,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         transcript: String,
         operationGeneration: UInt64
     ) async {
+        let originatingStatusGeneration: UInt64?
         if operationGeneration == activeOperationGeneration.current {
             runtime.overlayController.setState(.idle)
             updateStatusIcon()
             if latencyMS >= 1_000 {
-                applyStatus(String(format: "Done (%.1fs)", Double(latencyMS) / 1_000))
+                originatingStatusGeneration = applyStatus(
+                    String(format: "Done (%.1fs)", Double(latencyMS) / 1_000)
+                )
             } else {
-                applyStatus("Done (\(latencyMS)ms)")
+                originatingStatusGeneration = applyStatus("Done (\(latencyMS)ms)")
             }
+        } else {
+            originatingStatusGeneration = nil
         }
 
         let coordinator = transcriptHistoryCoordinator
@@ -1443,10 +1451,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         } catch {
             refreshHistoryMenu()
             refreshPreferencesWindow()
-            if activeOperationGeneration.shouldPresentDelayedFailure(
+            if let originatingStatusGeneration,
+               activeOperationGeneration.shouldPresentDelayedFailure(
                 for: operationGeneration,
+                originatingStatusGeneration: originatingStatusGeneration,
                 hasActiveOperation: hasActiveOperation
-            ) {
+               ) {
                 applyStatus("History unavailable: \(describe(error))", autoClear: false)
                 runtime.overlayController.showTransientMessage("Transcript history could not be saved")
             }
