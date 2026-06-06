@@ -12,64 +12,73 @@ public struct DictionaryEntry: Codable, Equatable, Sendable {
 
 public protocol DictionaryStoring: Sendable {
     func entries() -> [DictionaryEntry]
-    func mutateEntries(_ mutation: (inout [DictionaryEntry]) -> Void) throws
+    func save(_ entries: [DictionaryEntry]) throws
+    func addOrReplace(wrong: String, correct: String) throws
+    func delete(wrongValues: Set<String>) throws
+    func replace(originalWrong: String, wrong: String, correct: String) throws
     func apply(to text: String) -> String
 }
 
-public extension DictionaryStoring {
-    func addOrReplace(wrong: String, correct: String) throws {
+private enum DictionaryEntriesMutation {
+    static func addingOrReplacing(
+        entries: [DictionaryEntry],
+        wrong: String,
+        correct: String
+    ) -> [DictionaryEntry]? {
         let trimmedWrong = wrong.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedCorrect = correct.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedWrong.isEmpty, !trimmedCorrect.isEmpty else {
-            return
+            return nil
         }
 
-        try mutateEntries { current in
-            if let index = current.firstIndex(where: { $0.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame }) {
-                current[index] = DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect)
-            } else {
-                current.append(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect))
+        var updated = entries
+        if let index = updated.firstIndex(where: { $0.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame }) {
+            updated[index] = DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect)
+        } else {
+            updated.append(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect))
+        }
+        return updated
+    }
+
+    static func deleting(entries: [DictionaryEntry], wrongValues: Set<String>) -> [DictionaryEntry] {
+        entries.filter { entry in
+            !wrongValues.contains { wrongValue in
+                entry.wrong.caseInsensitiveCompare(wrongValue) == .orderedSame
             }
         }
     }
 
-    func delete(wrongValues: Set<String>) throws {
-        try mutateEntries { current in
-            current.removeAll { entry in
-                wrongValues.contains { wrongValue in
-                    entry.wrong.caseInsensitiveCompare(wrongValue) == .orderedSame
-                }
-            }
-        }
-    }
-
-    func replace(originalWrong: String, wrong: String, correct: String) throws {
+    static func replacing(
+        entries: [DictionaryEntry],
+        originalWrong: String,
+        wrong: String,
+        correct: String
+    ) -> [DictionaryEntry]? {
         let trimmedOriginalWrong = originalWrong.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedWrong = wrong.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedCorrect = correct.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedOriginalWrong.isEmpty, !trimmedWrong.isEmpty, !trimmedCorrect.isEmpty else {
-            return
+            return nil
         }
 
-        try mutateEntries { current in
-            let originalIndex = current.firstIndex {
-                $0.wrong.caseInsensitiveCompare(trimmedOriginalWrong) == .orderedSame
-            }
-            let collisionIndex = current.firstIndex {
-                $0.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame
-            }
-            let preferredIndex = originalIndex ?? collisionIndex ?? current.endIndex
-            let insertionIndex = current[..<preferredIndex].count { entry in
-                entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) != .orderedSame
-                    && entry.wrong.caseInsensitiveCompare(trimmedWrong) != .orderedSame
-            }
-
-            current.removeAll { entry in
-                entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) == .orderedSame
-                    || entry.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame
-            }
-            current.insert(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect), at: insertionIndex)
+        let originalIndex = entries.firstIndex {
+            $0.wrong.caseInsensitiveCompare(trimmedOriginalWrong) == .orderedSame
         }
+        let collisionIndex = entries.firstIndex {
+            $0.wrong.caseInsensitiveCompare(trimmedWrong) == .orderedSame
+        }
+        let preferredIndex = originalIndex ?? collisionIndex ?? entries.endIndex
+        let insertionIndex = entries[..<preferredIndex].count { entry in
+            entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) != .orderedSame
+                && entry.wrong.caseInsensitiveCompare(trimmedWrong) != .orderedSame
+        }
+
+        var updated = entries.filter { entry in
+            entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) != .orderedSame
+                && entry.wrong.caseInsensitiveCompare(trimmedWrong) != .orderedSame
+        }
+        updated.insert(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect), at: insertionIndex)
+        return updated
     }
 }
 
@@ -87,15 +96,46 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
         return storedEntries
     }
 
-    public func mutateEntries(_ mutation: (inout [DictionaryEntry]) -> Void) throws {
+    public func save(_ entries: [DictionaryEntry]) throws {
         lock.lock()
         defer { lock.unlock() }
-        mutation(&storedEntries)
+        storedEntries = entries
+    }
+
+    public func addOrReplace(wrong: String, correct: String) throws {
+        mutateEntries {
+            DictionaryEntriesMutation.addingOrReplacing(entries: $0, wrong: wrong, correct: correct)
+        }
+    }
+
+    public func delete(wrongValues: Set<String>) throws {
+        mutateEntries {
+            DictionaryEntriesMutation.deleting(entries: $0, wrongValues: wrongValues)
+        }
+    }
+
+    public func replace(originalWrong: String, wrong: String, correct: String) throws {
+        mutateEntries {
+            DictionaryEntriesMutation.replacing(
+                entries: $0,
+                originalWrong: originalWrong,
+                wrong: wrong,
+                correct: correct
+            )
+        }
     }
 
     public func apply(to text: String) -> String {
         let entries = entries()
         return DictionaryReplacer.apply(entries: entries, to: text)
+    }
+
+    private func mutateEntries(_ mutation: ([DictionaryEntry]) -> [DictionaryEntry]?) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let updatedEntries = mutation(storedEntries) {
+            storedEntries = updatedEntries
+        }
     }
 }
 
@@ -119,24 +159,56 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
         return cachedEntries
     }
 
-    public func mutateEntries(_ mutation: (inout [DictionaryEntry]) -> Void) throws {
+    public func save(_ entries: [DictionaryEntry]) throws {
         lock.lock()
         defer { lock.unlock() }
+        try persist(entries)
+        cachedEntries = entries
+    }
 
-        var updatedEntries = cachedEntries
-        mutation(&updatedEntries)
+    public func addOrReplace(wrong: String, correct: String) throws {
+        try mutateEntries {
+            DictionaryEntriesMutation.addingOrReplacing(entries: $0, wrong: wrong, correct: correct)
+        }
+    }
 
-        let directory = fileURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    public func delete(wrongValues: Set<String>) throws {
+        try mutateEntries {
+            DictionaryEntriesMutation.deleting(entries: $0, wrongValues: wrongValues)
+        }
+    }
 
-        let data = try JSONEncoder().encode(updatedEntries)
-        try data.write(to: fileURL, options: .atomic)
-        cachedEntries = updatedEntries
+    public func replace(originalWrong: String, wrong: String, correct: String) throws {
+        try mutateEntries {
+            DictionaryEntriesMutation.replacing(
+                entries: $0,
+                originalWrong: originalWrong,
+                wrong: wrong,
+                correct: correct
+            )
+        }
     }
 
     public func apply(to text: String) -> String {
         let entries = entries()
         return DictionaryReplacer.apply(entries: entries, to: text)
+    }
+
+    private func mutateEntries(_ mutation: ([DictionaryEntry]) -> [DictionaryEntry]?) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let updatedEntries = mutation(cachedEntries) else {
+            return
+        }
+        try persist(updatedEntries)
+        cachedEntries = updatedEntries
+    }
+
+    private func persist(_ entries: [DictionaryEntry]) throws {
+        let directory = fileURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(entries)
+        try data.write(to: fileURL, options: .atomic)
     }
 
     private static func loadFromDisk(fileURL: URL) throws -> [DictionaryEntry] {

@@ -43,6 +43,17 @@ final class DictionaryReplacerTests: XCTestCase {
         XCTAssertTrue(store.entries().isEmpty)
     }
 
+    func testSaveRemainsAvailable() throws {
+        let store: any DictionaryStoring = InMemoryDictionaryStore()
+        let entries = [
+            DictionaryEntry(wrong: "wispr", correct: "Whisper"),
+        ]
+
+        try store.save(entries)
+
+        XCTAssertEqual(store.entries(), entries)
+    }
+
     func testDeleteRemovesMatchingWrongValuesCaseInsensitive() throws {
         let store = InMemoryDictionaryStore(entries: [
             DictionaryEntry(wrong: "wispr", correct: "Whisper"),
@@ -119,28 +130,15 @@ final class DictionaryReplacerTests: XCTestCase {
         ])
     }
 
-    func testConcurrentAddsUseAtomicMutationAndDoNotLoseEitherEntry() throws {
-        let store = CoordinatedDictionaryStore()
-        let firstFinished = expectation(description: "first add finished")
-        let secondFinished = expectation(description: "second add finished")
-        let secondStarted = DispatchSemaphore(value: 0)
+    func testConcurrentAddsDoNotLoseEntries() {
+        let store = InMemoryDictionaryStore()
+        let expectedWrongValues = Set((0..<200).map { "entry-\($0)" })
 
-        DispatchQueue.global().async {
-            try? store.addOrReplace(wrong: "alpha", correct: "Alpha")
-            firstFinished.fulfill()
+        DispatchQueue.concurrentPerform(iterations: expectedWrongValues.count) { index in
+            try! store.addOrReplace(wrong: "entry-\(index)", correct: "Entry \(index)")
         }
-        XCTAssertEqual(store.firstMutationStarted.wait(timeout: .now() + 1), .success)
 
-        DispatchQueue.global().async {
-            secondStarted.signal()
-            try? store.addOrReplace(wrong: "bravo", correct: "Bravo")
-            secondFinished.fulfill()
-        }
-        XCTAssertEqual(secondStarted.wait(timeout: .now() + 1), .success)
-        store.allowFirstMutation.signal()
-
-        wait(for: [firstFinished, secondFinished], timeout: 2)
-        XCTAssertEqual(Set(store.entries().map(\.wrong)), Set(["alpha", "bravo"]))
+        XCTAssertEqual(Set(store.entries().map(\.wrong)), expectedWrongValues)
     }
 
     func testFailedJSONMutationLeavesCacheUnchanged() throws {
@@ -158,35 +156,23 @@ final class DictionaryReplacerTests: XCTestCase {
             DictionaryEntry(wrong: "alpha", correct: "Alpha"),
         ])
     }
-}
 
-private final class CoordinatedDictionaryStore: DictionaryStoring, @unchecked Sendable {
-    let firstMutationStarted = DispatchSemaphore(value: 0)
-    let allowFirstMutation = DispatchSemaphore(value: 0)
+    func testFailedJSONSaveLeavesCacheUnchanged() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let fileURL = directory.appending(path: "dictionary.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-    private let lock = NSLock()
-    private var isFirstMutation = true
-    private var storedEntries: [DictionaryEntry] = []
+        let original = [
+            DictionaryEntry(wrong: "alpha", correct: "Alpha"),
+        ]
+        let store = JSONDictionaryStore(fileURL: fileURL)
+        try store.save(original)
+        try FileManager.default.removeItem(at: fileURL)
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: false)
 
-    func entries() -> [DictionaryEntry] {
-        lock.lock()
-        defer { lock.unlock() }
-        return storedEntries
-    }
-
-    func mutateEntries(_ mutation: (inout [DictionaryEntry]) -> Void) throws {
-        lock.lock()
-        defer { lock.unlock() }
-
-        if isFirstMutation {
-            isFirstMutation = false
-            firstMutationStarted.signal()
-            allowFirstMutation.wait()
-        }
-        mutation(&storedEntries)
-    }
-
-    func apply(to text: String) -> String {
-        DictionaryReplacer.apply(entries: entries(), to: text)
+        XCTAssertThrowsError(try store.save([
+            DictionaryEntry(wrong: "bravo", correct: "Bravo"),
+        ]))
+        XCTAssertEqual(store.entries(), original)
     }
 }
