@@ -1156,31 +1156,37 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         historySubmenu.removeAllItems()
 
-        guard runtime.settingsStore.load().isTranscriptHistoryEnabled else {
+        let state = PreferencesContentState.historyMenuState(
+            isEnabled: runtime.settingsStore.load().isTranscriptHistoryEnabled,
+            loadErrorDescription: runtime.transcriptHistoryStore.loadErrorDescription,
+            records: runtime.transcriptHistoryStore.records()
+        )
+
+        switch state {
+        case .disabled:
             let disabled = NSMenuItem(title: "Transcript history is off", action: nil, keyEquivalent: "")
             disabled.isEnabled = false
             historySubmenu.addItem(disabled)
-            return
-        }
-
-        let records = runtime.transcriptHistoryStore.records()
-        guard !records.isEmpty else {
+        case .unavailable:
+            let unavailable = NSMenuItem(title: "Transcript history unavailable", action: nil, keyEquivalent: "")
+            unavailable.isEnabled = false
+            historySubmenu.addItem(unavailable)
+        case .empty:
             let empty = NSMenuItem(title: "No transcripts yet", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             historySubmenu.addItem(empty)
-            return
-        }
-
-        for record in records.prefix(12) {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm:ss"
-            let prefix = formatter.string(from: record.createdAt)
-            let shortened = record.text.count > 70 ? String(record.text.prefix(67)) + "..." : record.text
-            let title = "[\(prefix)] \(shortened)"
-            let item = NSMenuItem(title: title, action: #selector(repasteTranscript(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = record.id.uuidString
-            historySubmenu.addItem(item)
+        case let .records(records):
+            for record in records {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "HH:mm:ss"
+                let prefix = formatter.string(from: record.createdAt)
+                let shortened = record.text.count > 70 ? String(record.text.prefix(67)) + "..." : record.text
+                let title = "[\(prefix)] \(shortened)"
+                let item = NSMenuItem(title: title, action: #selector(repasteTranscript(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = record.id.uuidString
+                historySubmenu.addItem(item)
+            }
         }
     }
 
@@ -1208,31 +1214,34 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         "Recording...", "Transcribing...", hotkeyCapturePrompt
     ]
 
-    private func setStatus(_ text: String) {
+    private func setStatus(_ text: String, autoClear: Bool = true) {
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            self?.applyStatus(text, autoClear: autoClear)
+        }
+    }
 
-            statusAutoClearTimer?.invalidate()
-            statusAutoClearTimer = nil
-            latestStatusText = text
+    @MainActor
+    private func applyStatus(_ text: String, autoClear: Bool = true) {
+        statusAutoClearTimer?.invalidate()
+        statusAutoClearTimer = nil
+        latestStatusText = text
 
-            if text == "Idle" {
-                statusLineItem?.isHidden = true
-                statusLineItem?.title = "Status: Idle"
-                return
-            }
+        if text == "Idle" {
+            statusLineItem?.isHidden = true
+            statusLineItem?.title = "Status: Idle"
+            return
+        }
 
-            statusLineItem?.isHidden = false
-            statusLineItem?.title = "Status: \(text)"
+        statusLineItem?.isHidden = false
+        statusLineItem?.title = "Status: \(text)"
 
-            let isOngoing = Self.ongoingStatuses.contains(text)
-                || text.hasPrefix("Downloading ")
-                || text.hasPrefix("Loading model:")
-                || text.hasPrefix("Transcribing with ")
-                || text.hasPrefix("Retrying on CPU")
-            if !isOngoing {
-                scheduleStatusAutoClear(after: text == "Done" ? 2.5 : 5.0)
-            }
+        let isOngoing = Self.ongoingStatuses.contains(text)
+            || text.hasPrefix("Downloading ")
+            || text.hasPrefix("Loading model:")
+            || text.hasPrefix("Transcribing with ")
+            || text.hasPrefix("Retrying on CPU")
+        if autoClear, !isOngoing {
+            scheduleStatusAutoClear(after: text == "Done" ? 2.5 : 5.0)
         }
 
         #if DEBUG
@@ -1261,7 +1270,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     @MainActor
     private func setStatusOnMain(_ text: String) {
-        setStatus(text)
+        applyStatus(text)
     }
 
     private func handleTranscriptionProgress(_ event: TranscriptionProgressEvent) {
@@ -1360,16 +1369,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         await pasteToTargetApp(text, target: lastExternalActiveApp)
     }
 
-    private func addTranscriptToHistory(_ text: String) {
-        do {
-            try transcriptHistoryCoordinator.add(text: text)
-            refreshHistoryMenu()
-            refreshPreferencesWindow()
-        } catch {
-            setStatus("History error: \(describe(error))")
-        }
-    }
-
     private func saveSettings(_ settings: AppSettings) {
         do {
             try runtime.settingsStore.save(settings)
@@ -1402,14 +1401,27 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @MainActor
-    private func handleTranscriptionSuccess(latencyMS: Int, transcript: String) {
+    private func handleTranscriptionSuccess(latencyMS: Int, transcript: String) async {
         runtime.overlayController.setState(.idle)
-        addTranscriptToHistory(transcript)
         updateStatusIcon()
         if latencyMS >= 1_000 {
-            setStatus(String(format: "Done (%.1fs)", Double(latencyMS) / 1_000))
+            applyStatus(String(format: "Done (%.1fs)", Double(latencyMS) / 1_000))
         } else {
-            setStatus("Done (\(latencyMS)ms)")
+            applyStatus("Done (\(latencyMS)ms)")
+        }
+
+        let coordinator = transcriptHistoryCoordinator
+        do {
+            try await Task.detached(priority: .utility) {
+                try coordinator.add(text: transcript)
+            }.value
+            refreshHistoryMenu()
+            refreshPreferencesWindow()
+        } catch {
+            refreshHistoryMenu()
+            refreshPreferencesWindow()
+            applyStatus("History unavailable: \(describe(error))", autoClear: false)
+            runtime.overlayController.showTransientMessage("Transcript history could not be saved")
         }
     }
 

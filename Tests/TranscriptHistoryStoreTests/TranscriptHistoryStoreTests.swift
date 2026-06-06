@@ -44,6 +44,25 @@ final class TranscriptHistoryStoreTests: XCTestCase {
         XCTAssertEqual(JSONTranscriptHistoryStore(fileURL: fileURL).records(), [record])
     }
 
+    func testInMemoryStoreHasNoLoadError() {
+        XCTAssertNil(InMemoryTranscriptHistoryStore().loadErrorDescription)
+    }
+
+    func testJSONStoreExposesInvalidFileLoadErrorUntilClearRecovers() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appending(path: "history.json")
+        try Data("not json".utf8).write(to: fileURL)
+        let store = JSONTranscriptHistoryStore(fileURL: fileURL)
+
+        XCTAssertNotNil(store.loadErrorDescription)
+
+        try store.clear()
+
+        XCTAssertNil(store.loadErrorDescription)
+    }
+
     func testJSONDeleteAndClearPersistAcrossInstances() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

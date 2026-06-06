@@ -5,6 +5,58 @@ import TranscriptHistoryStore
 import XCTest
 
 final class PreferencesContentStateTests: XCTestCase {
+    func testHistoryMenuStateIsDisabledBeforeConsideringStoreHealth() {
+        XCTAssertEqual(
+            PreferencesContentState.historyMenuState(
+                isEnabled: false,
+                loadErrorDescription: "corrupt",
+                records: []
+            ),
+            .disabled
+        )
+    }
+
+    func testHistoryMenuStateIsUnavailableForLoadFailure() {
+        XCTAssertEqual(
+            PreferencesContentState.historyMenuState(
+                isEnabled: true,
+                loadErrorDescription: "corrupt",
+                records: []
+            ),
+            .unavailable
+        )
+    }
+
+    func testHistoryMenuStateIsEmptyForHealthyEmptyStore() {
+        XCTAssertEqual(
+            PreferencesContentState.historyMenuState(
+                isEnabled: true,
+                loadErrorDescription: nil,
+                records: []
+            ),
+            .empty
+        )
+    }
+
+    func testHistoryMenuStateContainsNewestTwelveRecords() {
+        let records = (0..<15).map {
+            TranscriptRecord(
+                id: UUID(),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(15 - $0)),
+                text: "\($0)"
+            )
+        }
+
+        XCTAssertEqual(
+            PreferencesContentState.historyMenuState(
+                isEnabled: true,
+                loadErrorDescription: nil,
+                records: records
+            ),
+            .records(Array(records.prefix(12)))
+        )
+    }
+
     func testFilteredHistoryReturnsAllRecordsForEmptyQueryAndPreservesOrder() {
         let records = [
             record(id: "00000000-0000-0000-0000-000000000001", text: "First"),

@@ -34,7 +34,7 @@ public struct AppRuntime {
         audioCaptureService: AudioCaptureServing,
         textOutputTarget: TextOutputTarget,
         dictionaryStore: any DictionaryStoring,
-        transcriptHistoryStore: any TranscriptHistoryStoring,
+        transcriptHistoryStore: any TranscriptHistoryStoring = InMemoryTranscriptHistoryStore(),
         whisperProvider: any TranscriptionProvider,
         modelsDirectoryURL: URL,
         whisperExecutableURL: URL,

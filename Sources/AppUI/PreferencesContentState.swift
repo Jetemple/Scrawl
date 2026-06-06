@@ -3,6 +3,30 @@ import Foundation
 import TranscriptHistoryStore
 
 enum PreferencesContentState {
+    enum HistoryMenuState: Equatable {
+        case disabled
+        case unavailable
+        case empty
+        case records([TranscriptRecord])
+    }
+
+    static func historyMenuState(
+        isEnabled: Bool,
+        loadErrorDescription: String?,
+        records: [TranscriptRecord]
+    ) -> HistoryMenuState {
+        guard isEnabled else {
+            return .disabled
+        }
+        guard loadErrorDescription == nil else {
+            return .unavailable
+        }
+        guard !records.isEmpty else {
+            return .empty
+        }
+        return .records(Array(records.prefix(12)))
+    }
+
     static func filteredHistory(records: [TranscriptRecord], query: String) -> [TranscriptRecord] {
         let query = normalizedQuery(query)
         guard !query.isEmpty else {

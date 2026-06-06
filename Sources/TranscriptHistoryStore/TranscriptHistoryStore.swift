@@ -13,10 +13,15 @@ public struct TranscriptRecord: Codable, Equatable, Identifiable, Sendable {
 }
 
 public protocol TranscriptHistoryStoring: Sendable {
+    var loadErrorDescription: String? { get }
     func records() -> [TranscriptRecord]
     func add(_ record: TranscriptRecord) throws
     func delete(ids: Set<UUID>) throws
     func clear() throws
+}
+
+public extension TranscriptHistoryStoring {
+    var loadErrorDescription: String? { nil }
 }
 
 public final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @unchecked Sendable {
@@ -28,6 +33,8 @@ public final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @un
         self.limit = max(0, limit)
         cachedRecords = Self.normalize(records, limit: self.limit)
     }
+
+    public var loadErrorDescription: String? { nil }
 
     public func records() -> [TranscriptRecord] {
         lock.withLock {
@@ -93,6 +100,12 @@ public final class JSONTranscriptHistoryStore: TranscriptHistoryStoring, @unchec
         }
     }
 
+    public var loadErrorDescription: String? {
+        lock.withLock {
+            loadError.map(Self.describe)
+        }
+    }
+
     public func add(_ record: TranscriptRecord) throws {
         try mutate { records in
             records.append(record)
@@ -132,6 +145,13 @@ public final class JSONTranscriptHistoryStore: TranscriptHistoryStoring, @unchec
             cachedRecords = newRecords
             loadError = nil
         }
+    }
+
+    private static func describe(_ error: Error) -> String {
+        if let error = error as? LocalizedError, let description = error.errorDescription {
+            return description
+        }
+        return String(describing: error)
     }
 }
 
