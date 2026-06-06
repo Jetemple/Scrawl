@@ -2,6 +2,18 @@ import SettingsStore
 import XCTest
 
 final class AppSettingsDecodingTests: XCTestCase {
+    func testTranscriptHistoryIsEnabledByDefault() {
+        XCTAssertTrue(AppSettings().isTranscriptHistoryEnabled)
+    }
+
+    func testLegacySettingsDecodeWithTranscriptHistoryEnabled() throws {
+        let data = try XCTUnwrap("""
+        {"defaultModelID":"tiny.en","selectedModelID":"tiny.en","language":"en"}
+        """.data(using: .utf8))
+
+        XCTAssertTrue(try JSONDecoder().decode(AppSettings.self, from: data).isTranscriptHistoryEnabled)
+    }
+
     func testDecodesLegacyHotkeyDescription() throws {
         let json = """
         {

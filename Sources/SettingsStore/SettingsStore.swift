@@ -22,19 +22,22 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var language: String
     public var hotkey: HotkeySetting
     public var modelsDirectoryPath: String?
+    public var isTranscriptHistoryEnabled: Bool
 
     public init(
         defaultModelID: String = "ggml-small.en",
         selectedModelID: String = "ggml-small.en",
         language: String = "en",
         hotkey: HotkeySetting = HotkeySetting(),
-        modelsDirectoryPath: String? = nil
+        modelsDirectoryPath: String? = nil,
+        isTranscriptHistoryEnabled: Bool = true
     ) {
         self.defaultModelID = defaultModelID
         self.selectedModelID = selectedModelID
         self.language = language
         self.hotkey = hotkey
         self.modelsDirectoryPath = modelsDirectoryPath
+        self.isTranscriptHistoryEnabled = isTranscriptHistoryEnabled
     }
 
     public var modelID: String {
@@ -48,6 +51,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case hotkey
         case hotkeyDescription
         case modelsDirectoryPath
+        case isTranscriptHistoryEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +61,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         selectedModelID = try container.decodeIfPresent(String.self, forKey: .selectedModelID) ?? defaultModelID
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "en"
         modelsDirectoryPath = try container.decodeIfPresent(String.self, forKey: .modelsDirectoryPath)
+        isTranscriptHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTranscriptHistoryEnabled) ?? true
 
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
             self.hotkey = hotkey
@@ -73,6 +78,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try container.encode(language, forKey: .language)
         try container.encode(hotkey, forKey: .hotkey)
         try container.encodeIfPresent(modelsDirectoryPath, forKey: .modelsDirectoryPath)
+        try container.encode(isTranscriptHistoryEnabled, forKey: .isTranscriptHistoryEnabled)
     }
 }
 
