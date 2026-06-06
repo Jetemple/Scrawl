@@ -2,6 +2,7 @@ import Foundation
 import SettingsStore
 import TranscriptHistoryStore
 
+/// The live app must own one instance and route all transcript-history mutations through it.
 final class TranscriptHistoryCoordinator: @unchecked Sendable {
     let settingsStore: SettingsStore
     let historyStore: any TranscriptHistoryStoring

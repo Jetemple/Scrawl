@@ -6,6 +6,12 @@ final class AppSettingsDecodingTests: XCTestCase {
         XCTAssertTrue(AppSettings().isTranscriptHistoryEnabled)
     }
 
+    func testNoStoredSettingsDefaultTranscriptHistoryEnabled() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+
+        XCTAssertTrue(SettingsStore(defaults: defaults).load().isTranscriptHistoryEnabled)
+    }
+
     func testLegacySettingsDecodeWithTranscriptHistoryEnabled() throws {
         let data = try XCTUnwrap("""
         {"defaultModelID":"tiny.en","selectedModelID":"tiny.en","language":"en"}
@@ -30,6 +36,23 @@ final class AppSettingsDecodingTests: XCTestCase {
         defaults.set(Data("malformed".utf8), forKey: "scrawl.settings.v1")
 
         XCTAssertFalse(store.load().isTranscriptHistoryEnabled)
+    }
+
+    func testMalformedSettingsWithoutSeparatePrivacyValueFailClosed() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(Data("malformed".utf8), forKey: "scrawl.settings.v1")
+
+        XCTAssertFalse(SettingsStore(defaults: defaults).load().isTranscriptHistoryEnabled)
+    }
+
+    func testStaleLoadDoesNotOverwriteNewerDisabledPrivacyValue() throws {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(try JSONEncoder().encode(AppSettings(isTranscriptHistoryEnabled: true)), forKey: "scrawl.settings.v1")
+        defaults.set(false, forKey: "scrawl.settings.transcriptHistoryEnabled")
+
+        _ = SettingsStore(defaults: defaults).load()
+
+        XCTAssertFalse(defaults.bool(forKey: "scrawl.settings.transcriptHistoryEnabled"))
     }
 
     func testDecodesLegacyHotkeyDescription() throws {

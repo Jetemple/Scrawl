@@ -86,34 +86,59 @@ public final class SettingsStore: @unchecked Sendable {
     private let defaults: UserDefaults
     private let key = "scrawl.settings.v1"
     private let transcriptHistoryEnabledKey = "scrawl.settings.transcriptHistoryEnabled"
+    private let lock = NSLock()
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
     public func hasStoredSettings() -> Bool {
-        defaults.data(forKey: key) != nil
+        lock.withLock {
+            defaults.data(forKey: key) != nil
+        }
     }
 
     public func load() -> AppSettings {
-        if
-            let data = defaults.data(forKey: key),
-            let decoded = try? JSONDecoder().decode(AppSettings.self, from: data)
-        {
-            defaults.set(decoded.isTranscriptHistoryEnabled, forKey: transcriptHistoryEnabledKey)
+        lock.withLock {
+            loadUnlocked()
+        }
+    }
+
+    public func save(_ settings: AppSettings) throws {
+        try lock.withLock {
+            try saveUnlocked(settings)
+        }
+    }
+
+    private func loadUnlocked() -> AppSettings {
+        guard let data = defaults.data(forKey: key) else {
+            return AppSettings()
+        }
+
+        if let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) {
             return decoded
         }
 
         var settings = AppSettings()
         if defaults.object(forKey: transcriptHistoryEnabledKey) != nil {
             settings.isTranscriptHistoryEnabled = defaults.bool(forKey: transcriptHistoryEnabledKey)
+        } else {
+            settings.isTranscriptHistoryEnabled = false
         }
         return settings
     }
 
-    public func save(_ settings: AppSettings) throws {
+    private func saveUnlocked(_ settings: AppSettings) throws {
         let data = try JSONEncoder().encode(settings)
         defaults.set(data, forKey: key)
         defaults.set(settings.isTranscriptHistoryEnabled, forKey: transcriptHistoryEnabledKey)
+    }
+}
+
+private extension NSLock {
+    func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+        lock()
+        defer { unlock() }
+        return try body()
     }
 }
