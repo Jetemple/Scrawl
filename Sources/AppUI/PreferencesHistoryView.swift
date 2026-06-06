@@ -46,6 +46,11 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     var visibleRecordIDs: [UUID] { visibleRecords.map(\.id) }
     var selectedRecordID: UUID? { selectedID }
     var isAddDictionaryEnabled: Bool { addDictionaryButton.isEnabled }
+    var areActionControlsWithinBounds: Bool {
+        [copyButton, repasteButton, deleteButton, addDictionaryButton].allSatisfy {
+            bounds.contains(convert($0.bounds, from: $0))
+        }
+    }
 
     init(actions: Actions) {
         self.actions = actions
@@ -167,10 +172,18 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             self?.actions.delete([id])
         }
         bind(addDictionaryButton) { [weak self] in self?.showDictionaryPopover() }
-        let buttons = NSStackView(views: [copyButton, repasteButton, addDictionaryButton, NSView(), deleteButton])
-        buttons.orientation = .horizontal
-        buttons.alignment = .centerY
-        buttons.spacing = 6
+        let primaryButtons = NSStackView(views: [copyButton, repasteButton, addDictionaryButton, NSView()])
+        primaryButtons.orientation = .horizontal
+        primaryButtons.alignment = .centerY
+        primaryButtons.spacing = 6
+        let destructiveButtons = NSStackView(views: [NSView(), deleteButton])
+        destructiveButtons.orientation = .horizontal
+        destructiveButtons.alignment = .centerY
+        destructiveButtons.spacing = 6
+        let buttons = NSStackView(views: [primaryButtons, destructiveButtons])
+        buttons.orientation = .vertical
+        buttons.alignment = .width
+        buttons.spacing = 4
 
         let right = NSStackView(views: [metadata, textScroll, buttons])
         right.orientation = .vertical

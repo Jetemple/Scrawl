@@ -102,7 +102,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var downloadingModelID: String?
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
-    private var historyActionGeneration: UInt64 = 0
+    private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
+    private var pendingHistoryFailures: [(title: String, description: String)] = []
     private let historyActionQueue = DispatchQueue(label: "Scrawl.HistoryActions", qos: .utility)
     private let dictionaryActionQueue = DispatchQueue(label: "Scrawl.DictionaryActions", qos: .utility)
     private var cachedAccessibilityAuthorized = false
@@ -269,8 +270,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             }
         }
 
-        historyActionGeneration &+= 1
-        let generation = historyActionGeneration
+        let action = historyActionPresentationPolicy.beginAction()
         let coordinator = transcriptHistoryCoordinator
         historyActionQueue.async { [weak self] in
             let result = Result { try coordinator.setEnabled(enabled) }
@@ -278,13 +278,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 guard let self else { return }
                 self.refreshHistoryMenu()
                 self.refreshPreferencesWindow()
-                guard generation == self.historyActionGeneration else { return }
-                switch result {
-                case .success:
-                    self.setStatus(enabled ? "Transcript history enabled" : "Transcript history disabled and deleted")
-                case let .failure(error):
-                    self.presentHistoryFailure("Could not update transcript history", error: error)
-                }
+                self.handleHistoryActionCompletion(
+                    action: action,
+                    result: result,
+                    successStatus: enabled ? "Transcript history enabled" : "Transcript history disabled and deleted",
+                    failureTitle: "Could not update transcript history"
+                )
             }
         }
     }
@@ -307,14 +306,15 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
         Task { [weak self] in
-            await self?.pasteToPreviousApp(record.text)
-            await self?.setStatusOnMain("Repasted transcript")
+            guard let outcome = await self?.pasteToPreviousApp(record.text) else { return }
+            if let status = outcome.repasteStatus {
+                await self?.setStatusOnMain(status)
+            }
         }
     }
 
     private func deleteTranscripts(ids: Set<UUID>) {
-        historyActionGeneration &+= 1
-        let generation = historyActionGeneration
+        let action = historyActionPresentationPolicy.beginAction()
         let store = runtime.transcriptHistoryStore
         historyActionQueue.async { [weak self] in
             let result = Result { try store.delete(ids: ids) }
@@ -322,13 +322,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 guard let self else { return }
                 self.refreshHistoryMenu()
                 self.refreshPreferencesWindow()
-                guard generation == self.historyActionGeneration else { return }
-                switch result {
-                case .success:
-                    self.setStatus("Deleted transcript")
-                case let .failure(error):
-                    self.presentHistoryFailure("Could not delete transcript", error: error)
-                }
+                self.handleHistoryActionCompletion(
+                    action: action,
+                    result: result,
+                    successStatus: "Deleted transcript",
+                    failureTitle: "Could not delete transcript"
+                )
             }
         }
     }
@@ -348,9 +347,50 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    private func presentHistoryFailure(_ title: String, error: Error) {
-        let description = describe(error)
-        setStatus("History unavailable: \(description)", autoClear: false)
+    @MainActor
+    private func handleHistoryActionCompletion(
+        action: UInt64,
+        result: Result<Void, Error>,
+        successStatus: String,
+        failureTitle: String
+    ) {
+        let completion: HistoryActionPresentationPolicy.Completion
+        switch result {
+        case .success:
+            completion = .success
+        case .failure:
+            completion = .failure
+        }
+        let decision = historyActionPresentationPolicy.decision(
+            for: action,
+            completion: completion,
+            hasActiveOperation: hasActiveOperation
+        )
+        switch (decision, result) {
+        case (.presentSuccess, .success):
+            applyStatus(successStatus)
+        case let (.presentFailure, .failure(error)):
+            presentHistoryFailure(failureTitle, description: describe(error))
+        case let (.queueFailure, .failure(error)):
+            pendingHistoryFailures.append((failureTitle, describe(error)))
+        case (.ignore, _), (.presentSuccess, .failure), (.presentFailure, .success), (.queueFailure, .success):
+            break
+        }
+    }
+
+    @MainActor
+    private func flushPendingHistoryFailuresIfPossible() {
+        guard !hasActiveOperation, !pendingHistoryFailures.isEmpty else { return }
+        let failures = pendingHistoryFailures
+        pendingHistoryFailures.removeAll()
+        for failure in failures {
+            presentHistoryFailure(failure.title, description: failure.description)
+        }
+    }
+
+    @MainActor
+    private func presentHistoryFailure(_ title: String, description: String) {
+        applyStatus("History unavailable: \(description)", autoClear: false)
         runtime.overlayController.showTransientMessage(title)
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -430,8 +470,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         Task { [weak self] in
-            await self?.pasteToPreviousApp(record.text)
-            await self?.setStatusOnMain("Repasted transcript")
+            guard let outcome = await self?.pasteToPreviousApp(record.text) else { return }
+            if let status = outcome.repasteStatus {
+                await self?.setStatusOnMain(status)
+            }
         }
     }
 
@@ -1094,7 +1136,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 )
                 let result = try await runtime.whisperProvider.transcribe(request)
                 let correctedText = runtime.dictionaryStore.apply(to: result.text)
-                await self?.pasteToTargetApp(correctedText, target: insertionTargetApp)
+                _ = await self?.pasteToTargetApp(correctedText, target: insertionTargetApp)
                 await self?.handleTranscriptionSuccess(
                     latencyMS: result.latencyMS,
                     transcript: correctedText,
@@ -1379,6 +1421,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             scheduleStatusAutoClear(after: text == "Done" ? 2.5 : 5.0)
         }
 
+        if !hasActiveOperation, !pendingHistoryFailures.isEmpty {
+            Task { @MainActor [weak self] in
+                self?.flushPendingHistoryFailuresIfPossible()
+            }
+        }
+
         #if DEBUG
         print("[Scrawl] \(text)")
         #endif
@@ -1495,22 +1543,26 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @MainActor
-    private func pasteToTargetApp(_ text: String, target: NSRunningApplication?) async {
+    private func pasteToTargetApp(_ text: String, target: NSRunningApplication?) async -> PasteOutcome {
         Self.restoreFocus(to: target)
         try? await Task.sleep(nanoseconds: 180_000_000)
         do {
             try await runtime.textOutputTarget.output(text)
+            return .pasted
         } catch TextOutputError.secureInputActive {
             setStatus("Secure field — transcript copied to clipboard")
             runtime.overlayController.showTransientMessage("Secure field detected — transcript copied to clipboard")
+            return .copiedForSecureInput
         } catch {
-            setStatus("Paste error: \(describe(error))")
-            runtime.overlayController.showTransientMessage("Couldn't paste — \(describe(error))")
+            let description = describe(error)
+            setStatus("Paste error: \(description)")
+            runtime.overlayController.showTransientMessage("Couldn't paste — \(description)")
+            return .failed(description)
         }
     }
 
     @MainActor
-    private func pasteToPreviousApp(_ text: String) async {
+    private func pasteToPreviousApp(_ text: String) async -> PasteOutcome {
         await pasteToTargetApp(text, target: lastExternalActiveApp)
     }
 

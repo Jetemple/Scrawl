@@ -133,6 +133,20 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         XCTAssertFalse(controller.visibleSectionHasAmbiguousLayout)
         XCTAssertTrue(controller.isVisibleSectionWithinContentBounds)
+        XCTAssertTrue(controller.isVisibleSectionCriticalContentWithinBounds)
+    }
+
+    @MainActor
+    func testHistoryActionControlsFitAtDefaultWindowSize() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        controller.update(snapshot: makeSnapshot(records: [
+            TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")
+        ]))
+        controller.selectSection(.history)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.isVisibleSectionCriticalContentWithinBounds)
     }
 
     @MainActor

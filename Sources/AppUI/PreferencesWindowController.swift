@@ -88,7 +88,14 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     }
 
     var isVisibleSectionCriticalContentWithinBounds: Bool {
-        selectedSection != .models || modelsView.isCriticalContentWithinBounds
+        switch selectedSection {
+        case .models:
+            modelsView.isCriticalContentWithinBounds
+        case .history:
+            historyView.areActionControlsWithinBounds
+        default:
+            true
+        }
     }
 
     var hasDraggableSidebarDivider: Bool {
