@@ -14,6 +14,24 @@ final class AppSettingsDecodingTests: XCTestCase {
         XCTAssertTrue(try JSONDecoder().decode(AppSettings.self, from: data).isTranscriptHistoryEnabled)
     }
 
+    func testExplicitlyDisabledTranscriptHistoryRoundTrips() throws {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let store = SettingsStore(defaults: defaults)
+
+        try store.save(AppSettings(isTranscriptHistoryEnabled: false))
+
+        XCTAssertFalse(store.load().isTranscriptHistoryEnabled)
+    }
+
+    func testMalformedSettingsRetainSeparatelyPersistedDisabledTranscriptHistory() throws {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let store = SettingsStore(defaults: defaults)
+        try store.save(AppSettings(isTranscriptHistoryEnabled: false))
+        defaults.set(Data("malformed".utf8), forKey: "scrawl.settings.v1")
+
+        XCTAssertFalse(store.load().isTranscriptHistoryEnabled)
+    }
+
     func testDecodesLegacyHotkeyDescription() throws {
         let json = """
         {

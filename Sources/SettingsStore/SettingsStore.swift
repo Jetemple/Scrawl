@@ -85,6 +85,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
 public final class SettingsStore: @unchecked Sendable {
     private let defaults: UserDefaults
     private let key = "scrawl.settings.v1"
+    private let transcriptHistoryEnabledKey = "scrawl.settings.transcriptHistoryEnabled"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -95,17 +96,24 @@ public final class SettingsStore: @unchecked Sendable {
     }
 
     public func load() -> AppSettings {
-        guard
+        if
             let data = defaults.data(forKey: key),
             let decoded = try? JSONDecoder().decode(AppSettings.self, from: data)
-        else {
-            return AppSettings()
+        {
+            defaults.set(decoded.isTranscriptHistoryEnabled, forKey: transcriptHistoryEnabledKey)
+            return decoded
         }
-        return decoded
+
+        var settings = AppSettings()
+        if defaults.object(forKey: transcriptHistoryEnabledKey) != nil {
+            settings.isTranscriptHistoryEnabled = defaults.bool(forKey: transcriptHistoryEnabledKey)
+        }
+        return settings
     }
 
     public func save(_ settings: AppSettings) throws {
         let data = try JSONEncoder().encode(settings)
         defaults.set(data, forKey: key)
+        defaults.set(settings.isTranscriptHistoryEnabled, forKey: transcriptHistoryEnabledKey)
     }
 }
