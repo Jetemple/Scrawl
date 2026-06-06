@@ -60,20 +60,31 @@ public final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @un
     }
 }
 
+/// The live app should own one instance; writes are serialized within an instance, not across instances.
 public final class JSONTranscriptHistoryStore: TranscriptHistoryStoring, @unchecked Sendable {
     private let fileURL: URL
     private let limit: Int
     private let lock = NSLock()
     private let encoder = JSONEncoder()
     private var cachedRecords: [TranscriptRecord]
+    private var loadError: Error?
 
     public init(fileURL: URL, limit: Int = 100) {
         self.fileURL = fileURL
         self.limit = max(0, limit)
 
-        let records = (try? Data(contentsOf: fileURL))
-            .flatMap { try? JSONDecoder().decode([TranscriptRecord].self, from: $0) } ?? []
-        cachedRecords = InMemoryTranscriptHistoryStore.normalize(records, limit: self.limit)
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let records = try JSONDecoder().decode([TranscriptRecord].self, from: data)
+            cachedRecords = InMemoryTranscriptHistoryStore.normalize(records, limit: self.limit)
+            loadError = nil
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            cachedRecords = []
+            loadError = nil
+        } catch {
+            cachedRecords = []
+            loadError = error
+        }
     }
 
     public func records() -> [TranscriptRecord] {
@@ -95,13 +106,20 @@ public final class JSONTranscriptHistoryStore: TranscriptHistoryStoring, @unchec
     }
 
     public func clear() throws {
-        try mutate { records in
+        try mutate(allowLoadErrorRecovery: true) { records in
             records.removeAll()
         }
     }
 
-    private func mutate(_ mutation: (inout [TranscriptRecord]) -> Void) throws {
+    private func mutate(
+        allowLoadErrorRecovery: Bool = false,
+        _ mutation: (inout [TranscriptRecord]) -> Void
+    ) throws {
         try lock.withLock {
+            if !allowLoadErrorRecovery, let loadError {
+                throw loadError
+            }
+
             var newRecords = cachedRecords
             mutation(&newRecords)
             newRecords = InMemoryTranscriptHistoryStore.normalize(newRecords, limit: limit)
@@ -112,6 +130,7 @@ public final class JSONTranscriptHistoryStore: TranscriptHistoryStoring, @unchec
             )
             try encoder.encode(newRecords).write(to: fileURL, options: .atomic)
             cachedRecords = newRecords
+            loadError = nil
         }
     }
 }
