@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "WhisperCppProvider", targets: ["WhisperCppProvider"]),
         .library(name: "TextOutput", targets: ["TextOutput"]),
         .library(name: "DictionaryStore", targets: ["DictionaryStore"]),
+        .library(name: "TranscriptHistoryStore", targets: ["TranscriptHistoryStore"]),
         .library(name: "SettingsStore", targets: ["SettingsStore"]),
         .library(name: "Permissions", targets: ["Permissions"]),
         .library(name: "RecordingOverlay", targets: ["RecordingOverlay"])
@@ -36,6 +37,7 @@ let package = Package(
                 "RecordingOverlay",
                 "SettingsStore",
                 "TextOutput",
+                "TranscriptHistoryStore",
                 "TranscriptionCore",
                 "WhisperCppProvider"
             ]
@@ -51,6 +53,7 @@ let package = Package(
         ),
         .target(name: "TextOutput"),
         .target(name: "DictionaryStore"),
+        .target(name: "TranscriptHistoryStore"),
         .target(name: "SettingsStore"),
         .target(name: "Permissions"),
         .target(name: "RecordingOverlay"),
@@ -58,6 +61,8 @@ let package = Package(
             name: "AppUITests",
             dependencies: [
                 "AppUI",
+                "DictionaryStore",
+                "TranscriptHistoryStore",
                 "SettingsStore"
             ]
         ),
@@ -77,6 +82,12 @@ let package = Package(
             name: "DictionaryStoreTests",
             dependencies: [
                 "DictionaryStore"
+            ]
+        ),
+        .testTarget(
+            name: "TranscriptHistoryStoreTests",
+            dependencies: [
+                "TranscriptHistoryStore"
             ]
         ),
         .testTarget(
