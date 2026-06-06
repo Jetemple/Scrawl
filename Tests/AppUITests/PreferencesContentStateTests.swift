@@ -28,6 +28,27 @@ final class PreferencesContentStateTests: XCTestCase {
         )
     }
 
+    func testFilteredHistoryNormalizesWhitespaceOnlyAndPaddedQueries() {
+        let matching = record(id: "00000000-0000-0000-0000-000000000001", text: "Kubernetes notes")
+        let nonmatching = record(id: "00000000-0000-0000-0000-000000000002", text: "Swift notes")
+        let records = [matching, nonmatching]
+
+        XCTAssertEqual(PreferencesContentState.filteredHistory(records: records, query: " \n\t "), records)
+        XCTAssertEqual(
+            PreferencesContentState.filteredHistory(records: records, query: "  Kubernetes\n"),
+            [matching]
+        )
+    }
+
+    func testFilteredHistoryUsesLocalizedStandardMatching() {
+        let matching = record(id: "00000000-0000-0000-0000-000000000001", text: "Résumé notes")
+
+        XCTAssertEqual(
+            PreferencesContentState.filteredHistory(records: [matching], query: "resume"),
+            [matching]
+        )
+    }
+
     func testResolvedHistorySelectionRetainsVisibleCurrentSelection() {
         let first = record(id: "00000000-0000-0000-0000-000000000001", text: "First")
         let current = record(id: "00000000-0000-0000-0000-000000000002", text: "Current")
@@ -86,6 +107,28 @@ final class PreferencesContentStateTests: XCTestCase {
 
         XCTAssertEqual(PreferencesContentState.filteredDictionary(entries: entries, query: ""), entries)
         XCTAssertEqual(PreferencesContentState.filteredDictionary(entries: entries, query: "missing"), [])
+    }
+
+    func testFilteredDictionaryNormalizesWhitespaceOnlyAndPaddedQueries() {
+        let matching = DictionaryEntry(wrong: "kuber netties", correct: "Kubernetes")
+        let nonmatching = DictionaryEntry(wrong: "pie torch", correct: "PyTorch")
+        let entries = [matching, nonmatching]
+
+        XCTAssertEqual(PreferencesContentState.filteredDictionary(entries: entries, query: " \n\t "), entries)
+        XCTAssertEqual(
+            PreferencesContentState.filteredDictionary(entries: entries, query: "\n Kubernetes  "),
+            [matching]
+        )
+    }
+
+    func testFilteredDictionaryUsesLocalizedStandardMatchingForBothColumns() {
+        let wrongMatch = DictionaryEntry(wrong: "Résumé", correct: "CV")
+        let correctMatch = DictionaryEntry(wrong: "CV", correct: "Résumé")
+
+        XCTAssertEqual(
+            PreferencesContentState.filteredDictionary(entries: [wrongMatch, correctMatch], query: "resume"),
+            [wrongMatch, correctMatch]
+        )
     }
 
     private func record(id: String, text: String) -> TranscriptRecord {
