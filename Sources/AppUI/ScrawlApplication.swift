@@ -4,6 +4,7 @@ import HotkeyEngine
 import Permissions
 import SettingsStore
 import TextOutput
+import TranscriptHistoryStore
 import TranscriptionCore
 
 public final class ScrawlApplication {
@@ -50,12 +51,6 @@ private final class DelegateRetainer {
     var instanceLock: SingleInstanceLock?
 }
 
-private struct TranscriptRecord: Sendable {
-    let id: UUID
-    let createdAt: Date
-    let text: String
-}
-
 private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum RecordingOrigin {
         case manual
@@ -67,6 +62,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private let runtime: AppRuntime
     private let modelManager: LocalModelManager
+    private lazy var transcriptHistoryCoordinator = TranscriptHistoryCoordinator(
+        settingsStore: runtime.settingsStore,
+        historyStore: runtime.transcriptHistoryStore
+    )
 
     private var statusItem: NSStatusItem?
     private var rootMenu: NSMenu?
@@ -88,7 +87,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var recordingSafetyTimer: Timer?
     private var insertionTargetApp: NSRunningApplication?
     private var lastExternalActiveApp: NSRunningApplication?
-    private var transcriptHistory: [TranscriptRecord] = []
 
     private var workspaceActivationObserver: NSObjectProtocol?
     private var hotkeyMonitor: HotkeyMonitor?
@@ -298,7 +296,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         guard
             let idString = sender.representedObject as? String,
             let id = UUID(uuidString: idString),
-            let record = transcriptHistory.first(where: { $0.id == id })
+            let record = runtime.transcriptHistoryStore.records().first(where: { $0.id == id })
         else {
             setStatus("Transcript not found")
             return
@@ -1158,14 +1156,22 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         historySubmenu.removeAllItems()
 
-        guard !transcriptHistory.isEmpty else {
+        guard runtime.settingsStore.load().isTranscriptHistoryEnabled else {
+            let disabled = NSMenuItem(title: "Transcript history is off", action: nil, keyEquivalent: "")
+            disabled.isEnabled = false
+            historySubmenu.addItem(disabled)
+            return
+        }
+
+        let records = runtime.transcriptHistoryStore.records()
+        guard !records.isEmpty else {
             let empty = NSMenuItem(title: "No transcripts yet", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             historySubmenu.addItem(empty)
             return
         }
 
-        for record in transcriptHistory {
+        for record in records.prefix(12) {
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm:ss"
             let prefix = formatter.string(from: record.createdAt)
@@ -1355,12 +1361,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func addTranscriptToHistory(_ text: String) {
-        let record = TranscriptRecord(id: UUID(), createdAt: Date(), text: text)
-        transcriptHistory.insert(record, at: 0)
-        if transcriptHistory.count > 12 {
-            transcriptHistory = Array(transcriptHistory.prefix(12))
+        do {
+            try transcriptHistoryCoordinator.add(text: text)
+            refreshHistoryMenu()
+            refreshPreferencesWindow()
+        } catch {
+            setStatus("History error: \(describe(error))")
         }
-        refreshHistoryMenu()
     }
 
     private func saveSettings(_ settings: AppSettings) {

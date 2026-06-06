@@ -7,6 +7,7 @@ import Permissions
 import RecordingOverlay
 import SettingsStore
 import TextOutput
+import TranscriptHistoryStore
 import TranscriptionCore
 import WhisperCppProvider
 
@@ -18,6 +19,7 @@ public struct AppRuntime {
     public let audioCaptureService: AudioCaptureServing
     public let textOutputTarget: TextOutputTarget
     public let dictionaryStore: any DictionaryStoring
+    public let transcriptHistoryStore: any TranscriptHistoryStoring
     public let whisperProvider: any TranscriptionProvider
     public let modelsDirectoryURL: URL
     public let whisperExecutableURL: URL
@@ -32,6 +34,7 @@ public struct AppRuntime {
         audioCaptureService: AudioCaptureServing,
         textOutputTarget: TextOutputTarget,
         dictionaryStore: any DictionaryStoring,
+        transcriptHistoryStore: any TranscriptHistoryStoring,
         whisperProvider: any TranscriptionProvider,
         modelsDirectoryURL: URL,
         whisperExecutableURL: URL,
@@ -45,6 +48,7 @@ public struct AppRuntime {
         self.audioCaptureService = audioCaptureService
         self.textOutputTarget = textOutputTarget
         self.dictionaryStore = dictionaryStore
+        self.transcriptHistoryStore = transcriptHistoryStore
         self.whisperProvider = whisperProvider
         self.modelsDirectoryURL = modelsDirectoryURL
         self.whisperExecutableURL = whisperExecutableURL
@@ -63,6 +67,7 @@ public struct AppRuntime {
         let recommendedDefaultModelID = resolveRecommendedDefaultModelID()
         let threadCount = resolveWhisperThreadCount()
         let dictionaryURL = appSupportDirectory.appending(path: "dictionary.json")
+        let historyURL = appSupportDirectory.appending(path: "history.json")
 
         return AppRuntime(
             permissionManager: PermissionManager(),
@@ -72,6 +77,7 @@ public struct AppRuntime {
             audioCaptureService: AudioCaptureService(),
             textOutputTarget: PasteboardTextOutput(),
             dictionaryStore: JSONDictionaryStore(fileURL: dictionaryURL),
+            transcriptHistoryStore: JSONTranscriptHistoryStore(fileURL: historyURL),
             whisperProvider: WhisperCppProvider(
                 config: WhisperCppConfig(
                     executableURL: executableURL,
