@@ -32,6 +32,31 @@ public extension DictionaryStoring {
         }
         try save(current)
     }
+
+    func delete(wrongValues: Set<String>) throws {
+        let remaining = entries().filter { entry in
+            !wrongValues.contains { wrongValue in
+                entry.wrong.caseInsensitiveCompare(wrongValue) == .orderedSame
+            }
+        }
+        try save(remaining)
+    }
+
+    func replace(originalWrong: String, wrong: String, correct: String) throws {
+        let trimmedOriginalWrong = originalWrong.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedWrong = wrong.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCorrect = correct.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedOriginalWrong.isEmpty, !trimmedWrong.isEmpty, !trimmedCorrect.isEmpty else {
+            return
+        }
+
+        var current = entries().filter { entry in
+            entry.wrong.caseInsensitiveCompare(trimmedOriginalWrong) != .orderedSame
+                && entry.wrong.caseInsensitiveCompare(trimmedWrong) != .orderedSame
+        }
+        current.append(DictionaryEntry(wrong: trimmedWrong, correct: trimmedCorrect))
+        try save(current)
+    }
 }
 
 public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendable {
