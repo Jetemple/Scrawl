@@ -4,3 +4,4 @@ DerivedData/
 .DS_Store
 benchmarks/
 *.bench.csv
+.worktrees/
