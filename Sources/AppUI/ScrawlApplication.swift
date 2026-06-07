@@ -220,6 +220,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 },
                 addDictionaryEntry: { [weak self] wrong, correct, completion in
                     self?.addDictionaryEntry(wrong: wrong, correct: correct, completion: completion)
+                },
+                saveDictionaryEntry: { [weak self] originalWrong, wrong, correct, completion in
+                    self?.saveDictionaryEntry(
+                        originalWrong: originalWrong,
+                        wrong: wrong,
+                        correct: correct,
+                        completion: completion
+                    )
+                },
+                deleteDictionaryEntries: { [weak self] wrongValues, completion in
+                    self?.deleteDictionaryEntries(wrongValues: wrongValues, completion: completion)
                 }
             )
         )
@@ -337,11 +348,44 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         correct: String,
         completion: @escaping (Result<Void, Error>) -> Void
     ) {
+        saveDictionaryEntry(originalWrong: nil, wrong: wrong, correct: correct, completion: completion)
+    }
+
+    private func saveDictionaryEntry(
+        originalWrong: String?,
+        wrong: String,
+        correct: String,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
         let store = runtime.dictionaryStore
         dictionaryActionQueue.async { [weak self] in
-            let result = Result { try store.addOrReplace(wrong: wrong, correct: correct) }
+            let result = Result {
+                if let originalWrong {
+                    try store.replace(originalWrong: originalWrong, wrong: wrong, correct: correct)
+                } else {
+                    try store.addOrReplace(wrong: wrong, correct: correct)
+                }
+            }
             DispatchQueue.main.async {
-                self?.refreshPreferencesWindow()
+                if case .success = result {
+                    self?.refreshPreferencesWindow()
+                }
+                completion(result)
+            }
+        }
+    }
+
+    private func deleteDictionaryEntries(
+        wrongValues: Set<String>,
+        completion: @escaping (Result<Void, Error>) -> Void
+    ) {
+        let store = runtime.dictionaryStore
+        dictionaryActionQueue.async { [weak self] in
+            let result = Result { try store.delete(wrongValues: wrongValues) }
+            DispatchQueue.main.async {
+                if case .success = result {
+                    self?.refreshPreferencesWindow()
+                }
                 completion(result)
             }
         }

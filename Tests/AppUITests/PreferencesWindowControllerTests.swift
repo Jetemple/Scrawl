@@ -150,10 +150,73 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testDictionaryPageFiltersByEitherColumnAndFallsBackToFirstSelection() {
+        let first = DictionaryEntry(wrong: "post grass", correct: "Postgres")
+        let second = DictionaryEntry(wrong: "cube", correct: "Kubernetes")
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: [first, second]))
+        controller.selectSection(.dictionary)
+
+        XCTAssertEqual(controller.dictionarySelectedWrong, first.wrong)
+        controller.setDictionarySearchQuery("kube")
+
+        XCTAssertEqual(controller.dictionaryVisibleWrongValues, [second.wrong])
+        XCTAssertEqual(controller.dictionarySelectedWrong, second.wrong)
+
+        controller.setDictionarySearchQuery("missing")
+        XCTAssertEqual(controller.dictionaryState, .noSearchResults)
+        XCTAssertNil(controller.dictionarySelectedWrong)
+
+        controller.setDictionarySearchQuery("")
+        XCTAssertEqual(controller.dictionaryState, .entries)
+        XCTAssertEqual(controller.dictionarySelectedWrong, first.wrong)
+    }
+
+    @MainActor
+    func testDictionaryPageShowsEmptyState() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        controller.update(snapshot: makeSnapshot())
+
+        XCTAssertEqual(controller.dictionaryState, .empty)
+    }
+
+    @MainActor
+    func testDictionarySelectionUsesUpdatedVisibleKeyAfterCaseOnlyEdit() {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: [
+            DictionaryEntry(wrong: "kubernetes", correct: "Kubernetes")
+        ]))
+
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: [
+            DictionaryEntry(wrong: "Kubernetes", correct: "Kubernetes")
+        ]))
+
+        XCTAssertEqual(controller.dictionarySelectedWrong, "Kubernetes")
+    }
+
+    @MainActor
+    func testDictionaryPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: [
+            DictionaryEntry(wrong: "post grass", correct: "Postgres")
+        ]))
+        controller.selectSection(.dictionary)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(controller.visibleSectionHasAmbiguousLayout)
+        XCTAssertTrue(controller.isVisibleSectionWithinContentBounds)
+        XCTAssertTrue(controller.isVisibleSectionCriticalContentWithinBounds)
+    }
+
+    @MainActor
     private func makeSnapshot(
         isHistoryEnabled: Bool = true,
         historyLoadErrorDescription: String? = nil,
-        records: [TranscriptRecord] = []
+        records: [TranscriptRecord] = [],
+        dictionaryEntries: [DictionaryEntry] = []
     ) -> PreferencesWindowController.Snapshot {
         PreferencesWindowController.Snapshot(
             settings: AppSettings(isTranscriptHistoryEnabled: isHistoryEnabled),
@@ -165,7 +228,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             isModelDownloadInProgress: false,
             transcriptHistory: records,
             transcriptHistoryLoadErrorDescription: historyLoadErrorDescription,
-            dictionaryEntries: []
+            dictionaryEntries: dictionaryEntries
         )
     }
 
@@ -182,7 +245,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
             copyTranscript: { _ in },
             repasteTranscript: { _ in },
             deleteTranscripts: { _ in },
-            addDictionaryEntry: { _, _, completion in completion(.success(())) }
+            addDictionaryEntry: { _, _, completion in completion(.success(())) },
+            saveDictionaryEntry: { _, _, _, completion in completion(.success(())) },
+            deleteDictionaryEntries: { _, completion in completion(.success(())) }
         )
     }
 }

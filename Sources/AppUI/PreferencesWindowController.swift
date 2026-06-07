@@ -17,6 +17,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let repasteTranscript: (UUID) -> Void
         let deleteTranscripts: (Set<UUID>) -> Void
         let addDictionaryEntry: (String, String, @escaping (Result<Void, Error>) -> Void) -> Void
+        let saveDictionaryEntry: (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void
+        let deleteDictionaryEntries: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
     }
 
     struct Snapshot {
@@ -67,6 +69,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     private let modelsView: PreferencesModelsView
     private let keyboardView: PreferencesKeyboardView
     private let historyView: PreferencesHistoryView
+    private let dictionaryView: PreferencesDictionaryView
     private let aboutView: PreferencesAboutView
     private let sidebarTable = NSTableView()
     private let contentContainer = PreferencesPageSupport.makeContentBackground()
@@ -93,6 +96,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             modelsView.isCriticalContentWithinBounds
         case .history:
             historyView.areActionControlsWithinBounds
+        case .dictionary:
+            true
         default:
             true
         }
@@ -106,6 +111,9 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     var historyVisibleRecordIDs: [UUID] { historyView.visibleRecordIDs }
     var historySelectedRecordID: UUID? { historyView.selectedRecordID }
     var isHistoryAddDictionaryEnabled: Bool { historyView.isAddDictionaryEnabled }
+    var dictionaryState: PreferencesDictionaryView.State { dictionaryView.state }
+    var dictionaryVisibleWrongValues: [String] { dictionaryView.visibleWrongValues }
+    var dictionarySelectedWrong: String? { dictionaryView.selectedWrong }
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
@@ -124,6 +132,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             repaste: actions.repasteTranscript,
             delete: actions.deleteTranscripts,
             addDictionaryEntry: actions.addDictionaryEntry
+        ))
+        dictionaryView = PreferencesDictionaryView(actions: .init(
+            save: actions.saveDictionaryEntry,
+            delete: actions.deleteDictionaryEntries
         ))
         aboutView = PreferencesAboutView {
             guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
@@ -179,6 +191,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             isEnabled: snapshot.settings.isTranscriptHistoryEnabled,
             loadErrorDescription: snapshot.transcriptHistoryLoadErrorDescription
         )
+        dictionaryView.update(entries: snapshot.dictionaryEntries)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -229,16 +242,17 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         historyView.selectText(range: range)
     }
 
+    func setDictionarySearchQuery(_ query: String) {
+        dictionaryView.setSearchQuery(query)
+    }
+
     private func makeContentView() -> NSView {
         sectionViews = [
             .general: generalView,
             .models: modelsView,
             .keyboard: keyboardView,
             .history: historyView,
-            .dictionary: PreferencesPageSupport.makeEmptyState(
-                title: "No dictionary entries yet",
-                detail: "Custom heard-text replacements will appear here."
-            ),
+            .dictionary: dictionaryView,
             .about: aboutView
         ]
 
