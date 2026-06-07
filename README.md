@@ -78,9 +78,12 @@ open /Applications/Scrawl.app
 
 Scrawl lives in your menubar. From there you can:
 
-- **Change the hotkey** — Set Hotkey, then press any single key, `Fn`, or modifier. Press `Esc` to cancel.
-- **Switch models** — tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy)
-- **Repaste recent transcripts** — Recent Transcripts submenu
+- **Open Settings** - Manage permissions, models, the recording shortcut, transcript history, and dictionary replacements from a compact sidebar window.
+- **Switch models** - tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy).
+- **Repaste recent transcripts** - Use the Recent Transcripts submenu for quick access or the searchable History page for copy, repaste, delete, and Add to Dictionary actions.
+- **Manage replacements** - Search, add, edit, and delete local heard-text replacements from the Dictionary page.
+
+Transcript history is stored only on this Mac, enabled by default, and limited to the newest 100 transcripts. Turning off **Save transcript history** deletes saved transcripts and stops saving new ones until it is enabled again. Dictionary replacements are also stored locally.
 
 ## Development
 

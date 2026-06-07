@@ -388,6 +388,13 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         cancel.action = #selector(ClosureAction.perform(_:))
         add.target = addAction
         add.action = #selector(ClosureAction.perform(_:))
-        popover.show(relativeTo: addDictionaryButton.bounds, of: addDictionaryButton, preferredEdge: .maxY)
+        if let window = textView.window {
+            let screenRect = textView.firstRect(forCharacterRange: range, actualRange: nil)
+            let windowRect = window.convertFromScreen(screenRect)
+            let selectionRect = textView.convert(windowRect, from: nil)
+            popover.show(relativeTo: selectionRect, of: textView, preferredEdge: .maxY)
+        } else {
+            popover.show(relativeTo: addDictionaryButton.bounds, of: addDictionaryButton, preferredEdge: .maxY)
+        }
     }
 }

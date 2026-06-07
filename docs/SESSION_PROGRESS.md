@@ -1,6 +1,6 @@
 # Sidebar Settings Redesign Progress
 
-Updated: 2026-06-06
+Updated: 2026-06-07
 
 ## Goal
 
@@ -36,21 +36,14 @@ The original checkout remains at:
 
 ## Current Status
 
-Tasks 1 through 4 are complete and passed both spec-compliance and code-quality review.
+Tasks 1 through 9 are complete. The feature is ready for interactive release checks and branch integration.
 
-Task 5 implementation is committed at `b4148d4` and is awaiting:
+Final automated verification:
 
-1. Spec-compliance review
-2. Code-quality review
-3. Any review-driven fixes
-
-Tasks 6 through 9 remain.
-
-The latest full-suite evidence before Task 5 was 77 passing tests. Task 5's implementer reported:
-
-- `swift test`: 77 passed
-- `swift build`: passed
+- `swift test`: 109 passed
+- `swift build -c release --product ScrawlApp`: passed
 - `git diff --check`: passed
+- Release-binary launch smoke test: exited cleanly
 
 ## Completed Work
 
@@ -135,11 +128,14 @@ Implemented:
 
 ### Task 5: Runtime and Menubar Integration
 
-Implementation commit:
+Commits:
 
 - `b4148d4` Persist transcript history in app runtime
+- `0b80419` Harden transcript history runtime integration
+- `db8b3aa` Guard delayed history failure presentation
+- `148cdb3` Guard delayed history errors by status generation
 
-Implemented but not yet reviewed:
+Implemented:
 
 - Live `history.json` store in `AppRuntime`
 - One lazy `TranscriptHistoryCoordinator`
@@ -148,46 +144,35 @@ Implemented but not yet reviewed:
 - History-off menubar state
 - Menubar renders newest 12 stored transcripts
 
-## Remaining Tasks
-
-### Task 5 Review
-
-Review `b4148d4` against Task 5 in the implementation plan. Fix all spec or quality findings before continuing.
-
 ### Task 6
 
-Replace the segmented settings window with the compact 680 by 460 sidebar shell:
+Commits:
 
-- General
-- Models
-- Keyboard
-- History
-- Dictionary
-- About
+- `a15c241` Replace preferences tabs with sidebar window
+- `afd8cd7` Fix preferences sidebar layout quality
 
-Minimum window size: 620 by 400.
+Implemented the compact, resizable 680 by 460 sidebar window with General, Models, Keyboard, History, Dictionary, and About pages. Minimum size is 620 by 400.
 
 ### Task 7
 
-Build the History workspace:
+Commits:
 
-- Searchable two-pane layout
-- Copy, repaste, delete
-- Save-history toggle and destructive confirmation
-- Text selection to Add to Dictionary popover
+- `154dedc` Add transcript history workspace
+- `4d7d4d8` Fix transcript history action handling
+
+Implemented the searchable two-pane History workspace with copy, repaste, delete, privacy toggle, disabled/error states, and selected-text Add to Dictionary.
 
 ### Task 8
 
-Build the Dictionary manager:
+Commit:
 
-- Searchable table
-- Add/Edit sheet
-- Delete and multi-delete confirmation
-- Shared mutation APIs
+- `1ea16fb` Add dictionary manager
+
+Implemented the searchable two-column Dictionary manager with add/edit sheet, double-click editing, delete-key support, and multi-delete confirmation.
 
 ### Task 9
 
-Finish integration and documentation, then run:
+Completed the integration review and documentation update. Final automated checks:
 
 ```bash
 swift test
@@ -196,16 +181,4 @@ git diff --check
 git status --short
 ```
 
-Also manually verify resizing, light/dark appearance, model actions, hotkey capture, history privacy behavior, dictionary interactions, and unchanged recording/transcription behavior.
-
-## Workflow
-
-Continue using Superpowers subagent-driven development:
-
-1. Fresh implementation agent per task
-2. Spec-compliance review
-3. Code-quality review
-4. Implementer fixes every finding
-5. Re-review until approved
-
-Do not start the next task with open review findings.
+No remaining code-review findings. Interactive checks still worth performing before release: light/dark appearance, permission actions, model actions, hotkey capture, history privacy behavior, dictionary interactions, and unchanged recording/transcription behavior.
