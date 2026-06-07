@@ -22,17 +22,20 @@ public struct TranscriptionRequest: Sendable {
     public var audioFileURL: URL
     public var modelID: String
     public var language: String
+    public var promptContext: String?
     public var progressHandler: (@Sendable (TranscriptionProgressEvent) -> Void)?
 
     public init(
         audioFileURL: URL,
         modelID: String,
         language: String = "en",
+        promptContext: String? = nil,
         progressHandler: (@Sendable (TranscriptionProgressEvent) -> Void)? = nil
     ) {
         self.audioFileURL = audioFileURL
         self.modelID = modelID
         self.language = language
+        self.promptContext = promptContext
         self.progressHandler = progressHandler
     }
 }

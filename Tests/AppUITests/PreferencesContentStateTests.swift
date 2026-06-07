@@ -5,6 +5,51 @@ import TranscriptHistoryStore
 import XCTest
 
 final class PreferencesContentStateTests: XCTestCase {
+    func testVocabularyPromptNormalizesDeduplicatesAndBoundsTerms() {
+        let prompt = PreferencesContentState.vocabularyPrompt(
+            terms: [
+                VocabularyTerm(value: " Anduril "),
+                VocabularyTerm(value: "anduril"),
+                VocabularyTerm(value: "Postgres"),
+                VocabularyTerm(value: String(repeating: "x", count: 500))
+            ],
+            maximumLength: 48
+        )
+
+        XCTAssertEqual(prompt, "Preferred vocabulary: Anduril, Postgres")
+    }
+
+    func testVocabularyPromptIsNilWithoutUsableTerms() {
+        XCTAssertNil(PreferencesContentState.vocabularyPrompt(terms: [VocabularyTerm(value: "  ")]))
+    }
+
+    func testHistoryMetricsIncludeAvailablePerformanceData() {
+        let record = TranscriptRecord(
+            id: UUID(),
+            createdAt: .now,
+            text: "one two three four",
+            recordingDurationMS: 2_000,
+            transcriptionLatencyMS: 1_400
+        )
+
+        XCTAssertEqual(
+            PreferencesContentState.historyMetrics(for: record),
+            "4 words · 2s recording · 120 WPM · transcribed in 1.4s"
+        )
+    }
+
+    func testHistoryMetricsOmitUnavailableLegacyPerformanceData() {
+        let record = TranscriptRecord(id: UUID(), createdAt: .now, text: "one two")
+
+        XCTAssertEqual(PreferencesContentState.historyMetrics(for: record), "2 words")
+    }
+
+    func testFilteredVocabularyMatchesPreferredTerms() {
+        let terms = [VocabularyTerm(value: "Anduril"), VocabularyTerm(value: "Postgres")]
+
+        XCTAssertEqual(PreferencesContentState.filteredVocabulary(terms: terms, query: "and").map(\.value), ["Anduril"])
+    }
+
     func testHistoryMenuStateIsDisabledBeforeConsideringStoreHealth() {
         XCTAssertEqual(
             PreferencesContentState.historyMenuState(

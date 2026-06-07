@@ -6,7 +6,7 @@ APP_BUNDLE := $(APP_NAME).app
 EXECUTABLE_TARGET := ScrawlApp
 SWIFT_ARCH_FLAGS := $(foreach arch,$(BUILD_ARCHS),--arch $(arch))
 
-.PHONY: build install uninstall clean test check-deps doctor
+.PHONY: build install uninstall clean test run run-debug check-deps doctor
 
 check-deps:
 	@command -v swift >/dev/null 2>&1 || { echo "Error: swift is not installed. Install Xcode command line tools: xcode-select --install"; exit 1; }
@@ -23,6 +23,12 @@ build: check-deps
 
 test:
 	swift test
+
+run:
+	./scripts/run-local.sh
+
+run-debug:
+	./scripts/run-local.sh --debug
 
 install: build
 	SCRAWL_SKIP_BUILD=1 ./scripts/install-app.sh "$(PREFIX)"

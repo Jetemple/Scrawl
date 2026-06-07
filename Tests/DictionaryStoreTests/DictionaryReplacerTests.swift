@@ -3,6 +3,54 @@ import Foundation
 import XCTest
 
 final class DictionaryReplacerTests: XCTestCase {
+    func testVocabularyTermsNormalizeAndDeduplicateCaseInsensitively() throws {
+        let store = InMemoryDictionaryStore()
+
+        try store.addTerm(" Anduril ")
+        try store.addTerm("anduril")
+        try store.addTerm("Postgres")
+
+        XCTAssertEqual(store.terms().map(\.value), ["Anduril", "Postgres"])
+    }
+
+    func testVocabularyTermsCanBeEditedAndDeleted() throws {
+        let store = InMemoryDictionaryStore(terms: [
+            VocabularyTerm(value: "Anduril"),
+            VocabularyTerm(value: "Postgres")
+        ])
+
+        try store.replaceTerm(original: "Anduril", with: "Kubernetes")
+        try store.deleteTerms(["Postgres"])
+
+        XCTAssertEqual(store.terms().map(\.value), ["Kubernetes"])
+    }
+
+    func testJSONVocabularyStoreMigratesLegacyCorrectValues() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let fileURL = directory.appending(path: "dictionary.json")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode([
+            DictionaryEntry(wrong: "andrew", correct: "Anduril"),
+            DictionaryEntry(wrong: "post grass", correct: "Postgres"),
+            DictionaryEntry(wrong: "duplicate", correct: "anduril")
+        ]).write(to: fileURL)
+
+        let store = JSONDictionaryStore(fileURL: fileURL)
+
+        XCTAssertEqual(store.terms().map(\.value), ["Anduril", "Postgres"])
+    }
+
+    func testJSONVocabularyStorePersistsPreferredTerms() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let fileURL = directory.appending(path: "dictionary.json")
+        let store = JSONDictionaryStore(fileURL: fileURL)
+
+        try store.addTerm("Anduril")
+        try store.addTerm("Postgres")
+
+        XCTAssertEqual(JSONDictionaryStore(fileURL: fileURL).terms().map(\.value), ["Anduril", "Postgres"])
+    }
+
     func testAppliesCaseInsensitiveReplacement() {
         let entries = [DictionaryEntry(wrong: "whispr", correct: "Whisper")]
         let result = DictionaryReplacer.apply(entries: entries, to: "whispr and WHISPR and Whispr")

@@ -120,6 +120,46 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         XCTAssertTrue(arguments.contains("--no-gpu"))
     }
 
+    func testMakeCLIArgumentsIncludesNonEmptyPromptContext() {
+        let provider = WhisperCppProvider(config: WhisperCppConfig(
+            executableURL: URL(filePath: "/usr/local/bin/whisper-cli"),
+            modelsDirectoryURL: URL(filePath: "/tmp/models")
+        ))
+        let request = TranscriptionRequest(
+            audioFileURL: URL(filePath: "/tmp/input.wav"),
+            modelID: "ggml-small.en",
+            promptContext: "Preferred vocabulary: Anduril, Postgres"
+        )
+
+        let arguments = provider.makeCLIArguments(
+            request: request,
+            modelPath: URL(filePath: "/tmp/models/ggml-small.en.bin"),
+            outputPrefix: URL(filePath: "/tmp/output")
+        )
+
+        XCTAssertEqual(arguments.suffix(2), ["--prompt", "Preferred vocabulary: Anduril, Postgres"])
+    }
+
+    func testMakeCLIArgumentsOmitsBlankPromptContext() {
+        let provider = WhisperCppProvider(config: WhisperCppConfig(
+            executableURL: URL(filePath: "/usr/local/bin/whisper-cli"),
+            modelsDirectoryURL: URL(filePath: "/tmp/models")
+        ))
+        let request = TranscriptionRequest(
+            audioFileURL: URL(filePath: "/tmp/input.wav"),
+            modelID: "ggml-small.en",
+            promptContext: "  \n "
+        )
+
+        let arguments = provider.makeCLIArguments(
+            request: request,
+            modelPath: URL(filePath: "/tmp/models/ggml-small.en.bin"),
+            outputPrefix: URL(filePath: "/tmp/output")
+        )
+
+        XCTAssertFalse(arguments.contains("--prompt"))
+    }
+
     func testTranscriptionRequestCarriesOptionalProgressHandler() {
         let request = TranscriptionRequest(
             audioFileURL: URL(filePath: "/tmp/input.wav"),
@@ -129,6 +169,16 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         )
 
         XCTAssertNotNil(request.progressHandler)
+    }
+
+    func testTranscriptionRequestCarriesOptionalPromptContext() {
+        let request = TranscriptionRequest(
+            audioFileURL: URL(filePath: "/tmp/input.wav"),
+            modelID: "ggml-large-v3-turbo",
+            promptContext: "Preferred vocabulary: Anduril"
+        )
+
+        XCTAssertEqual(request.promptContext, "Preferred vocabulary: Anduril")
     }
 
     func testProgressPhaseDetectsWhisperProcessingLogLine() {

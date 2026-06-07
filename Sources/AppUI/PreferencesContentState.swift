@@ -59,7 +59,56 @@ enum PreferencesContentState {
         }
     }
 
+    static func filteredVocabulary(terms: [VocabularyTerm], query: String) -> [VocabularyTerm] {
+        let query = normalizedQuery(query)
+        guard !query.isEmpty else { return terms }
+        return terms.filter { $0.value.localizedStandardContains(query) }
+    }
+
+    static func historyMetrics(for record: TranscriptRecord) -> String {
+        let wordCount = record.text.split(whereSeparator: \.isWhitespace).count
+        var metrics = ["\(wordCount) \(wordCount == 1 ? "word" : "words")"]
+        if let durationMS = record.recordingDurationMS, durationMS > 0 {
+            metrics.append("\(formattedDuration(durationMS)) recording")
+            metrics.append("\(Int((Double(wordCount) * 60_000 / Double(durationMS)).rounded())) WPM")
+        }
+        if let latencyMS = record.transcriptionLatencyMS, latencyMS > 0 {
+            metrics.append("transcribed in \(formattedDuration(latencyMS))")
+        }
+        return metrics.joined(separator: " · ")
+    }
+
+    static func vocabularyPrompt(
+        terms: [VocabularyTerm],
+        maximumLength: Int = 500
+    ) -> String? {
+        var seen: Set<String> = []
+        var accepted: [String] = []
+        let prefix = "Preferred vocabulary: "
+
+        for term in terms {
+            let value = term.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty, seen.insert(value.lowercased()).inserted else { continue }
+            let candidate = prefix + (accepted + [value]).joined(separator: ", ")
+            guard candidate.count <= maximumLength else { continue }
+            accepted.append(value)
+        }
+
+        guard !accepted.isEmpty else { return nil }
+        return prefix + accepted.joined(separator: ", ")
+    }
+
     private static func normalizedQuery(_ query: String) -> String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func formattedDuration(_ milliseconds: Int) -> String {
+        if milliseconds < 1_000 {
+            return "\(milliseconds)ms"
+        }
+        let seconds = Double(milliseconds) / 1_000
+        return seconds.rounded() == seconds
+            ? "\(Int(seconds))s"
+            : String(format: "%.1fs", seconds)
     }
 }

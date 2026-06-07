@@ -4,11 +4,21 @@ public struct TranscriptRecord: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let createdAt: Date
     public let text: String
+    public let recordingDurationMS: Int?
+    public let transcriptionLatencyMS: Int?
 
-    public init(id: UUID, createdAt: Date, text: String) {
+    public init(
+        id: UUID,
+        createdAt: Date,
+        text: String,
+        recordingDurationMS: Int? = nil,
+        transcriptionLatencyMS: Int? = nil
+    ) {
         self.id = id
         self.createdAt = createdAt
         self.text = text
+        self.recordingDurationMS = recordingDurationMS
+        self.transcriptionLatencyMS = transcriptionLatencyMS
     }
 }
 

@@ -16,7 +16,6 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let copyTranscript: (UUID) -> Void
         let repasteTranscript: (UUID) -> Void
         let deleteTranscripts: (Set<UUID>) -> Void
-        let addDictionaryEntry: (String, String, @escaping (Result<Void, Error>) -> Void) -> Void
         let saveDictionaryEntry: (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void
         let deleteDictionaryEntries: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
     }
@@ -48,7 +47,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             case .models: "Models"
             case .keyboard: "Keyboard"
             case .history: "History"
-            case .dictionary: "Dictionary"
+            case .dictionary: "Vocabulary"
             case .about: "About"
             }
         }
@@ -110,7 +109,6 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     var historyState: PreferencesHistoryView.State { historyView.state }
     var historyVisibleRecordIDs: [UUID] { historyView.visibleRecordIDs }
     var historySelectedRecordID: UUID? { historyView.selectedRecordID }
-    var isHistoryAddDictionaryEnabled: Bool { historyView.isAddDictionaryEnabled }
     var dictionaryState: PreferencesDictionaryView.State { dictionaryView.state }
     var dictionaryVisibleWrongValues: [String] { dictionaryView.visibleWrongValues }
     var dictionarySelectedWrong: String? { dictionaryView.selectedWrong }
@@ -130,8 +128,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             setEnabled: actions.setTranscriptHistoryEnabled,
             copy: actions.copyTranscript,
             repaste: actions.repasteTranscript,
-            delete: actions.deleteTranscripts,
-            addDictionaryEntry: actions.addDictionaryEntry
+            delete: actions.deleteTranscripts
         ))
         dictionaryView = PreferencesDictionaryView(actions: .init(
             save: actions.saveDictionaryEntry,
@@ -236,10 +233,6 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     func setHistorySearchQuery(_ query: String) {
         historyView.setSearchQuery(query)
-    }
-
-    func selectHistoryText(range: NSRange) {
-        historyView.selectText(range: range)
     }
 
     func setDictionarySearchQuery(_ query: String) {

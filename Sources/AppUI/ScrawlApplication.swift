@@ -1,5 +1,6 @@
 import AppKit
 import AudioCapture
+import DictionaryStore
 import HotkeyEngine
 import Permissions
 import SettingsStore
@@ -84,6 +85,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var historySubmenu: NSMenu?
 
     private var recordingOrigin: RecordingOrigin?
+    private var recordingStartedAt: Date?
     private var recordingSafetyTimer: Timer?
     private var insertionTargetApp: NSRunningApplication?
     private var lastExternalActiveApp: NSRunningApplication?
@@ -218,9 +220,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 deleteTranscripts: { [weak self] ids in
                     self?.deleteTranscripts(ids: ids)
                 },
-                addDictionaryEntry: { [weak self] wrong, correct, completion in
-                    self?.addDictionaryEntry(wrong: wrong, correct: correct, completion: completion)
-                },
                 saveDictionaryEntry: { [weak self] originalWrong, wrong, correct, completion in
                     self?.saveDictionaryEntry(
                         originalWrong: originalWrong,
@@ -262,7 +261,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 isModelDownloadInProgress: isModelDownloadInProgress,
                 transcriptHistory: runtime.transcriptHistoryStore.records(),
                 transcriptHistoryLoadErrorDescription: runtime.transcriptHistoryStore.loadErrorDescription,
-                dictionaryEntries: runtime.dictionaryStore.entries()
+                dictionaryEntries: runtime.dictionaryStore.terms().map {
+                    DictionaryEntry(wrong: $0.value, correct: $0.value)
+                }
             )
         )
     }
@@ -343,14 +344,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    private func addDictionaryEntry(
-        wrong: String,
-        correct: String,
-        completion: @escaping (Result<Void, Error>) -> Void
-    ) {
-        saveDictionaryEntry(originalWrong: nil, wrong: wrong, correct: correct, completion: completion)
-    }
-
     private func saveDictionaryEntry(
         originalWrong: String?,
         wrong: String,
@@ -361,9 +354,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         dictionaryActionQueue.async { [weak self] in
             let result = Result {
                 if let originalWrong {
-                    try store.replace(originalWrong: originalWrong, wrong: wrong, correct: correct)
+                    try store.replaceTerm(original: originalWrong, with: correct)
                 } else {
-                    try store.addOrReplace(wrong: wrong, correct: correct)
+                    try store.addTerm(correct)
                 }
             }
             DispatchQueue.main.async {
@@ -381,7 +374,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     ) {
         let store = runtime.dictionaryStore
         dictionaryActionQueue.async { [weak self] in
-            let result = Result { try store.delete(wrongValues: wrongValues) }
+            let result = Result { try store.deleteTerms(wrongValues) }
             DispatchQueue.main.async {
                 if case .success = result {
                     self?.refreshPreferencesWindow()
@@ -1120,6 +1113,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         do {
             try runtime.audioCaptureService.startCapture()
             recordingOrigin = origin
+            recordingStartedAt = .now
             activeOperationGeneration.beginActiveOperation()
             updateRecordingActionRows()
             scheduleSafetyStopTimer()
@@ -1140,10 +1134,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         recordingSafetyTimer = nil
 
         let audioURL: URL
+        let recordingDurationMS = recordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1_000) }
         do {
             audioURL = try runtime.audioCaptureService.stopCapture()
         } catch {
             recordingOrigin = nil
+            recordingStartedAt = nil
             updateRecordingActionRows()
             runtime.overlayController.setState(.idle)
             updateStatusIcon()
@@ -1157,6 +1153,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         recordingOrigin = nil
+        recordingStartedAt = nil
         updateRecordingActionRows()
         runtime.overlayController.setState(.transcribing)
         updateStatusIcon()
@@ -1166,6 +1163,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let runtime = self.runtime
         let insertionTargetApp = self.insertionTargetApp
         let operationGeneration = activeOperationGeneration.current
+        let promptContext = PreferencesContentState.vocabularyPrompt(terms: runtime.dictionaryStore.terms())
 
         Task { [weak self] in
             defer { try? FileManager.default.removeItem(at: audioURL) }
@@ -1174,16 +1172,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     audioFileURL: audioURL,
                     modelID: settings.modelID,
                     language: settings.language,
+                    promptContext: promptContext,
                     progressHandler: { [weak self] event in
                         self?.handleTranscriptionProgress(event)
                     }
                 )
                 let result = try await runtime.whisperProvider.transcribe(request)
-                let correctedText = runtime.dictionaryStore.apply(to: result.text)
-                _ = await self?.pasteToTargetApp(correctedText, target: insertionTargetApp)
+                _ = await self?.pasteToTargetApp(result.text, target: insertionTargetApp)
                 await self?.handleTranscriptionSuccess(
                     latencyMS: result.latencyMS,
-                    transcript: correctedText,
+                    recordingDurationMS: recordingDurationMS,
+                    transcript: result.text,
                     operationGeneration: operationGeneration
                 )
             } catch {
@@ -1644,6 +1643,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     @MainActor
     private func handleTranscriptionSuccess(
         latencyMS: Int,
+        recordingDurationMS: Int?,
         transcript: String,
         operationGeneration: UInt64
     ) async {
@@ -1665,7 +1665,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let coordinator = transcriptHistoryCoordinator
         do {
             try await Task.detached(priority: .utility) {
-                try coordinator.add(text: transcript)
+                try coordinator.add(
+                    text: transcript,
+                    recordingDurationMS: recordingDurationMS,
+                    transcriptionLatencyMS: latencyMS
+                )
             }.value
             refreshHistoryMenu()
             refreshPreferencesWindow()

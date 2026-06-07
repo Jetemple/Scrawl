@@ -36,14 +36,22 @@ The original checkout remains at:
 
 ## Current Status
 
-Tasks 1 through 9 are complete. The feature is ready for interactive release checks and branch integration.
+The original sidebar pass is complete. A repair pass is now implemented to simplify History and replace correction-pair Dictionary behavior with prompt-based Vocabulary.
 
-Final automated verification:
+Latest automated verification:
 
-- `swift test`: 109 passed
+- `swift test`: 122 passed
 - `swift build -c release --product ScrawlApp`: passed
 - `git diff --check`: passed
-- Release-binary launch smoke test: exited cleanly
+
+Repair pass:
+
+- History is a compact single-column feed with word count, recording duration, WPM, and transcription latency.
+- History supports search, copy, repaste, delete, and the existing privacy control. Dictionary actions were removed.
+- Dictionary is now user-facing Vocabulary: a searchable list of preferred terms.
+- Vocabulary terms are sent to `whisper-cli` through `--prompt`; transcripts are no longer rewritten afterward.
+- Existing correction entries migrate by retaining their corrected values as preferred terms.
+- `make run` stops an installed Scrawl instance before launching the current source build.
 
 ## Completed Work
 

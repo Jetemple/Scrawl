@@ -10,7 +10,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     func testSidebarContainsExpectedSections() {
         XCTAssertEqual(
             PreferencesWindowController.Section.allCases.map(\.title),
-            ["General", "Models", "Keyboard", "History", "Dictionary", "About"]
+            ["General", "Models", "Keyboard", "History", "Vocabulary", "About"]
         )
     }
 
@@ -110,17 +110,6 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testHistoryAddDictionaryRequiresSelectedText() {
-        let record = TranscriptRecord(id: UUID(), createdAt: .now, text: "Kubernetes notes")
-        let controller = PreferencesWindowController(actions: makeActions())
-        controller.update(snapshot: makeSnapshot(records: [record]))
-
-        XCTAssertFalse(controller.isHistoryAddDictionaryEnabled)
-        controller.selectHistoryText(range: NSRange(location: 0, length: 10))
-        XCTAssertTrue(controller.isHistoryAddDictionaryEnabled)
-    }
-
-    @MainActor
     func testHistoryPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
@@ -150,18 +139,18 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testDictionaryPageFiltersByEitherColumnAndFallsBackToFirstSelection() {
+    func testVocabularyPageFiltersPreferredTermsAndFallsBackToFirstSelection() {
         let first = DictionaryEntry(wrong: "post grass", correct: "Postgres")
         let second = DictionaryEntry(wrong: "cube", correct: "Kubernetes")
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot(dictionaryEntries: [first, second]))
         controller.selectSection(.dictionary)
 
-        XCTAssertEqual(controller.dictionarySelectedWrong, first.wrong)
+        XCTAssertEqual(controller.dictionarySelectedWrong, first.correct)
         controller.setDictionarySearchQuery("kube")
 
-        XCTAssertEqual(controller.dictionaryVisibleWrongValues, [second.wrong])
-        XCTAssertEqual(controller.dictionarySelectedWrong, second.wrong)
+        XCTAssertEqual(controller.dictionaryVisibleWrongValues, [second.correct])
+        XCTAssertEqual(controller.dictionarySelectedWrong, second.correct)
 
         controller.setDictionarySearchQuery("missing")
         XCTAssertEqual(controller.dictionaryState, .noSearchResults)
@@ -169,7 +158,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         controller.setDictionarySearchQuery("")
         XCTAssertEqual(controller.dictionaryState, .entries)
-        XCTAssertEqual(controller.dictionarySelectedWrong, first.wrong)
+        XCTAssertEqual(controller.dictionarySelectedWrong, first.correct)
     }
 
     @MainActor
@@ -245,7 +234,6 @@ final class PreferencesWindowControllerTests: XCTestCase {
             copyTranscript: { _ in },
             repasteTranscript: { _ in },
             deleteTranscripts: { _ in },
-            addDictionaryEntry: { _, _, completion in completion(.success(())) },
             saveDictionaryEntry: { _, _, _, completion in completion(.success(())) },
             deleteDictionaryEntries: { _, completion in completion(.success(())) }
         )

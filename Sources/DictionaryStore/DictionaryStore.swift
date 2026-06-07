@@ -10,13 +10,46 @@ public struct DictionaryEntry: Codable, Equatable, Sendable {
     }
 }
 
+public struct VocabularyTerm: Codable, Equatable, Sendable {
+    public var value: String
+
+    public init(value: String) {
+        self.value = value
+    }
+}
+
 public protocol DictionaryStoring: Sendable {
     func entries() -> [DictionaryEntry]
+    func terms() -> [VocabularyTerm]
     func save(_ entries: [DictionaryEntry]) throws
+    func addTerm(_ value: String) throws
+    func replaceTerm(original: String, with value: String) throws
+    func deleteTerms(_ values: Set<String>) throws
     func addOrReplace(wrong: String, correct: String) throws
     func delete(wrongValues: Set<String>) throws
     func replace(originalWrong: String, wrong: String, correct: String) throws
     func apply(to text: String) -> String
+}
+
+private enum VocabularyTermsMutation {
+    static func normalized(_ values: [String]) -> [VocabularyTerm] {
+        var seen: Set<String> = []
+        return values.compactMap { rawValue in
+            let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return nil }
+            let key = value.lowercased()
+            guard seen.insert(key).inserted else { return nil }
+            return VocabularyTerm(value: value)
+        }
+    }
+
+    static func entries(from terms: [VocabularyTerm]) -> [DictionaryEntry] {
+        terms.map { DictionaryEntry(wrong: $0.value, correct: $0.value) }
+    }
+
+    static func terms(from entries: [DictionaryEntry]) -> [VocabularyTerm] {
+        normalized(entries.map(\.correct))
+    }
 }
 
 private enum DictionaryEntriesMutation {
@@ -90,6 +123,10 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
         self.storedEntries = entries
     }
 
+    public convenience init(terms: [VocabularyTerm]) {
+        self.init(entries: VocabularyTermsMutation.entries(from: VocabularyTermsMutation.normalized(terms.map(\.value))))
+    }
+
     public func entries() -> [DictionaryEntry] {
         lock.lock()
         defer { lock.unlock() }
@@ -100,6 +137,28 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
         lock.lock()
         defer { lock.unlock() }
         storedEntries = entries
+    }
+
+    public func terms() -> [VocabularyTerm] {
+        VocabularyTermsMutation.terms(from: entries())
+    }
+
+    public func addTerm(_ value: String) throws {
+        mutateTerms { $0 + [value] }
+    }
+
+    public func replaceTerm(original: String, with value: String) throws {
+        mutateTerms { terms in
+            terms.map { $0.caseInsensitiveCompare(original) == .orderedSame ? value : $0 }
+        }
+    }
+
+    public func deleteTerms(_ values: Set<String>) throws {
+        mutateTerms { terms in
+            terms.filter { term in
+                !values.contains { $0.caseInsensitiveCompare(term) == .orderedSame }
+            }
+        }
     }
 
     public func addOrReplace(wrong: String, correct: String) throws {
@@ -137,6 +196,13 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
             storedEntries = updatedEntries
         }
     }
+
+    private func mutateTerms(_ mutation: ([String]) -> [String]) {
+        lock.lock()
+        defer { lock.unlock() }
+        let terms = VocabularyTermsMutation.terms(from: storedEntries).map(\.value)
+        storedEntries = VocabularyTermsMutation.entries(from: VocabularyTermsMutation.normalized(mutation(terms)))
+    }
 }
 
 public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
@@ -159,11 +225,35 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
         return cachedEntries
     }
 
+    public func terms() -> [VocabularyTerm] {
+        lock.lock()
+        defer { lock.unlock() }
+        return VocabularyTermsMutation.terms(from: cachedEntries)
+    }
+
     public func save(_ entries: [DictionaryEntry]) throws {
         lock.lock()
         defer { lock.unlock() }
         try persist(entries)
         cachedEntries = entries
+    }
+
+    public func addTerm(_ value: String) throws {
+        try mutateTerms { $0 + [value] }
+    }
+
+    public func replaceTerm(original: String, with value: String) throws {
+        try mutateTerms { terms in
+            terms.map { $0.caseInsensitiveCompare(original) == .orderedSame ? value : $0 }
+        }
+    }
+
+    public func deleteTerms(_ values: Set<String>) throws {
+        try mutateTerms { terms in
+            terms.filter { term in
+                !values.contains { $0.caseInsensitiveCompare(term) == .orderedSame }
+            }
+        }
     }
 
     public func addOrReplace(wrong: String, correct: String) throws {
@@ -202,6 +292,13 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
         }
         try persist(updatedEntries)
         cachedEntries = updatedEntries
+    }
+
+    private func mutateTerms(_ mutation: ([String]) -> [String]) throws {
+        try mutateEntries { entries in
+            let terms = VocabularyTermsMutation.terms(from: entries).map(\.value)
+            return VocabularyTermsMutation.entries(from: VocabularyTermsMutation.normalized(mutation(terms)))
+        }
     }
 
     private func persist(_ entries: [DictionaryEntry]) throws {

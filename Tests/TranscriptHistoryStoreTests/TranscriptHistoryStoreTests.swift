@@ -3,6 +3,30 @@ import TranscriptHistoryStore
 import XCTest
 
 final class TranscriptHistoryStoreTests: XCTestCase {
+    func testJSONStorePersistsPerformanceMetricsAndDecodesLegacyRecords() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let fileURL = directory.appending(path: "history.json")
+        let store = JSONTranscriptHistoryStore(fileURL: fileURL)
+        let measured = TranscriptRecord(
+            id: UUID(),
+            createdAt: .now,
+            text: "measured",
+            recordingDurationMS: 12_000,
+            transcriptionLatencyMS: 1_400
+        )
+
+        try store.add(measured)
+        XCTAssertEqual(JSONTranscriptHistoryStore(fileURL: fileURL).records(), [measured])
+
+        let legacy = """
+        [{"id":"00000000-0000-0000-0000-000000000001","createdAt":0,"text":"legacy"}]
+        """.data(using: .utf8)!
+        try legacy.write(to: fileURL)
+        let decodedLegacy = try XCTUnwrap(JSONTranscriptHistoryStore(fileURL: fileURL).records().first)
+        XCTAssertNil(decodedLegacy.recordingDurationMS)
+        XCTAssertNil(decodedLegacy.transcriptionLatencyMS)
+    }
+
     func testAddStoresNewestFirstAndCapsAtLimit() throws {
         let store = InMemoryTranscriptHistoryStore(limit: 3)
 

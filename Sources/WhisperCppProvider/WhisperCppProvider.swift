@@ -326,6 +326,10 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
             arguments.append("--no-gpu")
         }
 
+        if let prompt = request.promptContext?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
+            arguments.append(contentsOf: ["--prompt", prompt])
+        }
+
         return arguments
     }
 

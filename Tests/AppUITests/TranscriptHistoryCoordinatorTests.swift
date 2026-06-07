@@ -4,6 +4,18 @@ import TranscriptHistoryStore
 import XCTest
 
 final class TranscriptHistoryCoordinatorTests: XCTestCase {
+    func testAddStoresPerformanceMetrics() throws {
+        let settingsStore = makeSettingsStore()
+        let historyStore = InMemoryTranscriptHistoryStore()
+        let coordinator = TranscriptHistoryCoordinator(settingsStore: settingsStore, historyStore: historyStore)
+
+        try coordinator.add(text: "hello world", recordingDurationMS: 2_000, transcriptionLatencyMS: 500)
+
+        let record = try XCTUnwrap(historyStore.records().first)
+        XCTAssertEqual(record.recordingDurationMS, 2_000)
+        XCTAssertEqual(record.transcriptionLatencyMS, 500)
+    }
+
     func testAddDoesNothingWhenHistoryIsDisabled() throws {
         let settingsStore = makeSettingsStore()
         try settingsStore.save(AppSettings(isTranscriptHistoryEnabled: false))

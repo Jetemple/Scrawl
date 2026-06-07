@@ -1,13 +1,9 @@
 import AppKit
 import TranscriptHistoryStore
 
-final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSTextViewDelegate {
+final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     enum State: Equatable {
-        case disabled
-        case unavailable
-        case empty
-        case noSearchResults
-        case records
+        case disabled, unavailable, empty, noSearchResults, records
     }
 
     struct Actions {
@@ -15,41 +11,30 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         let copy: (UUID) -> Void
         let repaste: (UUID) -> Void
         let delete: (Set<UUID>) -> Void
-        let addDictionaryEntry: (String, String, @escaping (Result<Void, Error>) -> Void) -> Void
     }
 
     private let actions: Actions
     private let toggle = NSButton(checkboxWithTitle: "Save transcript history", target: nil, action: nil)
     private let searchField = NSSearchField()
     private let tableView = NSTableView()
-    private let textView = NSTextView()
-    private let timestampLabel = NSTextField(labelWithString: "")
-    private let wordCountLabel = NSTextField(labelWithString: "")
+    private let stateView = NSView()
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
-    private let stateView = NSView()
-    private let panes = NSStackView()
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let repasteButton = NSButton(title: "Paste Again", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
-    private let addDictionaryButton = NSButton(title: "Add to Dictionary", target: nil, action: nil)
     private var actionRetainers: [ClosureAction] = []
     private var records: [TranscriptRecord] = []
     private var visibleRecords: [TranscriptRecord] = []
     private var selectedID: UUID?
     private var isEnabled = true
     private var loadErrorDescription: String?
-    private var dictionaryPopover: NSPopover?
-    private var dictionaryPopoverActions: [ClosureAction] = []
 
     private(set) var state = State.empty
     var visibleRecordIDs: [UUID] { visibleRecords.map(\.id) }
     var selectedRecordID: UUID? { selectedID }
-    var isAddDictionaryEnabled: Bool { addDictionaryButton.isEnabled }
     var areActionControlsWithinBounds: Bool {
-        [copyButton, repasteButton, deleteButton, addDictionaryButton].allSatisfy {
-            bounds.contains(convert($0.bounds, from: $0))
-        }
+        [copyButton, repasteButton, deleteButton].allSatisfy { bounds.contains(convert($0.bounds, from: $0)) }
     }
 
     init(actions: Actions) {
@@ -60,9 +45,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func update(records: [TranscriptRecord], isEnabled: Bool, loadErrorDescription: String?) {
         self.records = records
@@ -77,53 +60,68 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         applyFilter()
     }
 
-    func selectText(range: NSRange) {
-        textView.setSelectedRange(range)
-        updateActionAvailability()
-    }
+    func controlTextDidChange(_ obj: Notification) { applyFilter() }
+    func numberOfRows(in tableView: NSTableView) -> Int { visibleRecords.count }
 
-    func controlTextDidChange(_ obj: Notification) {
-        applyFilter()
-    }
-
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        visibleRecords.count
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard visibleRecords.indices.contains(row) else { return 72 }
+        let width = max(260, tableView.bounds.width - 28)
+        let text = visibleRecords[row].text as NSString
+        let textHeight = text.boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin],
+            attributes: [.font: NSFont.systemFont(ofSize: 13)]
+        ).height
+        return max(74, ceil(textHeight) + 48)
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard visibleRecords.indices.contains(row) else { return nil }
         let record = visibleRecords[row]
         let cell = NSTableCellView()
-        let text = NSTextField(labelWithString: record.text.replacingOccurrences(of: "\n", with: " "))
-        text.lineBreakMode = .byTruncatingTail
-        text.font = .systemFont(ofSize: 12)
-        text.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(text)
+        let time = NSTextField(labelWithString: DateFormatter.localizedString(
+            from: record.createdAt,
+            dateStyle: .medium,
+            timeStyle: .short
+        ))
+        time.font = .systemFont(ofSize: 10, weight: .medium)
+        time.textColor = .secondaryLabelColor
+        let metrics = NSTextField(labelWithString: PreferencesContentState.historyMetrics(for: record))
+        metrics.font = .systemFont(ofSize: 10)
+        metrics.textColor = .tertiaryLabelColor
+        let metadata = NSStackView(views: [time, NSView(), metrics])
+        metadata.orientation = .horizontal
+        let text = NSTextField(wrappingLabelWithString: record.text)
+        text.font = .systemFont(ofSize: 13)
+        text.maximumNumberOfLines = 0
+        let stack = NSStackView(views: [metadata, text])
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(stack)
         NSLayoutConstraint.activate([
-            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            text.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: cell.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
         ])
         return cell
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         selectedID = visibleRecords.indices.contains(tableView.selectedRow) ? visibleRecords[tableView.selectedRow].id : nil
-        updateDetail()
-    }
-
-    func textViewDidChangeSelection(_ notification: Notification) {
         updateActionAvailability()
     }
 
     private func buildView() {
         let header = PreferencesPageSupport.makePageHeader(
             title: "History",
-            description: "Review, reuse, or remove transcripts saved locally on this Mac."
+            description: "Recent transcripts stored only on this Mac."
         )
         toggle.target = self
         toggle.action = #selector(toggleChanged(_:))
-
         searchField.placeholderString = "Search transcripts"
         searchField.delegate = self
 
@@ -131,37 +129,16 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 28
+        tableView.usesAutomaticRowHeights = false
+        tableView.intercellSpacing = NSSize(width: 0, height: 6)
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.allowsEmptySelection = true
 
-        let listScroll = NSScrollView()
-        listScroll.hasVerticalScroller = true
-        listScroll.documentView = tableView
-        let left = NSStackView(views: [searchField, listScroll])
-        left.orientation = .vertical
-        left.alignment = .width
-        left.spacing = 8
-        left.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.documentView = tableView
 
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.drawsBackground = false
-        textView.font = .systemFont(ofSize: 13)
-        textView.textContainerInset = NSSize(width: 6, height: 6)
-        textView.delegate = self
-        let textScroll = NSScrollView()
-        textScroll.hasVerticalScroller = true
-        textScroll.documentView = textView
-
-        timestampLabel.textColor = .secondaryLabelColor
-        wordCountLabel.textColor = .secondaryLabelColor
-        let metadata = NSStackView(views: [timestampLabel, NSView(), wordCountLabel])
-        metadata.orientation = .horizontal
-        metadata.alignment = .centerY
-
-        for button in [copyButton, repasteButton, addDictionaryButton, deleteButton] {
+        for button in [copyButton, repasteButton, deleteButton] {
             PreferencesPageSupport.configureSecondaryButton(button)
         }
         deleteButton.contentTintColor = .systemRed
@@ -171,35 +148,12 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             guard let id = self?.selectedID else { return }
             self?.actions.delete([id])
         }
-        bind(addDictionaryButton) { [weak self] in self?.showDictionaryPopover() }
-        let primaryButtons = NSStackView(views: [copyButton, repasteButton, addDictionaryButton, NSView()])
-        primaryButtons.orientation = .horizontal
-        primaryButtons.alignment = .centerY
-        primaryButtons.spacing = 6
-        let destructiveButtons = NSStackView(views: [NSView(), deleteButton])
-        destructiveButtons.orientation = .horizontal
-        destructiveButtons.alignment = .centerY
-        destructiveButtons.spacing = 6
-        let buttons = NSStackView(views: [primaryButtons, destructiveButtons])
-        buttons.orientation = .vertical
-        buttons.alignment = .width
-        buttons.spacing = 4
-
-        let right = NSStackView(views: [metadata, textScroll, buttons])
-        right.orientation = .vertical
-        right.alignment = .width
-        right.spacing = 8
-
-        panes.addArrangedSubview(left)
-        panes.addArrangedSubview(right)
-        panes.orientation = .horizontal
-        panes.alignment = .height
-        panes.spacing = 12
+        let buttons = NSStackView(views: [copyButton, repasteButton, deleteButton, NSView()])
+        buttons.orientation = .horizontal
+        buttons.spacing = 6
 
         stateTitle.font = .systemFont(ofSize: 15, weight: .medium)
-        stateTitle.alignment = .center
         stateDetail.textColor = .secondaryLabelColor
-        stateDetail.alignment = .center
         let stateStack = NSStackView(views: [stateTitle, stateDetail])
         stateStack.orientation = .vertical
         stateStack.alignment = .centerX
@@ -208,31 +162,29 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         stateView.addSubview(stateStack)
         NSLayoutConstraint.activate([
             stateStack.centerXAnchor.constraint(equalTo: stateView.centerXAnchor),
-            stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
-            stateStack.leadingAnchor.constraint(greaterThanOrEqualTo: stateView.leadingAnchor, constant: 16),
-            stateStack.trailingAnchor.constraint(lessThanOrEqualTo: stateView.trailingAnchor, constant: -16)
+            stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor)
         ])
 
         let workspace = NSView()
-        panes.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
         stateView.translatesAutoresizingMaskIntoConstraints = false
-        workspace.addSubview(panes)
+        workspace.addSubview(scrollView)
         workspace.addSubview(stateView)
         NSLayoutConstraint.activate([
-            panes.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
-            panes.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
-            panes.topAnchor.constraint(equalTo: workspace.topAnchor),
-            panes.bottomAnchor.constraint(equalTo: workspace.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: workspace.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: workspace.bottomAnchor),
             stateView.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
             stateView.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
             stateView.topAnchor.constraint(equalTo: workspace.topAnchor),
             stateView.bottomAnchor.constraint(equalTo: workspace.bottomAnchor)
         ])
 
-        let root = NSStackView(views: [header, toggle, workspace])
+        let root = NSStackView(views: [header, toggle, searchField, workspace, buttons])
         root.orientation = .vertical
         root.alignment = .width
-        root.spacing = 10
+        root.spacing = 9
         root.translatesAutoresizingMaskIntoConstraints = false
         addSubview(root)
         NSLayoutConstraint.activate([
@@ -240,7 +192,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             root.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
             root.topAnchor.constraint(equalTo: topAnchor, constant: 18),
             root.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-            workspace.heightAnchor.constraint(greaterThanOrEqualToConstant: 260)
+            workspace.heightAnchor.constraint(greaterThanOrEqualToConstant: 250)
         ])
     }
 
@@ -261,7 +213,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             tableView.deselectAll(nil)
         }
         updateState()
-        updateDetail()
+        updateActionAvailability()
     }
 
     private func updateState() {
@@ -284,36 +236,16 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         } else {
             state = .records
         }
-        stateView.isHidden = state == .records || state == .noSearchResults
-        panes.isHidden = state != .records && state != .noSearchResults
+        stateView.isHidden = state == .records
+        tableView.enclosingScrollView?.isHidden = state != .records
         searchField.isEnabled = isEnabled && loadErrorDescription == nil && !records.isEmpty
     }
 
-    private func updateDetail() {
-        guard let record = visibleRecords.first(where: { $0.id == selectedID }), state == .records else {
-            textView.string = state == .noSearchResults ? "No matching transcripts.\nTry a different search." : ""
-            timestampLabel.stringValue = ""
-            wordCountLabel.stringValue = ""
-            updateActionAvailability()
-            return
-        }
-        textView.string = record.text
-        timestampLabel.stringValue = DateFormatter.localizedString(
-            from: record.createdAt,
-            dateStyle: .medium,
-            timeStyle: .short
-        )
-        let count = record.text.split(whereSeparator: \.isWhitespace).count
-        wordCountLabel.stringValue = "\(count) \(count == 1 ? "word" : "words")"
-        updateActionAvailability()
-    }
-
     private func updateActionAvailability() {
-        let hasRecord = selectedID != nil && state == .records
-        copyButton.isEnabled = hasRecord
-        repasteButton.isEnabled = hasRecord
-        deleteButton.isEnabled = hasRecord
-        addDictionaryButton.isEnabled = hasRecord && textView.selectedRange().length > 0
+        let enabled = selectedID != nil && state == .records
+        copyButton.isEnabled = enabled
+        repasteButton.isEnabled = enabled
+        deleteButton.isEnabled = enabled
     }
 
     private func performOnSelected(_ action: ((UUID) -> Void)?) {
@@ -321,80 +253,5 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         action?(selectedID)
     }
 
-    @objc private func toggleChanged(_ sender: NSButton) {
-        actions.setEnabled(sender.state == .on)
-    }
-
-    private func showDictionaryPopover() {
-        let range = textView.selectedRange()
-        guard range.length > 0 else { return }
-        let selectedText = (textView.string as NSString).substring(with: range)
-        let heardField = NSTextField(string: selectedText)
-        let replacementField = NSTextField(string: selectedText)
-        let errorLabel = NSTextField(wrappingLabelWithString: "")
-        errorLabel.textColor = .systemRed
-        errorLabel.isHidden = true
-        let cancel = NSButton(title: "Cancel", target: nil, action: nil)
-        let add = NSButton(title: "Add", target: nil, action: nil)
-        add.keyEquivalent = "\r"
-
-        let fields = NSStackView(views: [
-            NSTextField(labelWithString: "Heard text"), heardField,
-            NSTextField(labelWithString: "Replacement"), replacementField,
-            errorLabel
-        ])
-        fields.orientation = .vertical
-        fields.alignment = .width
-        fields.spacing = 5
-        let buttons = NSStackView(views: [NSView(), cancel, add])
-        buttons.orientation = .horizontal
-        buttons.spacing = 6
-        let root = NSStackView(views: [fields, buttons])
-        root.orientation = .vertical
-        root.alignment = .width
-        root.spacing = 10
-        root.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-
-        let popover = NSPopover()
-        let controller = NSViewController()
-        controller.view = root
-        controller.preferredContentSize = NSSize(width: 280, height: 170)
-        popover.contentViewController = controller
-        popover.behavior = .transient
-
-        let cancelAction = ClosureAction { popover.close() }
-        let addAction = ClosureAction { [weak self] in
-            guard
-                !heardField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                !replacementField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else {
-                errorLabel.stringValue = "Both fields are required."
-                errorLabel.isHidden = false
-                return
-            }
-            self?.actions.addDictionaryEntry(heardField.stringValue, replacementField.stringValue) { result in
-                switch result {
-                case .success:
-                    popover.close()
-                case let .failure(error):
-                    errorLabel.stringValue = error.localizedDescription
-                    errorLabel.isHidden = false
-                }
-            }
-        }
-        dictionaryPopover = popover
-        dictionaryPopoverActions = [cancelAction, addAction]
-        cancel.target = cancelAction
-        cancel.action = #selector(ClosureAction.perform(_:))
-        add.target = addAction
-        add.action = #selector(ClosureAction.perform(_:))
-        if let window = textView.window {
-            let screenRect = textView.firstRect(forCharacterRange: range, actualRange: nil)
-            let windowRect = window.convertFromScreen(screenRect)
-            let selectionRect = textView.convert(windowRect, from: nil)
-            popover.show(relativeTo: selectionRect, of: textView, preferredEdge: .maxY)
-        } else {
-            popover.show(relativeTo: addDictionaryButton.bounds, of: addDictionaryButton, preferredEdge: .maxY)
-        }
-    }
+    @objc private func toggleChanged(_ sender: NSButton) { actions.setEnabled(sender.state == .on) }
 }

@@ -13,10 +13,21 @@ final class TranscriptHistoryCoordinator: @unchecked Sendable {
         self.historyStore = historyStore
     }
 
-    func add(text: String, createdAt: Date = .now) throws {
+    func add(
+        text: String,
+        createdAt: Date = .now,
+        recordingDurationMS: Int? = nil,
+        transcriptionLatencyMS: Int? = nil
+    ) throws {
         try lock.withLock {
             guard settingsStore.load().isTranscriptHistoryEnabled else { return }
-            try historyStore.add(TranscriptRecord(id: UUID(), createdAt: createdAt, text: text))
+            try historyStore.add(TranscriptRecord(
+                id: UUID(),
+                createdAt: createdAt,
+                text: text,
+                recordingDurationMS: recordingDurationMS,
+                transcriptionLatencyMS: transcriptionLatencyMS
+            ))
         }
     }
 
