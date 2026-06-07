@@ -18,6 +18,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let deleteTranscripts: (Set<UUID>) -> Void
         let saveDictionaryEntry: (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void
         let deleteDictionaryEntries: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
+        let openProjectPage: () -> Void
     }
 
     struct Snapshot {
@@ -134,10 +135,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             save: actions.saveDictionaryEntry,
             delete: actions.deleteDictionaryEntries
         ))
-        aboutView = PreferencesAboutView {
-            guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
-            NSWorkspace.shared.open(url)
-        }
+        aboutView = PreferencesAboutView(openProjectPage: actions.openProjectPage)
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 460),

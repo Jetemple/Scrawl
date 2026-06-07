@@ -22,8 +22,9 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private var terms: [VocabularyTerm] = []
     private var visibleTerms: [VocabularyTerm] = []
     private var selectedValues: Set<String> = []
-    private var actionRetainers: [ClosureAction] = []
-    private var editorActionRetainers: [ClosureAction] = []
+    private weak var editorWindow: NSWindow?
+    private var editorOriginal: String?
+    private var editorField: NSTextField?
 
     private(set) var state = State.empty
     var visibleWrongValues: [String] { visibleTerms.map(\.value) }
@@ -82,7 +83,8 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         termField.placeholderString = "Add a preferred term, such as Anduril"
         PreferencesPageSupport.configureSecondaryButton(addButton)
         addButton.bezelColor = .controlAccentColor
-        bind(addButton) { [weak self] in self?.addTerm() }
+        addButton.target = self
+        addButton.action = #selector(addTerm(_:))
         let addRow = NSStackView(views: [termField, addButton])
         addRow.orientation = .horizontal
         addRow.spacing = 8
@@ -99,7 +101,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         tableView.delegate = self
         tableView.target = self
         tableView.doubleAction = #selector(editSelected(_:))
-        tableView.onDelete = { [weak self] in self?.deleteSelected() }
+        tableView.onDelete = { [weak self] in self?.deleteSelected(nil) }
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.documentView = tableView
@@ -136,8 +138,10 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         PreferencesPageSupport.configureSecondaryButton(editButton)
         PreferencesPageSupport.configureSecondaryButton(deleteButton)
         deleteButton.contentTintColor = .systemRed
-        bind(editButton) { [weak self] in self?.showEditorForSelection() }
-        bind(deleteButton) { [weak self] in self?.deleteSelected() }
+        editButton.target = self
+        editButton.action = #selector(editSelected(_:))
+        deleteButton.target = self
+        deleteButton.action = #selector(deleteSelected(_:))
         let buttons = NSStackView(views: [editButton, deleteButton, NSView()])
         buttons.orientation = .horizontal
         buttons.spacing = 6
@@ -157,14 +161,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         ])
     }
 
-    private func bind(_ button: NSButton, action: @escaping () -> Void) {
-        let retainer = ClosureAction(action)
-        actionRetainers.append(retainer)
-        button.target = retainer
-        button.action = #selector(ClosureAction.perform(_:))
-    }
-
-    private func addTerm() {
+    @objc private func addTerm(_ sender: NSButton) {
         let value = termField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         addButton.isEnabled = false
@@ -229,28 +226,48 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
         panel.title = "Edit Term"
         panel.contentView = root
-        let cancelAction = ClosureAction { [weak window] in
-            if let sheet = window?.attachedSheet { window?.endSheet(sheet) }
-        }
-        let saveAction = ClosureAction { [weak self, weak window] in
-            let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty else { return }
-            save.isEnabled = false
-            self?.actions.save(original, value, value) { result in
-                if case .success = result, let sheet = window?.attachedSheet { window?.endSheet(sheet) }
-                if case let .failure(error) = result { save.isEnabled = true; NSAlert(error: error).runModal() }
-            }
-        }
-        editorActionRetainers = [cancelAction, saveAction]
-        cancel.target = cancelAction
-        cancel.action = #selector(ClosureAction.perform(_:))
-        save.target = saveAction
-        save.action = #selector(ClosureAction.perform(_:))
+        editorWindow = window
+        editorOriginal = original
+        editorField = field
+        cancel.target = self
+        cancel.action = #selector(cancelEditor(_:))
+        save.target = self
+        save.action = #selector(saveEditor(_:))
         window.beginSheet(panel)
         window.makeFirstResponder(field)
     }
 
-    private func deleteSelected() {
+    @objc private func cancelEditor(_ sender: NSButton) {
+        guard let window = editorWindow, let sheet = window.attachedSheet else { return }
+        window.endSheet(sheet)
+        clearEditorState()
+    }
+
+    @objc private func saveEditor(_ sender: NSButton) {
+        guard let field = editorField else { return }
+        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        sender.isEnabled = false
+        actions.save(editorOriginal, value, value) { [weak self] result in
+            guard let self else { return }
+            if case .success = result, let window = editorWindow, let sheet = window.attachedSheet {
+                window.endSheet(sheet)
+                clearEditorState()
+            }
+            if case let .failure(error) = result {
+                sender.isEnabled = true
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
+    private func clearEditorState() {
+        editorOriginal = nil
+        editorField = nil
+        editorWindow = nil
+    }
+
+    @objc private func deleteSelected(_ sender: Any? = nil) {
         guard !selectedValues.isEmpty else { return }
         if selectedValues.count > 1 {
             let alert = NSAlert()

@@ -230,6 +230,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 },
                 deleteDictionaryEntries: { [weak self] wrongValues, completion in
                     self?.deleteDictionaryEntries(wrongValues: wrongValues, completion: completion)
+                },
+                openProjectPage: {
+                    guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
+                    NSWorkspace.shared.open(url)
                 }
             )
         )

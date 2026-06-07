@@ -4,15 +4,15 @@ import SettingsStore
 final class PreferencesKeyboardView: NSView {
     private let hotkeyLabel = NSTextField(labelWithString: "")
     private let captureButton = NSButton(title: "Set Hotkey...", target: nil, action: nil)
-    private let captureAction: ClosureAction
+    private let setHotkey: () -> Void
 
     init(setHotkey: @escaping () -> Void) {
-        captureAction = ClosureAction(setHotkey)
+        self.setHotkey = setHotkey
         super.init(frame: .zero)
 
         PreferencesPageSupport.configureSecondaryButton(captureButton)
-        captureButton.target = captureAction
-        captureButton.action = #selector(ClosureAction.perform(_:))
+        captureButton.target = self
+        captureButton.action = #selector(setHotkeyAction(_:))
 
         let instructions = NSTextField(wrappingLabelWithString: """
         Hold the hotkey while speaking, then release to transcribe.
@@ -44,4 +44,6 @@ final class PreferencesKeyboardView: NSView {
         hotkeyLabel.stringValue = isCapturing ? "Waiting for input..." : hotkey.displayName
         captureButton.title = isCapturing ? "Cancel Capture" : "Set Hotkey..."
     }
+
+    @objc private func setHotkeyAction(_ sender: NSButton) { setHotkey() }
 }

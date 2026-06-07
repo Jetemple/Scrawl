@@ -139,6 +139,72 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryButtonsDispatchActions() throws {
+        let record = TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")
+        var copiedID: UUID?
+        var repastedID: UUID?
+        var deletedIDs: Set<UUID> = []
+        let controller = PreferencesWindowController(actions: makeActions(
+            copyTranscript: { copiedID = $0 },
+            repasteTranscript: { repastedID = $0 },
+            deleteTranscripts: { deletedIDs = $0 }
+        ))
+        controller.update(snapshot: makeSnapshot(records: [record]))
+        controller.selectSection(.history)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        try XCTUnwrap(contentView.button(titled: "Copy")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Paste Again")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Delete")).performClick(nil)
+
+        XCTAssertEqual(copiedID, record.id)
+        XCTAssertEqual(repastedID, record.id)
+        XCTAssertEqual(deletedIDs, [record.id])
+    }
+
+    @MainActor
+    func testHistoryToggleDispatchesAction() throws {
+        var enabledValue: Bool?
+        let controller = PreferencesWindowController(actions: makeActions(
+            setTranscriptHistoryEnabled: { enabledValue = $0 }
+        ))
+        controller.selectSection(.history)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let toggle = try XCTUnwrap(contentView.button(titled: "Save transcript history"))
+
+        toggle.performClick(nil)
+
+        XCTAssertEqual(enabledValue, false)
+    }
+
+    @MainActor
+    func testGeneralKeyboardAndAboutButtonsDispatchActions() throws {
+        var requestedMicrophone = false
+        var requestedAccessibility = false
+        var requestedHotkey = false
+        var openedProjectPage = false
+        let controller = PreferencesWindowController(actions: makeActions(
+            setHotkey: { requestedHotkey = true },
+            requestMicrophone: { requestedMicrophone = true },
+            requestAccessibility: { requestedAccessibility = true },
+            openProjectPage: { openedProjectPage = true }
+        ))
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        try XCTUnwrap(contentView.button(titled: "Request")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Open Prompt")).performClick(nil)
+        controller.selectSection(.keyboard)
+        try XCTUnwrap(contentView.button(titled: "Set Hotkey...")).performClick(nil)
+        controller.selectSection(.about)
+        try XCTUnwrap(contentView.button(titled: "Open Project Page")).performClick(nil)
+
+        XCTAssertTrue(requestedMicrophone)
+        XCTAssertTrue(requestedAccessibility)
+        XCTAssertTrue(requestedHotkey)
+        XCTAssertTrue(openedProjectPage)
+    }
+
+    @MainActor
     func testVocabularyPageFiltersPreferredTermsAndFallsBackToFirstSelection() {
         let first = DictionaryEntry(wrong: "post grass", correct: "Postgres")
         let second = DictionaryEntry(wrong: "cube", correct: "Kubernetes")
@@ -201,6 +267,59 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testVocabularyAddButtonDispatchesAction() throws {
+        var savedValue: String?
+        let controller = PreferencesWindowController(actions: makeActions(
+            saveDictionaryEntry: { _, _, correct, completion in
+                savedValue = correct
+                completion(.success(()))
+            }
+        ))
+        controller.selectSection(.dictionary)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let field = try XCTUnwrap(contentView.textField(withPlaceholder: "Add a preferred term, such as Anduril"))
+        field.stringValue = "Anduril"
+
+        try XCTUnwrap(contentView.button(titled: "Add Term")).performClick(nil)
+
+        XCTAssertEqual(savedValue, "Anduril")
+    }
+
+    @MainActor
+    func testVocabularyEditAndDeleteButtonsDispatchActions() throws {
+        var editedOriginal: String?
+        var editedValue: String?
+        var deletedValues: Set<String> = []
+        let controller = PreferencesWindowController(actions: makeActions(
+            saveDictionaryEntry: { original, _, correct, completion in
+                editedOriginal = original
+                editedValue = correct
+                completion(.success(()))
+            },
+            deleteDictionaryEntries: { values, completion in
+                deletedValues = values
+                completion(.success(()))
+            }
+        ))
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: [
+            DictionaryEntry(wrong: "Anduril", correct: "Anduril")
+        ]))
+        controller.selectSection(.dictionary)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        try XCTUnwrap(contentView.button(titled: "Edit")).performClick(nil)
+        let sheet = try XCTUnwrap(controller.window?.attachedSheet)
+        let field = try XCTUnwrap(sheet.contentView?.editableTextField(withValue: "Anduril"))
+        field.stringValue = "Anduril Labs"
+        try XCTUnwrap(sheet.contentView?.button(titled: "Save")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Delete")).performClick(nil)
+
+        XCTAssertEqual(editedOriginal, "Anduril")
+        XCTAssertEqual(editedValue, "Anduril Labs")
+        XCTAssertEqual(deletedValues, ["Anduril"])
+    }
+
+    @MainActor
     private func makeSnapshot(
         isHistoryEnabled: Bool = true,
         historyLoadErrorDescription: String? = nil,
@@ -222,20 +341,63 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    private func makeActions() -> PreferencesWindowController.Actions {
+    private func makeActions(
+        setHotkey: @escaping () -> Void = {},
+        requestMicrophone: @escaping () -> Void = {},
+        requestAccessibility: @escaping () -> Void = {},
+        openProjectPage: @escaping () -> Void = {},
+        setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
+        copyTranscript: @escaping (UUID) -> Void = { _ in },
+        repasteTranscript: @escaping (UUID) -> Void = { _ in },
+        deleteTranscripts: @escaping (Set<UUID>) -> Void = { _ in },
+        saveDictionaryEntry: @escaping (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void = {
+            _, _, _, completion in completion(.success(()))
+        },
+        deleteDictionaryEntries: @escaping (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void = {
+            _, completion in completion(.success(()))
+        }
+    ) -> PreferencesWindowController.Actions {
         PreferencesWindowController.Actions(
             selectModel: { _ in },
             downloadModel: { _ in },
             deleteSelectedModel: {},
-            setHotkey: {},
-            requestMicrophone: {},
-            requestAccessibility: {},
-            setTranscriptHistoryEnabled: { _ in },
-            copyTranscript: { _ in },
-            repasteTranscript: { _ in },
-            deleteTranscripts: { _ in },
-            saveDictionaryEntry: { _, _, _, completion in completion(.success(())) },
-            deleteDictionaryEntries: { _, completion in completion(.success(())) }
+            setHotkey: setHotkey,
+            requestMicrophone: requestMicrophone,
+            requestAccessibility: requestAccessibility,
+            setTranscriptHistoryEnabled: setTranscriptHistoryEnabled,
+            copyTranscript: copyTranscript,
+            repasteTranscript: repasteTranscript,
+            deleteTranscripts: deleteTranscripts,
+            saveDictionaryEntry: saveDictionaryEntry,
+            deleteDictionaryEntries: deleteDictionaryEntries,
+            openProjectPage: openProjectPage
         )
+    }
+}
+
+private extension NSView {
+    func button(titled title: String) -> NSButton? {
+        if let button = self as? NSButton, button.title == title, !button.isEffectivelyHidden {
+            return button
+        }
+        return subviews.lazy.compactMap { $0.button(titled: title) }.first
+    }
+
+    func textField(withPlaceholder placeholder: String) -> NSTextField? {
+        if let field = self as? NSTextField, field.placeholderString == placeholder, !field.isEffectivelyHidden {
+            return field
+        }
+        return subviews.lazy.compactMap { $0.textField(withPlaceholder: placeholder) }.first
+    }
+
+    func editableTextField(withValue value: String) -> NSTextField? {
+        if let field = self as? NSTextField, field.isEditable, field.stringValue == value, !field.isEffectivelyHidden {
+            return field
+        }
+        return subviews.lazy.compactMap { $0.editableTextField(withValue: value) }.first
+    }
+
+    var isEffectivelyHidden: Bool {
+        isHidden || superview?.isEffectivelyHidden == true
     }
 }

@@ -1,10 +1,10 @@
 import AppKit
 
 final class PreferencesAboutView: NSView {
-    private let projectAction: ClosureAction
+    private let openProjectPage: () -> Void
 
     init(openProjectPage: @escaping () -> Void) {
-        projectAction = ClosureAction(openProjectPage)
+        self.openProjectPage = openProjectPage
         super.init(frame: .zero)
 
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
@@ -16,8 +16,8 @@ final class PreferencesAboutView: NSView {
 
         let projectButton = NSButton(title: "Open Project Page", target: nil, action: nil)
         PreferencesPageSupport.configureSecondaryButton(projectButton)
-        projectButton.target = projectAction
-        projectButton.action = #selector(ClosureAction.perform(_:))
+        projectButton.target = self
+        projectButton.action = #selector(openProjectPageAction(_:))
 
         let page = PreferencesPageSupport.makePage(
             title: "About Scrawl",
@@ -37,4 +37,6 @@ final class PreferencesAboutView: NSView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    @objc private func openProjectPageAction(_ sender: NSButton) { openProjectPage() }
 }

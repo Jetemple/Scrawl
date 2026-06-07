@@ -206,15 +206,3 @@ enum PreferencesPageSupport {
         return view
     }
 }
-
-final class ClosureAction: NSObject {
-    private let closure: () -> Void
-
-    init(_ closure: @escaping () -> Void) {
-        self.closure = closure
-    }
-
-    @objc func perform(_ sender: Any?) {
-        closure()
-    }
-}

@@ -10,21 +10,21 @@ final class PreferencesGeneralView: NSView {
     private let accessibilityLabel = NSTextField(labelWithString: "")
     private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
     private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
-    private let microphoneAction: ClosureAction
-    private let accessibilityAction: ClosureAction
+    private let requestMicrophone: () -> Void
+    private let requestAccessibility: () -> Void
 
     init(requestMicrophone: @escaping () -> Void, requestAccessibility: @escaping () -> Void) {
-        microphoneAction = ClosureAction(requestMicrophone)
-        accessibilityAction = ClosureAction(requestAccessibility)
+        self.requestMicrophone = requestMicrophone
+        self.requestAccessibility = requestAccessibility
         super.init(frame: .zero)
 
         PreferencesPageSupport.configureSecondaryButton(microphoneButton)
         PreferencesPageSupport.configureSecondaryButton(accessibilityButton)
 
-        microphoneButton.target = microphoneAction
-        microphoneButton.action = #selector(ClosureAction.perform(_:))
-        accessibilityButton.target = accessibilityAction
-        accessibilityButton.action = #selector(ClosureAction.perform(_:))
+        microphoneButton.target = self
+        microphoneButton.action = #selector(requestMicrophoneAccess(_:))
+        accessibilityButton.target = self
+        accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
 
         let page = PreferencesPageSupport.makePage(
             title: "General",
@@ -81,4 +81,7 @@ final class PreferencesGeneralView: NSView {
             label.textColor = .secondaryLabelColor
         }
     }
+
+    @objc private func requestMicrophoneAccess(_ sender: NSButton) { requestMicrophone() }
+    @objc private func requestAccessibilityAccess(_ sender: NSButton) { requestAccessibility() }
 }

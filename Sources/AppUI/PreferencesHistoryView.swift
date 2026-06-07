@@ -23,7 +23,6 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let repasteButton = NSButton(title: "Paste Again", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
-    private var actionRetainers: [ClosureAction] = []
     private var records: [TranscriptRecord] = []
     private var visibleRecords: [TranscriptRecord] = []
     private var selectedID: UUID?
@@ -142,12 +141,12 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             PreferencesPageSupport.configureSecondaryButton(button)
         }
         deleteButton.contentTintColor = .systemRed
-        bind(copyButton) { [weak self] in self?.performOnSelected(self?.actions.copy) }
-        bind(repasteButton) { [weak self] in self?.performOnSelected(self?.actions.repaste) }
-        bind(deleteButton) { [weak self] in
-            guard let id = self?.selectedID else { return }
-            self?.actions.delete([id])
-        }
+        copyButton.target = self
+        copyButton.action = #selector(copySelected(_:))
+        repasteButton.target = self
+        repasteButton.action = #selector(repasteSelected(_:))
+        deleteButton.target = self
+        deleteButton.action = #selector(deleteSelected(_:))
         let buttons = NSStackView(views: [copyButton, repasteButton, deleteButton, NSView()])
         buttons.orientation = .horizontal
         buttons.spacing = 6
@@ -196,13 +195,6 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         ])
     }
 
-    private func bind(_ button: NSButton, action: @escaping () -> Void) {
-        let retainer = ClosureAction(action)
-        actionRetainers.append(retainer)
-        button.target = retainer
-        button.action = #selector(ClosureAction.perform(_:))
-    }
-
     private func applyFilter() {
         visibleRecords = PreferencesContentState.filteredHistory(records: records, query: searchField.stringValue)
         selectedID = PreferencesContentState.resolvedHistorySelection(currentID: selectedID, visibleRecords: visibleRecords)
@@ -248,10 +240,16 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         deleteButton.isEnabled = enabled
     }
 
-    private func performOnSelected(_ action: ((UUID) -> Void)?) {
+    private func performOnSelected(_ action: (UUID) -> Void) {
         guard let selectedID else { return }
-        action?(selectedID)
+        action(selectedID)
     }
 
+    @objc private func copySelected(_ sender: NSButton) { performOnSelected(actions.copy) }
+    @objc private func repasteSelected(_ sender: NSButton) { performOnSelected(actions.repaste) }
+    @objc private func deleteSelected(_ sender: NSButton) {
+        guard let selectedID else { return }
+        actions.delete([selectedID])
+    }
     @objc private func toggleChanged(_ sender: NSButton) { actions.setEnabled(sender.state == .on) }
 }
