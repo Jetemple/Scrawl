@@ -49,7 +49,7 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
         do {
             try sendCommandV()
         } catch {
-            snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: pasteboard.changeCount)
+            snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: changeCountAfterWrite)
             throw error
         }
 
