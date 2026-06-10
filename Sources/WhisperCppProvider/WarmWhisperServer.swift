@@ -130,35 +130,75 @@ actor WarmWhisperServer {
         startupKey = key
 
         let task = Task {
-            let port = try Self.allocatePort()
-            let url = URL(string: "http://127.0.0.1:\(port)")!
-            let process = Process()
-            let serverArguments = self.makeServerArguments(
-                modelPath: modelPath,
-                language: key.language,
-                port: port,
-                forceNoGPU: key.forceNoGPU
-            )
-            let launch = Self.supervisedLaunch(
-                serverExecutableURL: self.config.serverExecutableURL,
-                serverArguments: serverArguments,
-                ownerPID: ProcessInfo.processInfo.processIdentifier
-            )
-            process.executableURL = launch.executableURL
-            process.arguments = launch.arguments
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try process.run()
+            // First launch attempt
+            let port1 = try Self.allocatePort()
+            let url1 = URL(string: "http://127.0.0.1:\(port1)")!
+            let process1 = Process()
             do {
-                try await self.waitUntilReady(process: process, baseURL: url)
+                let serverArguments = self.makeServerArguments(
+                    modelPath: modelPath, language: key.language,
+                    port: port1, forceNoGPU: key.forceNoGPU
+                )
+                let launch = Self.supervisedLaunch(
+                    serverExecutableURL: self.config.serverExecutableURL,
+                    serverArguments: serverArguments,
+                    ownerPID: ProcessInfo.processInfo.processIdentifier
+                )
+                process1.executableURL = launch.executableURL
+                process1.arguments = launch.arguments
+                process1.standardOutput = FileHandle.nullDevice
+                process1.standardError = FileHandle.nullDevice
+                try process1.run()
             } catch {
-                process.terminate()
-                if self.startupKey == key {
-                    self.startupTask = nil
-                    self.startupKey = nil
-                }
+                if self.startupKey == key { self.startupTask = nil; self.startupKey = nil }
                 throw error
             }
+
+            // Wait for readiness; on "exited during startup" retry once with a fresh port.
+            let process: Process
+            let url: URL
+            do {
+                try await self.waitUntilReady(process: process1, baseURL: url1)
+                (process, url) = (process1, url1)
+            } catch TranscriptionError.executionFailed(let msg)
+                where msg == "whisper-server exited during startup" {
+                // The server exited before it could bind — likely a port race between
+                // allocatePort() closing the probe socket and whisper-server calling
+                // bind(). Terminate the (already-dead) supervisor wrapper defensively,
+                // then retry with a freshly allocated port. Concurrent callers
+                // awaiting this Task transparently get the retry result.
+                process1.terminate()
+                let port2 = try Self.allocatePort()
+                let url2 = URL(string: "http://127.0.0.1:\(port2)")!
+                let process2 = Process()
+                do {
+                    let serverArguments = self.makeServerArguments(
+                        modelPath: modelPath, language: key.language,
+                        port: port2, forceNoGPU: key.forceNoGPU
+                    )
+                    let launch = Self.supervisedLaunch(
+                        serverExecutableURL: self.config.serverExecutableURL,
+                        serverArguments: serverArguments,
+                        ownerPID: ProcessInfo.processInfo.processIdentifier
+                    )
+                    process2.executableURL = launch.executableURL
+                    process2.arguments = launch.arguments
+                    process2.standardOutput = FileHandle.nullDevice
+                    process2.standardError = FileHandle.nullDevice
+                    try process2.run()
+                    try await self.waitUntilReady(process: process2, baseURL: url2)
+                } catch {
+                    process2.terminate()
+                    if self.startupKey == key { self.startupTask = nil; self.startupKey = nil }
+                    throw error
+                }
+                (process, url) = (process2, url2)
+            } catch {
+                process1.terminate()
+                if self.startupKey == key { self.startupTask = nil; self.startupKey = nil }
+                throw error
+            }
+
             // Only publish after readiness is confirmed
             self.process = process
             self.serverKey = key

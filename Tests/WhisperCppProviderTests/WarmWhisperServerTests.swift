@@ -244,4 +244,90 @@ final class WarmWhisperServerTests: XCTestCase {
 
         await server.shutdown()
     }
+
+    // MARK: - Fix 2: retry on early server exit
+
+    /// Verifies that when whisper-server exits during startup (simulated by a stub
+    /// that always exits immediately), ensureRunning retries exactly once before
+    /// propagating the error. The launch counter lets us confirm two attempts were made.
+    func testEarlyExitDuringStartupRetriesOnceThenThrows() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+        let stubURL = tmpDir.appendingPathComponent("stub-exit-server-\(UUID().uuidString)")
+        let counterURL = tmpDir.appendingPathComponent("stub-exit-count-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: stubURL)
+            try? FileManager.default.removeItem(at: counterURL)
+        }
+
+        // Stub: record launch and exit immediately so waitUntilReady sees !isRunning.
+        let stubScript = """
+        #!/bin/sh
+        printf '1\\n' >> "\(counterURL.path)"
+        exit 1
+        """
+        try stubScript.write(to: stubURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stubURL.path)
+
+        let config = WhisperCppConfig(
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/whisper-cli"),
+            serverExecutableURL: stubURL,
+            modelsDirectoryURL: FileManager.default.temporaryDirectory
+        )
+        let server = WarmWhisperServer(config: config)
+
+        let key = WarmWhisperServer.ServerKey(modelID: "test", language: "en", forceNoGPU: false)
+        let modelPath = URL(fileURLWithPath: "/tmp/fake-model.bin")
+
+        do {
+            _ = try await server.ensureRunning(key: key, modelPath: modelPath)
+            XCTFail("Expected ensureRunning to throw after exhausting retries")
+        } catch TranscriptionError.executionFailed(let msg) {
+            XCTAssertTrue(
+                msg.contains("exited during startup") || msg.contains("did not become ready"),
+                "Unexpected error message: \(msg)"
+            )
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+
+        // Give the supervisor wrappers a moment to record their launches.
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        let countText = (try? String(contentsOf: counterURL, encoding: .utf8)) ?? "0"
+        let launches = countText.components(separatedBy: "\n").filter { $0 == "1" }.count
+        XCTAssertEqual(launches, 2,
+            "Expected exactly 2 launch attempts (initial + one retry); got \(launches)")
+    }
+
+    /// Verifies that the existing concurrent-callers-both-throw test remains green
+    /// after the retry logic is introduced. This is the regression guard for Fix 2.
+    func testConcurrentCallersAfterRetryExhaustedBothThrow() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+        let stubURL = tmpDir.appendingPathComponent("stub-conc-exit-\(UUID().uuidString)")
+        let stubScript = "#!/bin/sh\nexit 1\n"
+        try stubScript.write(to: stubURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stubURL.path)
+        defer { try? FileManager.default.removeItem(at: stubURL) }
+
+        let config = WhisperCppConfig(
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/whisper-cli"),
+            serverExecutableURL: stubURL,
+            modelsDirectoryURL: FileManager.default.temporaryDirectory
+        )
+        let server = WarmWhisperServer(config: config)
+        let key = WarmWhisperServer.ServerKey(modelID: "test", language: "en", forceNoGPU: false)
+        let modelPath = URL(fileURLWithPath: "/tmp/fake-model.bin")
+
+        async let result1: URL = server.ensureRunning(key: key, modelPath: modelPath)
+        async let result2: URL = server.ensureRunning(key: key, modelPath: modelPath)
+
+        do {
+            _ = try await result1
+            XCTFail("Expected first call to throw")
+        } catch {}
+        do {
+            _ = try await result2
+            XCTFail("Expected second call to throw")
+        } catch {}
+    }
 }
