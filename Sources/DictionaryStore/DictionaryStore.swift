@@ -19,6 +19,7 @@ public struct VocabularyTerm: Codable, Equatable, Sendable {
 }
 
 public protocol DictionaryStoring: Sendable {
+    var loadErrorDescription: String? { get }
     func entries() -> [DictionaryEntry]
     func terms() -> [VocabularyTerm]
     func save(_ entries: [DictionaryEntry]) throws
@@ -29,6 +30,11 @@ public protocol DictionaryStoring: Sendable {
     func delete(wrongValues: Set<String>) throws
     func replace(originalWrong: String, wrong: String, correct: String) throws
     func apply(to text: String) -> String
+    func clear() throws
+}
+
+public extension DictionaryStoring {
+    var loadErrorDescription: String? { nil }
 }
 
 private enum VocabularyTermsMutation {
@@ -127,6 +133,8 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
         self.init(entries: VocabularyTermsMutation.entries(from: VocabularyTermsMutation.normalized(terms.map(\.value))))
     }
 
+    public var loadErrorDescription: String? { nil }
+
     public func entries() -> [DictionaryEntry] {
         lock.lock()
         defer { lock.unlock() }
@@ -189,6 +197,12 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
         return DictionaryReplacer.apply(entries: entries, to: text)
     }
 
+    public func clear() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        storedEntries = []
+    }
+
     private func mutateEntries(_ mutation: ([DictionaryEntry]) -> [DictionaryEntry]?) {
         lock.lock()
         defer { lock.unlock() }
@@ -209,33 +223,46 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
     private let lock = NSLock()
     private let fileURL: URL
     private var cachedEntries: [DictionaryEntry]
+    private var loadError: Error?
 
     public init(fileURL: URL) {
         self.fileURL = fileURL
-        self.cachedEntries = []
 
-        if let loaded = try? Self.loadFromDisk(fileURL: fileURL) {
-            self.cachedEntries = loaded
+        do {
+            let data = try Data(contentsOf: fileURL)
+            cachedEntries = try JSONDecoder().decode([DictionaryEntry].self, from: data)
+            loadError = nil
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            cachedEntries = []
+            loadError = nil
+        } catch {
+            cachedEntries = []
+            loadError = error
+        }
+    }
+
+    public var loadErrorDescription: String? {
+        lock.withLock {
+            loadError.map(Self.describe)
         }
     }
 
     public func entries() -> [DictionaryEntry] {
-        lock.lock()
-        defer { lock.unlock() }
-        return cachedEntries
+        lock.withLock {
+            cachedEntries
+        }
     }
 
     public func terms() -> [VocabularyTerm] {
-        lock.lock()
-        defer { lock.unlock() }
-        return VocabularyTermsMutation.terms(from: cachedEntries)
+        lock.withLock {
+            VocabularyTermsMutation.terms(from: cachedEntries)
+        }
     }
 
     public func save(_ entries: [DictionaryEntry]) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        try persist(entries)
-        cachedEntries = entries
+        try mutate(allowLoadErrorRecovery: false) { current in
+            current = entries
+        }
     }
 
     public func addTerm(_ value: String) throws {
@@ -284,14 +311,43 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
         return DictionaryReplacer.apply(entries: entries, to: text)
     }
 
-    private func mutateEntries(_ mutation: ([DictionaryEntry]) -> [DictionaryEntry]?) throws {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let updatedEntries = mutation(cachedEntries) else {
-            return
+    public func clear() throws {
+        try mutate(allowLoadErrorRecovery: true) { current in
+            current = []
         }
-        try persist(updatedEntries)
-        cachedEntries = updatedEntries
+    }
+
+    private func mutate(
+        allowLoadErrorRecovery: Bool = false,
+        _ mutation: (inout [DictionaryEntry]) -> Void
+    ) throws {
+        try lock.withLock {
+            if !allowLoadErrorRecovery, let loadError {
+                throw loadError
+            }
+
+            if allowLoadErrorRecovery, loadError != nil {
+                let bakURL = URL(fileURLWithPath: fileURL.path + ".bak")
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    try FileManager.default.copyItem(at: fileURL, to: bakURL)
+                }
+            }
+
+            var newEntries = cachedEntries
+            mutation(&newEntries)
+
+            try persist(newEntries)
+            cachedEntries = newEntries
+            loadError = nil
+        }
+    }
+
+    private func mutateEntries(_ mutation: ([DictionaryEntry]) -> [DictionaryEntry]?) throws {
+        try mutate { entries in
+            if let updated = mutation(entries) {
+                entries = updated
+            }
+        }
     }
 
     private func mutateTerms(_ mutation: ([String]) -> [String]) throws {
@@ -308,12 +364,19 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
         try data.write(to: fileURL, options: .atomic)
     }
 
-    private static func loadFromDisk(fileURL: URL) throws -> [DictionaryEntry] {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return []
+    private static func describe(_ error: Error) -> String {
+        if let error = error as? LocalizedError, let description = error.errorDescription {
+            return description
         }
-        let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode([DictionaryEntry].self, from: data)
+        return String(describing: error)
+    }
+}
+
+private extension NSLock {
+    func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+        lock()
+        defer { unlock() }
+        return try body()
     }
 }
 
