@@ -3,33 +3,41 @@ import TranscriptionCore
 
 public struct WhisperCppConfig: Sendable {
     public var executableURL: URL
+    public var serverExecutableURL: URL
     public var modelsDirectoryURL: URL
     public var transcriptionTimeoutSeconds: Int
     public var disableGPU: Bool
     public var threads: Int?
+    public var idleOffloadSeconds: TimeInterval?
 
     public init(
         executableURL: URL,
+        serverExecutableURL: URL? = nil,
         modelsDirectoryURL: URL,
         transcriptionTimeoutSeconds: Int = 120,
         disableGPU: Bool = false,
-        threads: Int? = nil
+        threads: Int? = nil,
+        idleOffloadSeconds: TimeInterval? = 300
     ) {
         self.executableURL = executableURL
+        self.serverExecutableURL = serverExecutableURL ?? WhisperCppProvider.serverExecutableURL(forCLI: executableURL)
         self.modelsDirectoryURL = modelsDirectoryURL
         self.transcriptionTimeoutSeconds = transcriptionTimeoutSeconds
         self.disableGPU = disableGPU
         self.threads = threads
+        self.idleOffloadSeconds = idleOffloadSeconds
     }
 }
 
-public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendable {
+public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unchecked Sendable {
     public let config: WhisperCppConfig
     private let fallbackLock = NSLock()
     private var shouldForceCPUFallback = false
+    private let warmServer: WarmWhisperServer
 
     public init(config: WhisperCppConfig) {
         self.config = config
+        self.warmServer = WarmWhisperServer(config: config)
     }
 
     public func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
@@ -47,6 +55,22 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
 
         let startedAt = Date()
         let forceNoGPU = config.disableGPU || isCPUFallbackForced()
+
+        if await warmServer.isEnabled {
+            do {
+                request.progressHandler?(
+                    TranscriptionProgressEvent(phase: .loadingModel, modelID: request.modelID, elapsedMS: 0)
+                )
+                return try await warmServer.transcribe(
+                    request,
+                    modelPath: modelPath,
+                    forceNoGPU: forceNoGPU,
+                    startedAt: startedAt
+                )
+            } catch {
+                await warmServer.shutdown()
+            }
+        }
 
         do {
             return try await transcribeOnce(
@@ -77,6 +101,24 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
                 forceNoGPU: true
             )
         }
+    }
+
+    public func warmUp(modelID: String, language: String) async {
+        guard let modelPath = resolveModelPath(modelID: modelID) else { return }
+        await warmServer.warmUp(
+            modelID: modelID,
+            modelPath: modelPath,
+            language: language,
+            forceNoGPU: config.disableGPU || isCPUFallbackForced()
+        )
+    }
+
+    public func setIdleOffloadSeconds(_ seconds: TimeInterval?) async {
+        await warmServer.setIdleOffloadSeconds(seconds)
+    }
+
+    public func shutdown() async {
+        await warmServer.shutdown()
     }
 
     private func transcribeOnce(
@@ -331,6 +373,44 @@ public final class WhisperCppProvider: TranscriptionProvider, @unchecked Sendabl
         }
 
         return arguments
+    }
+
+    func makeServerArguments(
+        modelPath: URL,
+        language: String,
+        port: Int,
+        forceNoGPU: Bool = false
+    ) -> [String] {
+        var arguments = [
+            "-m", modelPath.path,
+            "-l", language,
+            "-nt",
+            "-bo", "5",
+            "-bs", "5",
+            "--host", "127.0.0.1",
+            "--port", String(port)
+        ]
+        if let threads = config.threads, threads > 0 {
+            arguments.append(contentsOf: ["-t", String(threads)])
+        }
+        if config.disableGPU || forceNoGPU {
+            arguments.append("--no-gpu")
+        }
+        return arguments
+    }
+
+    static func serverExecutableURL(forCLI executableURL: URL) -> URL {
+        executableURL.deletingLastPathComponent().appendingPathComponent("whisper-server")
+    }
+
+    static func decodeServerTranscript(_ data: Data) throws -> String {
+        struct Response: Decodable { let text: String }
+        let cleaned = try JSONDecoder().decode(Response.self, from: data).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty, !isNoSpeechTranscript(cleaned) else {
+            throw TranscriptionError.noSpeechDetected
+        }
+        return cleaned
     }
 
     private func runAndWait(

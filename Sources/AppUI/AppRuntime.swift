@@ -83,7 +83,8 @@ public struct AppRuntime {
                     executableURL: executableURL,
                     modelsDirectoryURL: modelsDir,
                     disableGPU: disableGPU,
-                    threads: threadCount
+                    threads: threadCount,
+                    idleOffloadSeconds: settings.modelOffloadPolicy.idleSeconds
                 )
             ),
             modelsDirectoryURL: modelsDir,

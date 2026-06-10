@@ -1,5 +1,9 @@
 import AppKit
 
+private final class FlippedModelsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 final class PreferencesModelsView: NSView {
     private let selectModel: (String) -> Void
     private let downloadModel: (DownloadableModel) -> Void
@@ -9,6 +13,16 @@ final class PreferencesModelsView: NSView {
     private let modelsStack = NSStackView()
     private let listView = PreferencesPageSupport.makeRoundedBackground()
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
+    private var listHeightConstraint: NSLayoutConstraint?
+    private var twoLineRowCount = 0
+    private var selectedRowHasAction = false
+
+    var listIsTopAnchored: Bool {
+        modelsStack.superview?.isFlipped == true
+    }
+
+    var visibleTwoLineRowCount: Int { twoLineRowCount }
+    var visibleSelectedRowHasAction: Bool { selectedRowHasAction }
 
     var isCriticalContentWithinBounds: Bool {
         [listView, deleteButton].allSatisfy {
@@ -31,7 +45,7 @@ final class PreferencesModelsView: NSView {
         modelsStack.spacing = 0
         modelsStack.translatesAutoresizingMaskIntoConstraints = false
 
-        let documentView = NSView()
+        let documentView = FlippedModelsDocumentView()
         documentView.translatesAutoresizingMaskIntoConstraints = false
         documentView.addSubview(modelsStack)
 
@@ -43,8 +57,10 @@ final class PreferencesModelsView: NSView {
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         listView.addSubview(scrollView)
+        let listHeightConstraint = listView.heightAnchor.constraint(equalToConstant: 140)
+        self.listHeightConstraint = listHeightConstraint
         NSLayoutConstraint.activate([
-            listView.heightAnchor.constraint(greaterThanOrEqualToConstant: 140),
+            listHeightConstraint,
             scrollView.leadingAnchor.constraint(equalTo: listView.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: listView.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: listView.topAnchor),
@@ -52,7 +68,7 @@ final class PreferencesModelsView: NSView {
             modelsStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
             modelsStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
             modelsStack.topAnchor.constraint(equalTo: documentView.topAnchor),
-            modelsStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
+            modelsStack.bottomAnchor.constraint(lessThanOrEqualTo: documentView.bottomAnchor),
             modelsStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
         ])
 
@@ -77,6 +93,9 @@ final class PreferencesModelsView: NSView {
     func update(rows: [PreferencesModelRow], downloadableModels: [DownloadableModel], isDownloadInProgress: Bool) {
         downloadableModelsByID = Dictionary(uniqueKeysWithValues: downloadableModels.map { ($0.id, $0) })
         deleteButton.isEnabled = rows.contains { $0.isSelected && $0.isInstalled }
+        twoLineRowCount = rows.count
+        selectedRowHasAction = false
+        listHeightConstraint?.constant = min(300, max(140, CGFloat(rows.count) * 64))
 
         modelsStack.arrangedSubviews.forEach {
             modelsStack.removeArrangedSubview($0)
@@ -102,35 +121,67 @@ final class PreferencesModelsView: NSView {
     }
 
     private func makeModelRow(_ row: PreferencesModelRow, isDownloadBlocked: Bool) -> NSView {
-        let nameLabel = NSTextField(labelWithString: row.displayName)
+        let displayParts = row.displayName.components(separatedBy: " — ")
+        let nameLabel = NSTextField(labelWithString: displayParts.first ?? row.displayName)
         nameLabel.font = .systemFont(ofSize: 13)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        let detail = displayParts.dropFirst().joined(separator: " — ")
+        let detailLabel = NSTextField(labelWithString: detail.isEmpty ? row.statusText : detail)
+        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.alignment = .left
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         let statusLabel = NSTextField(labelWithString: row.statusText)
-        statusLabel.font = .systemFont(ofSize: 12)
+        statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = row.isSelected ? .systemBlue : .secondaryLabelColor
         statusLabel.alignment = .right
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        statusLabel.widthAnchor.constraint(equalToConstant: 72).isActive = true
 
-        let actionButton = NSButton(title: row.actionTitle, target: self, action: nil)
-        actionButton.identifier = NSUserInterfaceItemIdentifier(row.id)
-        PreferencesPageSupport.configureSecondaryButton(actionButton)
-        actionButton.translatesAutoresizingMaskIntoConstraints = false
-        actionButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 88).isActive = true
-        if row.isInstalled {
-            actionButton.action = #selector(selectModelAction(_:))
-            actionButton.isEnabled = row.canSelect
+        let actionArea: NSView
+        if row.isSelected {
+            let checkmark = NSImageView(image: NSImage(
+                systemSymbolName: "checkmark.circle.fill",
+                accessibilityDescription: "Selected"
+            ) ?? NSImage())
+            checkmark.contentTintColor = .systemBlue
+            checkmark.symbolConfiguration = .init(pointSize: 13, weight: .medium)
+            actionArea = checkmark
         } else {
-            actionButton.action = #selector(downloadModelAction(_:))
-            actionButton.isEnabled = row.canDownload && !isDownloadBlocked
+            let actionButton = NSButton(title: row.actionTitle, target: self, action: nil)
+            actionButton.identifier = NSUserInterfaceItemIdentifier(row.id)
+            PreferencesPageSupport.configureSecondaryButton(actionButton)
+            if row.isInstalled {
+                actionButton.action = #selector(selectModelAction(_:))
+                actionButton.isEnabled = row.canSelect
+            } else {
+                actionButton.action = #selector(downloadModelAction(_:))
+                actionButton.isEnabled = row.canDownload && !isDownloadBlocked
+            }
+            actionArea = actionButton
         }
+        actionArea.translatesAutoresizingMaskIntoConstraints = false
+        actionArea.widthAnchor.constraint(equalToConstant: 88).isActive = true
 
-        let stack = NSStackView(views: [nameLabel, statusLabel, actionButton])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
-        return stack
+        let topLine = NSStackView(views: [nameLabel, NSView(), statusLabel, actionArea])
+        topLine.orientation = .horizontal
+        topLine.alignment = .centerY
+        topLine.spacing = 8
+
+        let detailLine = NSStackView(views: [detailLabel, NSView()])
+        detailLine.orientation = .horizontal
+        detailLine.alignment = .centerY
+
+        let rowStack = NSStackView(views: [topLine, detailLine])
+        rowStack.orientation = .vertical
+        rowStack.alignment = .width
+        rowStack.spacing = 3
+        rowStack.edgeInsets = NSEdgeInsets(top: 9, left: 14, bottom: 9, right: 14)
+        return rowStack
     }
 
     @objc private func selectModelAction(_ sender: NSButton) {

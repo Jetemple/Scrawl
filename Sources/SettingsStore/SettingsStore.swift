@@ -1,5 +1,33 @@
 import Foundation
 
+public enum ModelOffloadPolicy: String, Codable, CaseIterable, Sendable {
+    case immediately
+    case oneMinute
+    case fiveMinutes
+    case fifteenMinutes
+    case never
+
+    public var idleSeconds: TimeInterval? {
+        switch self {
+        case .immediately: 0
+        case .oneMinute: 60
+        case .fiveMinutes: 300
+        case .fifteenMinutes: 900
+        case .never: nil
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .immediately: "Immediately"
+        case .oneMinute: "1 minute"
+        case .fiveMinutes: "5 minutes"
+        case .fifteenMinutes: "15 minutes"
+        case .never: "Never"
+        }
+    }
+}
+
 public struct HotkeySetting: Codable, Equatable, Sendable {
     public var keyCode: UInt16
     public var isModifierKey: Bool
@@ -23,6 +51,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var hotkey: HotkeySetting
     public var modelsDirectoryPath: String?
     public var isTranscriptHistoryEnabled: Bool
+    public var modelOffloadPolicy: ModelOffloadPolicy
 
     public init(
         defaultModelID: String = "ggml-small.en",
@@ -30,7 +59,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         language: String = "en",
         hotkey: HotkeySetting = HotkeySetting(),
         modelsDirectoryPath: String? = nil,
-        isTranscriptHistoryEnabled: Bool = true
+        isTranscriptHistoryEnabled: Bool = true,
+        modelOffloadPolicy: ModelOffloadPolicy = .fiveMinutes
     ) {
         self.defaultModelID = defaultModelID
         self.selectedModelID = selectedModelID
@@ -38,6 +68,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.hotkey = hotkey
         self.modelsDirectoryPath = modelsDirectoryPath
         self.isTranscriptHistoryEnabled = isTranscriptHistoryEnabled
+        self.modelOffloadPolicy = modelOffloadPolicy
     }
 
     public var modelID: String {
@@ -52,6 +83,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case hotkeyDescription
         case modelsDirectoryPath
         case isTranscriptHistoryEnabled
+        case modelOffloadPolicy
     }
 
     public init(from decoder: Decoder) throws {
@@ -62,6 +94,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "en"
         modelsDirectoryPath = try container.decodeIfPresent(String.self, forKey: .modelsDirectoryPath)
         isTranscriptHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTranscriptHistoryEnabled) ?? true
+        modelOffloadPolicy = try container.decodeIfPresent(ModelOffloadPolicy.self, forKey: .modelOffloadPolicy) ?? .fiveMinutes
 
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
             self.hotkey = hotkey
@@ -79,6 +112,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try container.encode(hotkey, forKey: .hotkey)
         try container.encodeIfPresent(modelsDirectoryPath, forKey: .modelsDirectoryPath)
         try container.encode(isTranscriptHistoryEnabled, forKey: .isTranscriptHistoryEnabled)
+        try container.encode(modelOffloadPolicy, forKey: .modelOffloadPolicy)
     }
 }
 

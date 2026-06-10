@@ -140,6 +140,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
+            let shutdownComplete = DispatchSemaphore(value: 0)
+            Task {
+                await provider.shutdown()
+                shutdownComplete.signal()
+            }
+            _ = shutdownComplete.wait(timeout: .now() + 1)
+        }
         teardownHotkeyHandling()
         stopHotkeyCapture()
         stopObservingWorkspaceActivations()
@@ -207,6 +215,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 },
                 requestAccessibility: { [weak self] in
                     self?.requestAccessibilityPermission(nil)
+                },
+                setModelOffloadPolicy: { [weak self] policy in
+                    self?.setModelOffloadPolicy(policy)
                 },
                 setTranscriptHistoryEnabled: { [weak self] enabled in
                     self?.setTranscriptHistoryEnabled(enabled)
@@ -302,6 +313,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 )
             }
         }
+    }
+
+    private func setModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
+        var settings = runtime.settingsStore.load()
+        settings.modelOffloadPolicy = policy
+        saveSettings(settings)
     }
 
     private func copyTranscript(id: UUID) {
@@ -1116,6 +1133,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         do {
             try runtime.audioCaptureService.startCapture()
+            let settings = runtime.settingsStore.load()
+            if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
+                Task {
+                    await provider.setIdleOffloadSeconds(settings.modelOffloadPolicy.idleSeconds)
+                    await provider.warmUp(modelID: settings.modelID, language: settings.language)
+                }
+            }
             recordingOrigin = origin
             recordingStartedAt = .now
             activeOperationGeneration.beginActiveOperation()
@@ -1615,7 +1639,18 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func saveSettings(_ settings: AppSettings) {
         do {
+            let previousSettings = runtime.settingsStore.load()
             try runtime.settingsStore.save(settings)
+            if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
+                Task {
+                    if previousSettings.modelID != settings.modelID {
+                        await provider.shutdown()
+                    }
+                    if previousSettings.modelOffloadPolicy != settings.modelOffloadPolicy {
+                        await provider.setIdleOffloadSeconds(settings.modelOffloadPolicy.idleSeconds)
+                    }
+                }
+            }
             refreshSettingsRows()
             refreshModelMenu()
             refreshPreferencesWindow()

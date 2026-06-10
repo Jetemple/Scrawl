@@ -80,6 +80,7 @@ Scrawl lives in your menubar. From there you can:
 
 - **Open Settings** - Manage permissions, models, the recording shortcut, transcript history, and preferred Vocabulary from a compact sidebar window.
 - **Switch models** - tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy).
+- **Control model offloading** - Keep the selected model warm for faster repeat transcriptions, then release its memory after a chosen idle period.
 - **Repaste recent transcripts** - Use the Recent Transcripts submenu for quick access or the searchable History page for copy, repaste, and delete actions.
 - **Manage Vocabulary** - Add names, technical terms, and phrases that help Whisper recognize your language.
 
@@ -120,6 +121,10 @@ SCRAWL_DISABLE_GPU=1 make run
 ```
 
 Scrawl automatically uses GPU acceleration when available and falls back to CPU mode if GPU execution fails.
+It also preloads the selected model when recording begins and keeps it warm between
+transcriptions. The default idle offload period is five minutes and can be changed
+in General Settings. If the persistent local helper is unavailable, Scrawl
+automatically falls back to one-shot `whisper-cli` transcription.
 
 Debug mode (shows manual record/stop controls and overlay previews):
 

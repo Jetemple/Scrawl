@@ -10,12 +10,25 @@ final class PreferencesGeneralView: NSView {
     private let accessibilityLabel = NSTextField(labelWithString: "")
     private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
     private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
+    private let offloadPopup = NSPopUpButton()
     private let requestMicrophone: () -> Void
     private let requestAccessibility: () -> Void
+    private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
 
-    init(requestMicrophone: @escaping () -> Void, requestAccessibility: @escaping () -> Void) {
+    var modelOffloadChoices: [String] { offloadPopup.itemTitles }
+    var selectedModelOffloadPolicy: ModelOffloadPolicy? {
+        guard offloadPopup.indexOfSelectedItem >= 0 else { return nil }
+        return ModelOffloadPolicy.allCases[offloadPopup.indexOfSelectedItem]
+    }
+
+    init(
+        requestMicrophone: @escaping () -> Void,
+        requestAccessibility: @escaping () -> Void,
+        setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void
+    ) {
         self.requestMicrophone = requestMicrophone
         self.requestAccessibility = requestAccessibility
+        self.setModelOffloadPolicy = setModelOffloadPolicy
         super.init(frame: .zero)
 
         PreferencesPageSupport.configureSecondaryButton(microphoneButton)
@@ -25,6 +38,10 @@ final class PreferencesGeneralView: NSView {
         microphoneButton.action = #selector(requestMicrophoneAccess(_:))
         accessibilityButton.target = self
         accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
+        offloadPopup.addItems(withTitles: ModelOffloadPolicy.allCases.map(\.displayName))
+        offloadPopup.controlSize = .small
+        offloadPopup.target = self
+        offloadPopup.action = #selector(modelOffloadChanged(_:))
 
         let page = PreferencesPageSupport.makePage(
             title: "General",
@@ -33,7 +50,12 @@ final class PreferencesGeneralView: NSView {
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Readiness", detail: readinessLabel),
                     PreferencesPageSupport.makeSettingRow(title: "Model", detail: modelLabel),
-                    PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel)
+                    PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel),
+                    PreferencesPageSupport.makeSettingRow(
+                        title: "Offload model",
+                        detail: NSTextField(labelWithString: "After inactivity"),
+                        action: offloadPopup
+                    )
                 ]),
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
@@ -66,6 +88,12 @@ final class PreferencesGeneralView: NSView {
 
         microphoneButton.isHidden = microphoneStatus == .authorized
         accessibilityButton.isHidden = accessibilityStatus == .authorized
+        offloadPopup.selectItem(at: ModelOffloadPolicy.allCases.firstIndex(of: settings.modelOffloadPolicy) ?? 0)
+    }
+
+    func selectModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
+        offloadPopup.selectItem(at: ModelOffloadPolicy.allCases.firstIndex(of: policy) ?? 0)
+        setModelOffloadPolicy(policy)
     }
 
     private func updatePermissionLabel(_ label: NSTextField, status: PermissionStatus) {
@@ -84,4 +112,8 @@ final class PreferencesGeneralView: NSView {
 
     @objc private func requestMicrophoneAccess(_ sender: NSButton) { requestMicrophone() }
     @objc private func requestAccessibilityAccess(_ sender: NSButton) { requestAccessibility() }
+    @objc private func modelOffloadChanged(_ sender: NSPopUpButton) {
+        guard sender.indexOfSelectedItem >= 0 else { return }
+        setModelOffloadPolicy(ModelOffloadPolicy.allCases[sender.indexOfSelectedItem])
+    }
 }

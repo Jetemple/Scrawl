@@ -18,6 +18,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private let searchField = NSSearchField()
     private let tableView = NSTableView()
     private let stateView = NSView()
+    private var workspaceGroup: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
@@ -28,10 +29,16 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private var selectedID: UUID?
     private var isEnabled = true
     private var loadErrorDescription: String?
+    private var rowsAreTranscriptFirst = true
+    private var transcriptTextIsLeftAligned = true
 
     private(set) var state = State.empty
     var visibleRecordIDs: [UUID] { visibleRecords.map(\.id) }
     var selectedRecordID: UUID? { selectedID }
+    var usesGroupedWorkspace: Bool { workspaceGroup is PreferencesBackgroundView }
+    var visibleRowsAreTranscriptFirst: Bool { rowsAreTranscriptFirst }
+    var visibleTranscriptTextIsLeftAligned: Bool { transcriptTextIsLeftAligned }
+    var visibleMetrics: [String] { visibleRecords.map(PreferencesContentState.historyMetrics(for:)) }
     var areActionControlsWithinBounds: Bool {
         [copyButton, repasteButton, deleteButton].allSatisfy { bounds.contains(convert($0.bounds, from: $0)) }
     }
@@ -71,13 +78,18 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             options: [.usesLineFragmentOrigin],
             attributes: [.font: NSFont.systemFont(ofSize: 13)]
         ).height
-        return max(74, ceil(textHeight) + 48)
+        return max(76, ceil(textHeight) + 50)
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard visibleRecords.indices.contains(row) else { return nil }
         let record = visibleRecords[row]
         let cell = NSTableCellView()
+        let text = NSTextField(wrappingLabelWithString: record.text)
+        text.font = .systemFont(ofSize: 13)
+        text.alignment = .left
+        text.maximumNumberOfLines = 0
+
         let time = NSTextField(labelWithString: DateFormatter.localizedString(
             from: record.createdAt,
             dateStyle: .medium,
@@ -88,24 +100,25 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         let metrics = NSTextField(labelWithString: PreferencesContentState.historyMetrics(for: record))
         metrics.font = .systemFont(ofSize: 10)
         metrics.textColor = .tertiaryLabelColor
+        metrics.alignment = .right
         let metadata = NSStackView(views: [time, NSView(), metrics])
         metadata.orientation = .horizontal
-        let text = NSTextField(wrappingLabelWithString: record.text)
-        text.font = .systemFont(ofSize: 13)
-        text.maximumNumberOfLines = 0
-        let stack = NSStackView(views: [metadata, text])
-        stack.orientation = .vertical
-        stack.alignment = .width
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(stack)
+        metadata.alignment = .centerY
+        text.translatesAutoresizingMaskIntoConstraints = false
+        metadata.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(text)
+        cell.addSubview(metadata)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: cell.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: cell.bottomAnchor)
+            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
+            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
+            text.topAnchor.constraint(equalTo: cell.topAnchor, constant: 10),
+            metadata.leadingAnchor.constraint(equalTo: text.leadingAnchor),
+            metadata.trailingAnchor.constraint(equalTo: text.trailingAnchor),
+            metadata.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 8),
+            metadata.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -9)
         ])
+        rowsAreTranscriptFirst = true
+        transcriptTextIsLeftAligned = text.alignment == .left
         return cell
     }
 
@@ -115,10 +128,6 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     private func buildView() {
-        let header = PreferencesPageSupport.makePageHeader(
-            title: "History",
-            description: "Recent transcripts stored only on this Mac."
-        )
         toggle.target = self
         toggle.action = #selector(toggleChanged(_:))
         searchField.placeholderString = "Search transcripts"
@@ -129,7 +138,9 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.usesAutomaticRowHeights = false
-        tableView.intercellSpacing = NSSize(width: 0, height: 6)
+        tableView.backgroundColor = .clear
+        tableView.intercellSpacing = .zero
+        tableView.gridStyleMask = []
         tableView.dataSource = self
         tableView.delegate = self
 
@@ -147,12 +158,9 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         repasteButton.action = #selector(repasteSelected(_:))
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected(_:))
-        let buttons = NSStackView(views: [copyButton, repasteButton, deleteButton, NSView()])
-        buttons.orientation = .horizontal
-        buttons.spacing = 6
-
         stateTitle.font = .systemFont(ofSize: 15, weight: .medium)
         stateDetail.textColor = .secondaryLabelColor
+        stateDetail.alignment = .center
         let stateStack = NSStackView(views: [stateTitle, stateDetail])
         stateStack.orientation = .vertical
         stateStack.alignment = .centerX
@@ -164,35 +172,19 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor)
         ])
 
-        let workspace = NSView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        stateView.translatesAutoresizingMaskIntoConstraints = false
-        workspace.addSubview(scrollView)
-        workspace.addSubview(stateView)
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: workspace.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: workspace.bottomAnchor),
-            stateView.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
-            stateView.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
-            stateView.topAnchor.constraint(equalTo: workspace.topAnchor),
-            stateView.bottomAnchor.constraint(equalTo: workspace.bottomAnchor)
-        ])
-
-        let root = NSStackView(views: [header, toggle, searchField, workspace, buttons])
-        root.orientation = .vertical
-        root.alignment = .width
-        root.spacing = 9
-        root.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(root)
-        NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            root.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            root.topAnchor.constraint(equalTo: topAnchor, constant: 18),
-            root.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-            workspace.heightAnchor.constraint(greaterThanOrEqualToConstant: 250)
-        ])
+        let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
+        workspaceGroup = workspace
+        let page = PreferencesPageSupport.makePage(
+            title: "History",
+            description: "Recent transcripts stored only on this Mac.",
+            content: [
+                toggle,
+                searchField,
+                workspace,
+                PreferencesPageSupport.makeActionRow(buttons: [copyButton, repasteButton, deleteButton])
+            ]
+        )
+        PreferencesPageSupport.fill(self, with: page)
     }
 
     private func applyFilter() {

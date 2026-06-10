@@ -12,10 +12,11 @@ Benchmarked on June 8, 2026 using the installed `ggml-small.en` model and the
 11-second whisper.cpp JFK sample:
 
 - One-shot `whisper-cli`: 1.09s and 1.11s, averaging 1.10s.
-- Persistent `whisper-server`: 0.323s, 0.302s, and 0.303s, averaging 0.309s.
+- Persistent `whisper-server`, configured with the CLI's equivalent beam and
+  best-of settings: 0.418s, 0.360s, and 0.359s, averaging 0.379s.
 - Server startup to ready: 0.357s.
 
-Warm model reuse reduced request latency by about 72%. Starting the helper when
+Warm model reuse reduced request latency by about 65%. Starting the helper when
 recording begins can overlap the initial model load with speech.
 
 ## Architecture

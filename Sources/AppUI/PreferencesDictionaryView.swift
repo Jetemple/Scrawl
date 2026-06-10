@@ -15,6 +15,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private let searchField = NSSearchField()
     private let tableView = DeleteKeyTableView()
     private let stateView = NSView()
+    private var workspaceGroup: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
     private let editButton = NSButton(title: "Edit", target: nil, action: nil)
@@ -29,6 +30,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private(set) var state = State.empty
     var visibleWrongValues: [String] { visibleTerms.map(\.value) }
     var selectedWrong: String? { selectedValues.count == 1 ? selectedValues.first : nil }
+    var usesGroupedWorkspace: Bool { workspaceGroup is PreferencesBackgroundView }
 
     init(actions: Actions) {
         self.actions = actions
@@ -76,11 +78,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     }
 
     private func buildView() {
-        let header = PreferencesPageSupport.makePageHeader(
-            title: "Vocabulary",
-            description: "Preferred names, terms, and phrases that help Whisper recognize your language."
-        )
-        termField.placeholderString = "Add a preferred term, such as Anduril"
+        termField.placeholderString = "Add a preferred term"
         PreferencesPageSupport.configureSecondaryButton(addButton)
         addButton.bezelColor = .controlAccentColor
         addButton.target = self
@@ -95,7 +93,12 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         column.title = "Preferred Terms"
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
-        tableView.rowHeight = 30
+        tableView.headerView = nil
+        tableView.rowHeight = 32
+        tableView.backgroundColor = .clear
+        tableView.intercellSpacing = .zero
+        tableView.gridStyleMask = .solidHorizontalGridLineMask
+        tableView.gridColor = .separatorColor.withAlphaComponent(0.45)
         tableView.allowsMultipleSelection = true
         tableView.dataSource = self
         tableView.delegate = self
@@ -108,6 +111,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 
         stateTitle.font = .systemFont(ofSize: 15, weight: .medium)
         stateDetail.textColor = .secondaryLabelColor
+        stateDetail.alignment = .center
         let stateStack = NSStackView(views: [stateTitle, stateDetail])
         stateStack.orientation = .vertical
         stateStack.alignment = .centerX
@@ -119,21 +123,8 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
             stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor)
         ])
 
-        let workspace = NSView()
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        stateView.translatesAutoresizingMaskIntoConstraints = false
-        workspace.addSubview(scrollView)
-        workspace.addSubview(stateView)
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: workspace.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: workspace.bottomAnchor),
-            stateView.leadingAnchor.constraint(equalTo: workspace.leadingAnchor),
-            stateView.trailingAnchor.constraint(equalTo: workspace.trailingAnchor),
-            stateView.topAnchor.constraint(equalTo: workspace.topAnchor),
-            stateView.bottomAnchor.constraint(equalTo: workspace.bottomAnchor)
-        ])
+        let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
+        workspaceGroup = workspace
 
         PreferencesPageSupport.configureSecondaryButton(editButton)
         PreferencesPageSupport.configureSecondaryButton(deleteButton)
@@ -142,23 +133,17 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         editButton.action = #selector(editSelected(_:))
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected(_:))
-        let buttons = NSStackView(views: [editButton, deleteButton, NSView()])
-        buttons.orientation = .horizontal
-        buttons.spacing = 6
-
-        let root = NSStackView(views: [header, addRow, searchField, workspace, buttons])
-        root.orientation = .vertical
-        root.alignment = .width
-        root.spacing = 10
-        root.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(root)
-        NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            root.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            root.topAnchor.constraint(equalTo: topAnchor, constant: 18),
-            root.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-            workspace.heightAnchor.constraint(greaterThanOrEqualToConstant: 220)
-        ])
+        let page = PreferencesPageSupport.makePage(
+            title: "Vocabulary",
+            description: "Preferred names, terms, and phrases that help Whisper recognize your language.",
+            content: [
+                addRow,
+                searchField,
+                workspace,
+                PreferencesPageSupport.makeActionRow(buttons: [editButton, deleteButton])
+            ]
+        )
+        PreferencesPageSupport.fill(self, with: page)
     }
 
     @objc private func addTerm(_ sender: NSButton) {

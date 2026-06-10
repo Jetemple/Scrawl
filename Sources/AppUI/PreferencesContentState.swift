@@ -66,14 +66,12 @@ enum PreferencesContentState {
     }
 
     static func historyMetrics(for record: TranscriptRecord) -> String {
-        let wordCount = record.text.split(whereSeparator: \.isWhitespace).count
-        var metrics = ["\(wordCount) \(wordCount == 1 ? "word" : "words")"]
+        var metrics: [String] = []
         if let durationMS = record.recordingDurationMS, durationMS > 0 {
-            metrics.append("\(formattedDuration(durationMS)) recording")
-            metrics.append("\(Int((Double(wordCount) * 60_000 / Double(durationMS)).rounded())) WPM")
+            metrics.append("\(formattedDuration(durationMS)) audio")
         }
         if let latencyMS = record.transcriptionLatencyMS, latencyMS > 0 {
-            metrics.append("transcribed in \(formattedDuration(latencyMS))")
+            metrics.append("\(formattedDuration(latencyMS)) processing")
         }
         return metrics.joined(separator: " · ")
     }

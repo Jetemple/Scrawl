@@ -55,6 +55,33 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testModelsPageUsesTopAnchoredTwoLineRowsWithoutSelectedAction() {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(modelRows: [
+            PreferencesModelRow(
+                id: "tiny.en",
+                displayName: "tiny.en — fast, 75 MB",
+                isInstalled: true,
+                isSelected: false,
+                isDownloading: false
+            ),
+            PreferencesModelRow(
+                id: "large-v3-turbo",
+                displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
+                isInstalled: true,
+                isSelected: true,
+                isDownloading: false
+            )
+        ]))
+        controller.selectSection(.models)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.modelsListIsTopAnchored)
+        XCTAssertEqual(controller.modelsTwoLineRowCount, 2)
+        XCTAssertFalse(controller.modelsSelectedRowHasAction)
+    }
+
+    @MainActor
     func testPreferencesBackgroundsUpdateForAppearanceChanges() {
         for view in [
             PreferencesPageSupport.makeRoundedBackground(),
@@ -73,6 +100,43 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
             XCTAssertNotEqual(lightComponents, darkComponents)
         }
+    }
+
+    @MainActor
+    func testPageHeaderUsesSameWidthAndLeadingEdgeAsContent() throws {
+        let content = PreferencesPageSupport.makeRoundedBackground()
+        content.heightAnchor.constraint(equalToConstant: 80).isActive = true
+        let page = PreferencesPageSupport.makePage(
+            title: "Models",
+            description: "Select an installed model or download another.",
+            content: [content]
+        )
+        page.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
+        page.layoutSubtreeIfNeeded()
+
+        let pageStack = try XCTUnwrap(page.subviews.compactMap { $0 as? NSStackView }.first)
+        let header = try XCTUnwrap(pageStack.arrangedSubviews.first)
+
+        XCTAssertEqual(header.frame.minX, content.frame.minX, accuracy: 0.5)
+        XCTAssertEqual(header.frame.width, content.frame.width, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testPageHeaderLabelsFillWidthAndAlignLeft() throws {
+        let header = PreferencesPageSupport.makePageHeader(
+            title: "Models",
+            description: "Select an installed model or download another."
+        )
+        header.frame = NSRect(x: 0, y: 0, width: 500, height: 60)
+        header.layoutSubtreeIfNeeded()
+
+        let labels = header.subviews.compactMap { $0 as? NSTextField }
+        XCTAssertEqual(labels.count, 2)
+        for label in labels {
+            XCTAssertEqual(label.alignment, .left)
+            XCTAssertGreaterThanOrEqual(label.frame.width, header.bounds.width)
+        }
+        XCTAssertEqual(labels[0].frame.width, labels[1].frame.width, accuracy: 0.5)
     }
 
     @MainActor
@@ -136,6 +200,26 @@ final class PreferencesWindowControllerTests: XCTestCase {
         window.contentView?.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(controller.isVisibleSectionCriticalContentWithinBounds)
+    }
+
+    @MainActor
+    func testHistoryRowsPresentTranscriptBeforeQuietFooter() {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(records: [
+            TranscriptRecord(
+                id: UUID(),
+                createdAt: .now,
+                text: "A saved transcript",
+                recordingDurationMS: 2_000,
+                transcriptionLatencyMS: 1_400
+            )
+        ]))
+        controller.selectSection(.history)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(controller.historyRowsAreTranscriptFirst)
+        XCTAssertTrue(controller.historyTranscriptTextIsLeftAligned)
+        XCTAssertEqual(controller.historyVisibleMetrics, ["2s audio · 1.4s processing"])
     }
 
     @MainActor
@@ -205,6 +289,25 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneralModelOffloadControlShowsChoicesAndDispatchesSelection() {
+        var selectedPolicy: ModelOffloadPolicy?
+        let controller = PreferencesWindowController(actions: makeActions(
+            setModelOffloadPolicy: { selectedPolicy = $0 }
+        ))
+        controller.update(snapshot: makeSnapshot(modelOffloadPolicy: .oneMinute))
+
+        XCTAssertEqual(
+            controller.generalModelOffloadChoices,
+            ["Immediately", "1 minute", "5 minutes", "15 minutes", "Never"]
+        )
+        XCTAssertEqual(controller.generalSelectedModelOffloadPolicy, .oneMinute)
+
+        controller.selectGeneralModelOffloadPolicy(.fifteenMinutes)
+
+        XCTAssertEqual(selectedPolicy, .fifteenMinutes)
+    }
+
+    @MainActor
     func testVocabularyPageFiltersPreferredTermsAndFallsBackToFirstSelection() {
         let first = DictionaryEntry(wrong: "post grass", correct: "Postgres")
         let second = DictionaryEntry(wrong: "cube", correct: "Kubernetes")
@@ -267,6 +370,34 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testEverySettingsPageFitsAtMinimumWindowSize() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
+        controller.update(snapshot: makeSnapshot(
+            records: [TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")],
+            dictionaryEntries: [DictionaryEntry(wrong: "Anduril", correct: "Anduril")]
+        ))
+
+        for section in PreferencesWindowController.Section.allCases {
+            controller.selectSection(section)
+            window.contentView?.layoutSubtreeIfNeeded()
+
+            XCTAssertFalse(controller.visibleSectionHasAmbiguousLayout, "\(section.title) has ambiguous layout")
+            XCTAssertTrue(controller.isVisibleSectionWithinContentBounds, "\(section.title) extends beyond content bounds")
+            XCTAssertTrue(controller.isVisibleSectionCriticalContentWithinBounds, "\(section.title) clips critical controls")
+        }
+    }
+
+    @MainActor
+    func testListPagesUseSharedGroupedWorkspaceTreatment() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        XCTAssertTrue(controller.historyUsesGroupedWorkspace)
+        XCTAssertTrue(controller.dictionaryUsesGroupedWorkspace)
+    }
+
+    @MainActor
     func testVocabularyAddButtonDispatchesAction() throws {
         var savedValue: String?
         let controller = PreferencesWindowController(actions: makeActions(
@@ -277,7 +408,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         ))
         controller.selectSection(.dictionary)
         let contentView = try XCTUnwrap(controller.window?.contentView)
-        let field = try XCTUnwrap(contentView.textField(withPlaceholder: "Add a preferred term, such as Anduril"))
+        let field = try XCTUnwrap(contentView.textField(withPlaceholder: "Add a preferred term"))
         field.stringValue = "Anduril"
 
         try XCTUnwrap(contentView.button(titled: "Add Term")).performClick(nil)
@@ -322,14 +453,19 @@ final class PreferencesWindowControllerTests: XCTestCase {
     @MainActor
     private func makeSnapshot(
         isHistoryEnabled: Bool = true,
+        modelOffloadPolicy: ModelOffloadPolicy = .fiveMinutes,
         historyLoadErrorDescription: String? = nil,
         records: [TranscriptRecord] = [],
-        dictionaryEntries: [DictionaryEntry] = []
+        dictionaryEntries: [DictionaryEntry] = [],
+        modelRows: [PreferencesModelRow] = []
     ) -> PreferencesWindowController.Snapshot {
         PreferencesWindowController.Snapshot(
-            settings: AppSettings(isTranscriptHistoryEnabled: isHistoryEnabled),
+            settings: AppSettings(
+                isTranscriptHistoryEnabled: isHistoryEnabled,
+                modelOffloadPolicy: modelOffloadPolicy
+            ),
             downloadableModels: [],
-            modelRows: [],
+            modelRows: modelRows,
             microphoneStatus: .notDetermined,
             accessibilityStatus: .notDetermined,
             isCapturingHotkey: false,
@@ -347,6 +483,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         requestAccessibility: @escaping () -> Void = {},
         openProjectPage: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
+        setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
         copyTranscript: @escaping (UUID) -> Void = { _ in },
         repasteTranscript: @escaping (UUID) -> Void = { _ in },
         deleteTranscripts: @escaping (Set<UUID>) -> Void = { _ in },
@@ -364,6 +501,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             setHotkey: setHotkey,
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,
+            setModelOffloadPolicy: setModelOffloadPolicy,
             setTranscriptHistoryEnabled: setTranscriptHistoryEnabled,
             copyTranscript: copyTranscript,
             repasteTranscript: repasteTranscript,

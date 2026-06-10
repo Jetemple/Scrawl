@@ -2,6 +2,25 @@ import SettingsStore
 import XCTest
 
 final class AppSettingsDecodingTests: XCTestCase {
+    func testModelOffloadDefaultsToFiveMinutes() {
+        XCTAssertEqual(AppSettings().modelOffloadPolicy, .fiveMinutes)
+        XCTAssertEqual(AppSettings().modelOffloadPolicy.idleSeconds, 300)
+    }
+
+    func testModelOffloadPolicyRoundTrips() throws {
+        let data = try JSONEncoder().encode(AppSettings(modelOffloadPolicy: .never))
+
+        XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: data).modelOffloadPolicy, .never)
+    }
+
+    func testLegacySettingsDefaultModelOffloadToFiveMinutes() throws {
+        let data = try XCTUnwrap("""
+        {"defaultModelID":"tiny.en","selectedModelID":"tiny.en","language":"en"}
+        """.data(using: .utf8))
+
+        XCTAssertEqual(try JSONDecoder().decode(AppSettings.self, from: data).modelOffloadPolicy, .fiveMinutes)
+    }
+
     func testTranscriptHistoryIsEnabledByDefault() {
         XCTAssertTrue(AppSettings().isTranscriptHistoryEnabled)
     }

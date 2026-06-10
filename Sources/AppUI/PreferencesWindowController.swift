@@ -12,6 +12,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let setHotkey: () -> Void
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
+        let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
         let setTranscriptHistoryEnabled: (Bool) -> Void
         let copyTranscript: (UUID) -> Void
         let repasteTranscript: (UUID) -> Void
@@ -113,11 +114,22 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     var dictionaryState: PreferencesDictionaryView.State { dictionaryView.state }
     var dictionaryVisibleWrongValues: [String] { dictionaryView.visibleWrongValues }
     var dictionarySelectedWrong: String? { dictionaryView.selectedWrong }
+    var historyUsesGroupedWorkspace: Bool { historyView.usesGroupedWorkspace }
+    var historyRowsAreTranscriptFirst: Bool { historyView.visibleRowsAreTranscriptFirst }
+    var historyTranscriptTextIsLeftAligned: Bool { historyView.visibleTranscriptTextIsLeftAligned }
+    var historyVisibleMetrics: [String] { historyView.visibleMetrics }
+    var dictionaryUsesGroupedWorkspace: Bool { dictionaryView.usesGroupedWorkspace }
+    var modelsListIsTopAnchored: Bool { modelsView.listIsTopAnchored }
+    var modelsTwoLineRowCount: Int { modelsView.visibleTwoLineRowCount }
+    var modelsSelectedRowHasAction: Bool { modelsView.visibleSelectedRowHasAction }
+    var generalModelOffloadChoices: [String] { generalView.modelOffloadChoices }
+    var generalSelectedModelOffloadPolicy: ModelOffloadPolicy? { generalView.selectedModelOffloadPolicy }
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
             requestMicrophone: actions.requestMicrophone,
-            requestAccessibility: actions.requestAccessibility
+            requestAccessibility: actions.requestAccessibility,
+            setModelOffloadPolicy: actions.setModelOffloadPolicy
         )
         modelsView = PreferencesModelsView(
             selectModel: actions.selectModel,
@@ -187,6 +199,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             loadErrorDescription: snapshot.transcriptHistoryLoadErrorDescription
         )
         dictionaryView.update(entries: snapshot.dictionaryEntries)
+    }
+
+    func selectGeneralModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
+        generalView.selectModelOffloadPolicy(policy)
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {

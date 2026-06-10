@@ -78,3 +78,9 @@ extension TranscriptionError: LocalizedError {
 public protocol TranscriptionProvider: Sendable {
     func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult
 }
+
+public protocol ModelRetainingTranscriptionProvider: TranscriptionProvider {
+    func warmUp(modelID: String, language: String) async
+    func setIdleOffloadSeconds(_ seconds: TimeInterval?) async
+    func shutdown() async
+}

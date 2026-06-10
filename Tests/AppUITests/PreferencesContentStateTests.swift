@@ -34,14 +34,14 @@ final class PreferencesContentStateTests: XCTestCase {
 
         XCTAssertEqual(
             PreferencesContentState.historyMetrics(for: record),
-            "4 words · 2s recording · 120 WPM · transcribed in 1.4s"
+            "2s audio · 1.4s processing"
         )
     }
 
     func testHistoryMetricsOmitUnavailableLegacyPerformanceData() {
         let record = TranscriptRecord(id: UUID(), createdAt: .now, text: "one two")
 
-        XCTAssertEqual(PreferencesContentState.historyMetrics(for: record), "2 words")
+        XCTAssertEqual(PreferencesContentState.historyMetrics(for: record), "")
     }
 
     func testFilteredVocabularyMatchesPreferredTerms() {

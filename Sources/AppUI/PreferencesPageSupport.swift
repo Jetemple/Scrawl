@@ -45,6 +45,10 @@ final class PreferencesBackgroundView: NSView {
 }
 
 enum PreferencesPageSupport {
+    static let pageHorizontalInset: CGFloat = 28
+    static let pageVerticalInset: CGFloat = 24
+    static let pageSectionSpacing: CGFloat = 16
+
     static func fill(_ container: NSView, with view: NSView) {
         view.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(view)
@@ -60,9 +64,11 @@ enum PreferencesPageSupport {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .width
-        stack.spacing = 16
+        stack.spacing = pageSectionSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(makePageHeader(title: title, description: description))
+        let header = makePageHeader(title: title, description: description)
+        stack.addArrangedSubview(header)
+        header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         content.forEach {
             $0.setContentHuggingPriority(.defaultLow, for: .horizontal)
             stack.addArrangedSubview($0)
@@ -72,10 +78,10 @@ enum PreferencesPageSupport {
         let container = NSView()
         container.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -28),
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -24)
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: pageHorizontalInset),
+            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -pageHorizontalInset),
+            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: pageVerticalInset),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -pageVerticalInset)
         ])
         return container
     }
@@ -84,16 +90,28 @@ enum PreferencesPageSupport {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.alignment = .left
 
         let descriptionLabel = NSTextField(wrappingLabelWithString: description)
         descriptionLabel.font = .systemFont(ofSize: 12)
         descriptionLabel.textColor = .secondaryLabelColor
+        descriptionLabel.alignment = .left
 
-        let stack = NSStackView(views: [titleLabel, descriptionLabel])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 4
-        return stack
+        let container = NSView()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(titleLabel)
+        container.addSubview(descriptionLabel)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: container.topAnchor),
+            descriptionLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            descriptionLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            descriptionLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        return container
     }
 
     static func makeGroup(rows: [NSView]) -> NSView {
@@ -121,7 +139,7 @@ enum PreferencesPageSupport {
         return group
     }
 
-    static func makeSettingRow(title: String, detail: NSTextField, action: NSButton? = nil) -> NSView {
+    static func makeSettingRow(title: String, detail: NSTextField, action: NSView? = nil) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13)
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -168,16 +186,58 @@ enum PreferencesPageSupport {
     }
 
     static func makeButtonRow(_ button: NSButton) -> NSView {
+        makeActionRow(buttons: [button])
+    }
+
+    static func makeActionRow(buttons: [NSButton]) -> NSView {
+        let stack = NSStackView(views: buttons + [NSView()])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 6
+
         let row = NSView()
-        button.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(button)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(stack)
         NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            button.topAnchor.constraint(equalTo: row.topAnchor),
-            button.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-            button.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor)
+            stack.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: row.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: row.bottomAnchor)
         ])
         return row
+    }
+
+    static func makeListWorkspace(scrollView: NSScrollView, stateView: NSView) -> NSView {
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+
+        let content = NSView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        stateView.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(scrollView)
+        content.addSubview(stateView)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: content.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            stateView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            stateView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stateView.topAnchor.constraint(equalTo: content.topAnchor),
+            stateView.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+        ])
+
+        let group = makeRoundedBackground()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        group.addSubview(content)
+        NSLayoutConstraint.activate([
+            group.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            content.leadingAnchor.constraint(equalTo: group.leadingAnchor, constant: 1),
+            content.trailingAnchor.constraint(equalTo: group.trailingAnchor, constant: -1),
+            content.topAnchor.constraint(equalTo: group.topAnchor, constant: 1),
+            content.bottomAnchor.constraint(equalTo: group.bottomAnchor, constant: -1)
+        ])
+        return group
     }
 
     static func makeEmptyState(title: String, detail: String) -> NSView {
