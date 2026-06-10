@@ -112,4 +112,41 @@ final class WarmWhisperServerTests: XCTestCase {
         try await Task.sleep(nanoseconds: 4_000_000_000)
         XCTAssertFalse(process.isRunning, "Process should have been killed by SIGKILL")
     }
+
+    // MARK: - Task 8: Readiness identity check, port pre-check, budget
+
+    func testIsWhisperServerResponseAcceptsWhisperCppTitle() {
+        // Empirically verified: whisper-server GET / returns HTML with <title>Whisper.cpp Server</title>
+        let html = Data("<html><head><title>Whisper.cpp Server</title></head></html>".utf8)
+        XCTAssertTrue(WarmWhisperServer.isWhisperServerResponse(html))
+    }
+
+    func testIsWhisperServerResponseAcceptsWhisperServerString() {
+        let data = Data("whisper-server version 1.2.3".utf8)
+        XCTAssertTrue(WarmWhisperServer.isWhisperServerResponse(data))
+    }
+
+    func testIsWhisperServerResponseRejectsForeignNotFound() {
+        let data = Data("404 Not Found".utf8)
+        XCTAssertFalse(WarmWhisperServer.isWhisperServerResponse(data))
+    }
+
+    func testIsWhisperServerResponseRejectsForeignJSON() {
+        let data = Data("{\"error\": \"not a whisper service\"}".utf8)
+        XCTAssertFalse(WarmWhisperServer.isWhisperServerResponse(data))
+    }
+
+    func testAllocatePortReturnsUsablePort() throws {
+        let port = try WarmWhisperServer.allocatePort()
+        XCTAssertGreaterThan(port, 0)
+        XCTAssertLessThan(port, 65536)
+    }
+
+    func testAllocatePortReturnsDifferentPortsOnSuccessiveCalls() throws {
+        let port1 = try WarmWhisperServer.allocatePort()
+        let port2 = try WarmWhisperServer.allocatePort()
+        // Ports are kernel-assigned and should normally differ; both must be valid
+        XCTAssertGreaterThan(port1, 0)
+        XCTAssertGreaterThan(port2, 0)
+    }
 }

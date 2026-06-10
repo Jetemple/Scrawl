@@ -130,7 +130,7 @@ actor WarmWhisperServer {
         startupKey = key
 
         let task = Task {
-            let port = Int.random(in: 20_000...49_999)
+            let port = try Self.allocatePort()
             let url = URL(string: "http://127.0.0.1:\(port)")!
             let process = Process()
             let serverArguments = self.makeServerArguments(
@@ -201,18 +201,30 @@ actor WarmWhisperServer {
     }
 
     internal func waitUntilReady(process: Process, baseURL: URL) async throws {
-        for _ in 0..<100 {
+        // 60 iterations × (1s sleep + 0.5s probe timeout) ≈ 90s max budget
+        for _ in 0..<60 {
             guard process.isRunning else {
                 throw TranscriptionError.executionFailed("whisper-server exited during startup")
             }
             var request = URLRequest(url: baseURL)
-            request.timeoutInterval = 0.2
-            if (try? await URLSession.shared.data(for: request)) != nil {
+            request.timeoutInterval = 0.5
+            if let (data, _) = try? await URLSession.shared.data(for: request),
+               Self.isWhisperServerResponse(data) {
                 return
             }
-            try await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 1_000_000_000)
         }
-        throw TranscriptionError.executionFailed("whisper-server did not become ready")
+        throw TranscriptionError.executionFailed("whisper-server did not become ready in 90 seconds")
+    }
+
+    /// Returns true when the HTTP response body looks like it came from whisper-server.
+    /// Empirically verified against whisper-server 1.x (Homebrew): GET / returns an HTML page
+    /// with the title "Whisper.cpp Server". A foreign service on the same port (e.g. a dev server
+    /// returning 404 or a non-whisper process) will not contain these strings.
+    internal static func isWhisperServerResponse(_ data: Data) -> Bool {
+        guard let body = String(data: data, encoding: .utf8) else { return false }
+        let lower = body.lowercased()
+        return lower.contains("whisper.cpp") || lower.contains("whisper-server")
     }
 
     private func scheduleOffload() {
@@ -252,6 +264,41 @@ actor WarmWhisperServer {
         }
         append("--\(boundary)--\r\n")
         return body
+    }
+
+    /// Asks the kernel for a free TCP port by binding to :0 and reading the assigned address.
+    /// This eliminates the random-range collision risk and TOCTOU window is minimal because the
+    /// port is passed directly to whisper-server before other callers can claim it.
+    internal static func allocatePort() throws -> Int {
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        guard sock >= 0 else {
+            throw TranscriptionError.executionFailed("socket() failed: could not allocate port")
+        }
+        defer { close(sock) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = INADDR_ANY
+        let bindResult = withUnsafeMutablePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindResult == 0 else {
+            throw TranscriptionError.executionFailed("bind() failed: could not allocate port")
+        }
+        var boundAddr = sockaddr_in()
+        var boundLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let nameResult = withUnsafeMutablePointer(to: &boundAddr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(sock, $0, &boundLen)
+            }
+        }
+        guard nameResult == 0 else {
+            throw TranscriptionError.executionFailed("getsockname() failed: could not read port")
+        }
+        return Int(UInt16(bigEndian: boundAddr.sin_port))
     }
 
     static func supervisedLaunch(
