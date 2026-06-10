@@ -78,9 +78,13 @@ open /Applications/Scrawl.app
 
 Scrawl lives in your menubar. From there you can:
 
-- **Change the hotkey** — Set Hotkey, then press any single key, `Fn`, or modifier. Press `Esc` to cancel.
-- **Switch models** — tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy)
-- **Repaste recent transcripts** — Recent Transcripts submenu
+- **Open Settings** - Manage permissions, models, the recording shortcut, transcript history, and preferred Vocabulary from a compact sidebar window.
+- **Switch models** - tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy).
+- **Control model offloading** - Keep the selected model warm for faster repeat transcriptions, then release its memory after a chosen idle period.
+- **Repaste recent transcripts** - Use the Recent Transcripts submenu for quick access or the searchable History page for copy, repaste, and delete actions.
+- **Manage Vocabulary** - Add names, technical terms, and phrases that help Whisper recognize your language.
+
+Transcript history is stored only on this Mac, enabled by default, and limited to the newest 100 transcripts. Turning off **Save transcript history** deletes saved transcripts and stops saving new ones until it is enabled again. Preferred Vocabulary terms are also stored locally and supplied to Whisper as recognition context.
 
 ## Development
 
@@ -88,6 +92,7 @@ Scrawl lives in your menubar. From there you can:
 make build      # build
 make doctor     # check local toolchain/dependencies
 make test       # run tests
+make run        # stop an installed Scrawl instance and run this source build
 make clean      # clean build artifacts
 make uninstall  # remove app
 ```
@@ -95,33 +100,39 @@ make uninstall  # remove app
 Run directly from source:
 
 ```bash
-swift run ScrawlApp
+make run
 ```
 
 Override paths via environment variables:
 
 ```bash
-SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli swift run ScrawlApp
-SCRAWL_MODELS_DIR=/path/to/models swift run ScrawlApp
+SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli make run
+SCRAWL_MODELS_DIR=/path/to/models make run
 ```
 
 Performance tuning:
 
 ```bash
 # cap whisper threads (default auto-selects up to 8)
-SCRAWL_WHISPER_THREADS=8 swift run ScrawlApp
+SCRAWL_WHISPER_THREADS=8 make run
 
 # force CPU-only mode (GPU is enabled by default)
-SCRAWL_DISABLE_GPU=1 swift run ScrawlApp
+SCRAWL_DISABLE_GPU=1 make run
 ```
 
 Scrawl automatically uses GPU acceleration when available and falls back to CPU mode if GPU execution fails.
+It also preloads the selected model when recording begins and keeps it warm between
+transcriptions. The default idle offload period is five minutes and can be changed
+in General Settings. If the persistent local helper is unavailable, Scrawl
+automatically falls back to one-shot `whisper-cli` transcription.
 
 Debug mode (shows manual record/stop controls and overlay previews):
 
 ```bash
-SCRAWL_DEBUG=1 swift run ScrawlApp
+make run-debug
 ```
+
+Debug mode adds manual Control-R and Control-S recording actions for diagnostics. They are not Scrawl's normal recording shortcut; normal recording always uses the configured hotkey.
 
 ## License
 

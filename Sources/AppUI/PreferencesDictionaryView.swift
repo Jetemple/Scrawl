@@ -1,0 +1,275 @@
+import AppKit
+import DictionaryStore
+
+final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+    enum State: Equatable { case empty, noSearchResults, entries }
+
+    struct Actions {
+        let save: (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void
+        let delete: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
+    }
+
+    private let actions: Actions
+    private let termField = NSTextField()
+    private let addButton = NSButton(title: "Add Term", target: nil, action: nil)
+    private let searchField = NSSearchField()
+    private let tableView = DeleteKeyTableView()
+    private let stateView = NSView()
+    private var workspaceGroup: NSView?
+    private let stateTitle = NSTextField(labelWithString: "")
+    private let stateDetail = NSTextField(wrappingLabelWithString: "")
+    private let editButton = NSButton(title: "Edit", target: nil, action: nil)
+    private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
+    private var terms: [VocabularyTerm] = []
+    private var visibleTerms: [VocabularyTerm] = []
+    private var selectedValues: Set<String> = []
+    private weak var editorWindow: NSWindow?
+    private var editorOriginal: String?
+    private var editorField: NSTextField?
+
+    private(set) var state = State.empty
+    var visibleWrongValues: [String] { visibleTerms.map(\.value) }
+    var selectedWrong: String? { selectedValues.count == 1 ? selectedValues.first : nil }
+    var usesGroupedWorkspace: Bool { workspaceGroup is PreferencesBackgroundView }
+
+    init(actions: Actions) {
+        self.actions = actions
+        super.init(frame: .zero)
+        buildView()
+        update(entries: [])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(entries: [DictionaryEntry]) {
+        terms = entries.map { VocabularyTerm(value: $0.correct) }
+        applyFilter()
+    }
+
+    func setSearchQuery(_ query: String) {
+        searchField.stringValue = query
+        applyFilter()
+    }
+
+    func controlTextDidChange(_ obj: Notification) { applyFilter() }
+    func numberOfRows(in tableView: NSTableView) -> Int { visibleTerms.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard visibleTerms.indices.contains(row) else { return nil }
+        let cell = NSTableCellView()
+        let label = NSTextField(labelWithString: visibleTerms[row].value)
+        label.font = .systemFont(ofSize: 13)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+        ])
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        selectedValues = Set(tableView.selectedRowIndexes.compactMap {
+            visibleTerms.indices.contains($0) ? visibleTerms[$0].value : nil
+        })
+        updateActionAvailability()
+    }
+
+    private func buildView() {
+        termField.placeholderString = "Add a preferred term"
+        PreferencesPageSupport.configureSecondaryButton(addButton)
+        addButton.bezelColor = .controlAccentColor
+        addButton.target = self
+        addButton.action = #selector(addTerm(_:))
+        let addRow = NSStackView(views: [termField, addButton])
+        addRow.orientation = .horizontal
+        addRow.spacing = 8
+
+        searchField.placeholderString = "Search vocabulary"
+        searchField.delegate = self
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("term"))
+        column.title = "Preferred Terms"
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.rowHeight = 32
+        tableView.backgroundColor = .clear
+        tableView.intercellSpacing = .zero
+        tableView.gridStyleMask = .solidHorizontalGridLineMask
+        tableView.gridColor = .separatorColor.withAlphaComponent(0.45)
+        tableView.allowsMultipleSelection = true
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.target = self
+        tableView.doubleAction = #selector(editSelected(_:))
+        tableView.onDelete = { [weak self] in self?.deleteSelected(nil) }
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.documentView = tableView
+
+        stateTitle.font = .systemFont(ofSize: 15, weight: .medium)
+        stateDetail.textColor = .secondaryLabelColor
+        stateDetail.alignment = .center
+        let stateStack = NSStackView(views: [stateTitle, stateDetail])
+        stateStack.orientation = .vertical
+        stateStack.alignment = .centerX
+        stateStack.spacing = 5
+        stateStack.translatesAutoresizingMaskIntoConstraints = false
+        stateView.addSubview(stateStack)
+        NSLayoutConstraint.activate([
+            stateStack.centerXAnchor.constraint(equalTo: stateView.centerXAnchor),
+            stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor)
+        ])
+
+        let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
+        workspaceGroup = workspace
+
+        PreferencesPageSupport.configureSecondaryButton(editButton)
+        PreferencesPageSupport.configureSecondaryButton(deleteButton)
+        deleteButton.contentTintColor = .systemRed
+        editButton.target = self
+        editButton.action = #selector(editSelected(_:))
+        deleteButton.target = self
+        deleteButton.action = #selector(deleteSelected(_:))
+        let page = PreferencesPageSupport.makePage(
+            title: "Vocabulary",
+            description: "Preferred names, terms, and phrases that help Whisper recognize your language.",
+            content: [
+                addRow,
+                searchField,
+                workspace,
+                PreferencesPageSupport.makeActionRow(buttons: [editButton, deleteButton])
+            ]
+        )
+        PreferencesPageSupport.fill(self, with: page)
+    }
+
+    @objc private func addTerm(_ sender: NSButton) {
+        let value = termField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        addButton.isEnabled = false
+        actions.save(nil, value, value) { [weak self] result in
+            self?.addButton.isEnabled = true
+            if case .success = result { self?.termField.stringValue = "" }
+            if case let .failure(error) = result { NSAlert(error: error).runModal() }
+        }
+    }
+
+    private func applyFilter() {
+        visibleTerms = PreferencesContentState.filteredVocabulary(terms: terms, query: searchField.stringValue)
+        let retained = visibleTerms.compactMap { term in
+            selectedValues.contains { term.value.caseInsensitiveCompare($0) == .orderedSame } ? term.value : nil
+        }
+        selectedValues = retained.isEmpty ? Set(visibleTerms.first.map { [$0.value] } ?? []) : Set(retained)
+        tableView.reloadData()
+        tableView.selectRowIndexes(IndexSet(visibleTerms.indices.filter { selectedValues.contains(visibleTerms[$0].value) }), byExtendingSelection: false)
+        updateState()
+        updateActionAvailability()
+    }
+
+    private func updateState() {
+        if terms.isEmpty {
+            state = .empty
+            stateTitle.stringValue = "No preferred terms yet"
+            stateDetail.stringValue = "Add names and phrases you want Whisper to recognize."
+        } else if visibleTerms.isEmpty {
+            state = .noSearchResults
+            stateTitle.stringValue = "No matching terms"
+            stateDetail.stringValue = "Try a different search."
+        } else {
+            state = .entries
+        }
+        stateView.isHidden = state == .entries
+        tableView.enclosingScrollView?.isHidden = state != .entries
+    }
+
+    private func updateActionAvailability() {
+        editButton.isEnabled = selectedValues.count == 1
+        deleteButton.isEnabled = !selectedValues.isEmpty
+    }
+
+    @objc private func editSelected(_ sender: Any?) { showEditorForSelection() }
+
+    private func showEditorForSelection() {
+        guard let selectedWrong else { return }
+        showEditor(original: selectedWrong)
+    }
+
+    private func showEditor(original: String) {
+        guard let window else { return }
+        let field = NSTextField(string: original)
+        let cancel = NSButton(title: "Cancel", target: nil, action: nil)
+        let save = NSButton(title: "Save", target: nil, action: nil)
+        save.keyEquivalent = "\r"
+        let root = NSStackView(views: [NSTextField(labelWithString: "Preferred term"), field, NSStackView(views: [NSView(), cancel, save])])
+        root.orientation = .vertical
+        root.alignment = .width
+        root.spacing = 10
+        root.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 150), styleMask: [.titled], backing: .buffered, defer: false)
+        panel.title = "Edit Term"
+        panel.contentView = root
+        editorWindow = window
+        editorOriginal = original
+        editorField = field
+        cancel.target = self
+        cancel.action = #selector(cancelEditor(_:))
+        save.target = self
+        save.action = #selector(saveEditor(_:))
+        window.beginSheet(panel)
+        window.makeFirstResponder(field)
+    }
+
+    @objc private func cancelEditor(_ sender: NSButton) {
+        guard let window = editorWindow, let sheet = window.attachedSheet else { return }
+        window.endSheet(sheet)
+        clearEditorState()
+    }
+
+    @objc private func saveEditor(_ sender: NSButton) {
+        guard let field = editorField else { return }
+        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        sender.isEnabled = false
+        actions.save(editorOriginal, value, value) { [weak self] result in
+            guard let self else { return }
+            if case .success = result, let window = editorWindow, let sheet = window.attachedSheet {
+                window.endSheet(sheet)
+                clearEditorState()
+            }
+            if case let .failure(error) = result {
+                sender.isEnabled = true
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
+    private func clearEditorState() {
+        editorOriginal = nil
+        editorField = nil
+        editorWindow = nil
+    }
+
+    @objc private func deleteSelected(_ sender: Any? = nil) {
+        guard !selectedValues.isEmpty else { return }
+        if selectedValues.count > 1 {
+            let alert = NSAlert()
+            alert.messageText = "Delete \(selectedValues.count) Terms?"
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        actions.delete(selectedValues) { result in
+            if case let .failure(error) = result { NSAlert(error: error).runModal() }
+        }
+    }
+}
+
+private final class DeleteKeyTableView: NSTableView {
+    var onDelete: (() -> Void)?
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 51 || event.keyCode == 117 { onDelete?() } else { super.keyDown(with: event) }
+    }
+}

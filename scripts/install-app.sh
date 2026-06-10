@@ -74,8 +74,8 @@ resolve_built_executable() {
     local capitalized_configuration
     capitalized_configuration="$(capitalized_build_configuration)"
     local candidates=(
-        "$REPO_ROOT/.build/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET"
         "$REPO_ROOT/.build/apple/Products/$capitalized_configuration/$EXECUTABLE_TARGET"
+        "$REPO_ROOT/.build/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET"
     )
 
     local candidate

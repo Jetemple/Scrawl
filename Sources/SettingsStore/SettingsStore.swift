@@ -1,5 +1,33 @@
 import Foundation
 
+public enum ModelOffloadPolicy: String, Codable, CaseIterable, Sendable {
+    case immediately
+    case oneMinute
+    case fiveMinutes
+    case fifteenMinutes
+    case never
+
+    public var idleSeconds: TimeInterval? {
+        switch self {
+        case .immediately: 0
+        case .oneMinute: 60
+        case .fiveMinutes: 300
+        case .fifteenMinutes: 900
+        case .never: nil
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .immediately: "Immediately"
+        case .oneMinute: "1 minute"
+        case .fiveMinutes: "5 minutes"
+        case .fifteenMinutes: "15 minutes"
+        case .never: "Never"
+        }
+    }
+}
+
 public struct HotkeySetting: Codable, Equatable, Sendable {
     public var keyCode: UInt16
     public var isModifierKey: Bool
@@ -22,19 +50,25 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var language: String
     public var hotkey: HotkeySetting
     public var modelsDirectoryPath: String?
+    public var isTranscriptHistoryEnabled: Bool
+    public var modelOffloadPolicy: ModelOffloadPolicy
 
     public init(
         defaultModelID: String = "ggml-small.en",
         selectedModelID: String = "ggml-small.en",
         language: String = "en",
         hotkey: HotkeySetting = HotkeySetting(),
-        modelsDirectoryPath: String? = nil
+        modelsDirectoryPath: String? = nil,
+        isTranscriptHistoryEnabled: Bool = true,
+        modelOffloadPolicy: ModelOffloadPolicy = .fiveMinutes
     ) {
         self.defaultModelID = defaultModelID
         self.selectedModelID = selectedModelID
         self.language = language
         self.hotkey = hotkey
         self.modelsDirectoryPath = modelsDirectoryPath
+        self.isTranscriptHistoryEnabled = isTranscriptHistoryEnabled
+        self.modelOffloadPolicy = modelOffloadPolicy
     }
 
     public var modelID: String {
@@ -48,6 +82,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case hotkey
         case hotkeyDescription
         case modelsDirectoryPath
+        case isTranscriptHistoryEnabled
+        case modelOffloadPolicy
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,6 +93,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         selectedModelID = try container.decodeIfPresent(String.self, forKey: .selectedModelID) ?? defaultModelID
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "en"
         modelsDirectoryPath = try container.decodeIfPresent(String.self, forKey: .modelsDirectoryPath)
+        isTranscriptHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTranscriptHistoryEnabled) ?? true
+        modelOffloadPolicy = try container.decodeIfPresent(ModelOffloadPolicy.self, forKey: .modelOffloadPolicy) ?? .fiveMinutes
 
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
             self.hotkey = hotkey
@@ -73,33 +111,68 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try container.encode(language, forKey: .language)
         try container.encode(hotkey, forKey: .hotkey)
         try container.encodeIfPresent(modelsDirectoryPath, forKey: .modelsDirectoryPath)
+        try container.encode(isTranscriptHistoryEnabled, forKey: .isTranscriptHistoryEnabled)
+        try container.encode(modelOffloadPolicy, forKey: .modelOffloadPolicy)
     }
 }
 
 public final class SettingsStore: @unchecked Sendable {
     private let defaults: UserDefaults
     private let key = "scrawl.settings.v1"
+    private let transcriptHistoryEnabledKey = "scrawl.settings.transcriptHistoryEnabled"
+    private let lock = NSLock()
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
     public func hasStoredSettings() -> Bool {
-        defaults.data(forKey: key) != nil
+        lock.withLock {
+            defaults.data(forKey: key) != nil
+        }
     }
 
     public func load() -> AppSettings {
-        guard
-            let data = defaults.data(forKey: key),
-            let decoded = try? JSONDecoder().decode(AppSettings.self, from: data)
-        else {
-            return AppSettings()
+        lock.withLock {
+            loadUnlocked()
         }
-        return decoded
     }
 
     public func save(_ settings: AppSettings) throws {
+        try lock.withLock {
+            try saveUnlocked(settings)
+        }
+    }
+
+    private func loadUnlocked() -> AppSettings {
+        guard let data = defaults.data(forKey: key) else {
+            return AppSettings()
+        }
+
+        if let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) {
+            return decoded
+        }
+
+        var settings = AppSettings()
+        if defaults.object(forKey: transcriptHistoryEnabledKey) != nil {
+            settings.isTranscriptHistoryEnabled = defaults.bool(forKey: transcriptHistoryEnabledKey)
+        } else {
+            settings.isTranscriptHistoryEnabled = false
+        }
+        return settings
+    }
+
+    private func saveUnlocked(_ settings: AppSettings) throws {
         let data = try JSONEncoder().encode(settings)
         defaults.set(data, forKey: key)
+        defaults.set(settings.isTranscriptHistoryEnabled, forKey: transcriptHistoryEnabledKey)
+    }
+}
+
+private extension NSLock {
+    func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+        lock()
+        defer { unlock() }
+        return try body()
     }
 }
