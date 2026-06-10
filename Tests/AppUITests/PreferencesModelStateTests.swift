@@ -9,13 +9,15 @@ final class PreferencesModelStateTests: XCTestCase {
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!
+                    url: URL(string: "https://example.com/small.bin")!,
+                    sha256: "dummy-sha256-for-tests"
                 ),
                 DownloadableModel(
                     id: "ggml-medium",
                     fileName: "ggml-medium.bin",
                     displayName: "medium - multilingual, 1.5 GB",
-                    url: URL(string: "https://example.com/medium.bin")!
+                    url: URL(string: "https://example.com/medium.bin")!,
+                    sha256: "dummy-sha256-for-tests"
                 )
             ],
             installedModelIDs: ["ggml-small.en"],
@@ -47,7 +49,8 @@ final class PreferencesModelStateTests: XCTestCase {
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!
+                    url: URL(string: "https://example.com/small.bin")!,
+                    sha256: "dummy-sha256-for-tests"
                 )
             ],
             installedModelIDs: ["ggml-custom-model", "ggml-small.en"],
@@ -72,7 +75,8 @@ final class PreferencesModelStateTests: XCTestCase {
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!
+                    url: URL(string: "https://example.com/small.bin")!,
+                    sha256: "dummy-sha256-for-tests"
                 )
             ],
             installedModelIDs: ["small"],

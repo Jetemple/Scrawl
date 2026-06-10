@@ -5,6 +5,7 @@ struct DownloadableModel: Equatable, Sendable {
     let fileName: String
     let displayName: String
     let url: URL
+    let sha256: String
 }
 
 private enum ModelDownloadError: LocalizedError {
@@ -97,11 +98,21 @@ final class LocalModelManager: @unchecked Sendable {
         var failures: [String] = []
 
         for sourceURL in model.candidateDownloadURLs {
+            var temporaryURL: URL?
             do {
-                let temporaryURL = try await downloadFromURL(sourceURL, onProgress: onProgress)
-                return try installDownloadedModel(from: temporaryURL, fileName: model.fileName)
+                let downloadedURL = try await downloadFromURL(sourceURL, onProgress: onProgress)
+                temporaryURL = downloadedURL
+                try ModelDownloadValidator.verifySHA256(of: downloadedURL, expected: model.sha256)
+                return try installDownloadedModel(from: downloadedURL, fileName: model.fileName)
             } catch {
-                failures.append("\(sourceURL.absoluteString): \(describe(error))")
+                if let temp = temporaryURL {
+                    try? FileManager.default.removeItem(at: temp)
+                }
+                if error is ModelDownloadValidator.HashMismatchError {
+                    failures.append("\(sourceURL.absoluteString): SHA-256 mismatch")
+                } else {
+                    failures.append("\(sourceURL.absoluteString): \(describe(error))")
+                }
             }
         }
 
@@ -255,25 +266,29 @@ extension LocalModelManager {
             id: "ggml-tiny.en",
             fileName: "ggml-tiny.en.bin",
             displayName: "tiny.en — fast, 75 MB",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin")!
+            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin")!,
+            sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"
         ),
         DownloadableModel(
             id: "ggml-small.en",
             fileName: "ggml-small.en.bin",
             displayName: "small.en — recommended, 466 MB",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin")!
+            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin")!,
+            sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
         ),
         DownloadableModel(
             id: "ggml-medium",
             fileName: "ggml-medium.bin",
             displayName: "medium — multilingual, 1.5 GB",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")!
+            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")!,
+            sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208"
         ),
         DownloadableModel(
             id: "ggml-large-v3-turbo",
             fileName: "ggml-large-v3-turbo.bin",
             displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
-            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!
+            url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!,
+            sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
         )
     ]
 }
