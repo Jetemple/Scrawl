@@ -22,6 +22,7 @@ actor WarmWhisperServer {
     private var idleOffloadSeconds: TimeInterval?
     private var idleTask: Task<Void, Never>?
     private var activityGeneration: UInt64 = 0
+    private var inFlightRequests = 0
 
     init(config: WhisperCppConfig) {
         self.config = config
@@ -77,12 +78,16 @@ actor WarmWhisperServer {
         )
         httpRequest.timeoutInterval = TimeInterval(config.transcriptionTimeoutSeconds)
 
+        inFlightRequests += 1
+        defer {
+            inFlightRequests -= 1
+            scheduleOffload()
+        }
         let (data, response) = try await URLSession.shared.data(for: httpRequest)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw TranscriptionError.executionFailed("whisper-server returned an invalid response")
         }
         let text = try WhisperCppProvider.decodeServerTranscript(data)
-        scheduleOffload()
         return TranscriptionResult(
             text: text,
             latencyMS: Int(Date().timeIntervalSince(startedAt) * 1_000)
@@ -112,13 +117,11 @@ actor WarmWhisperServer {
                 shutdown()
                 return try await ensureRunning(key: key, modelPath: modelPath)
             }
-            scheduleOffload()
             return url
         }
 
         // Server already running and ready
         if serverKey == key, let process, process.isRunning, let baseURL {
-            scheduleOffload()
             return baseURL
         }
 
@@ -167,7 +170,6 @@ actor WarmWhisperServer {
         do {
             let url = try await task.value
             startupTask = nil
-            scheduleOffload()
             return url
         } catch {
             throw error
@@ -227,6 +229,10 @@ actor WarmWhisperServer {
 
     private func offloadIfIdle(generation: UInt64) {
         guard generation == activityGeneration else { return }
+        if inFlightRequests > 0 {
+            scheduleOffload()
+            return
+        }
         shutdown()
     }
 
