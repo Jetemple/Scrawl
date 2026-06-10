@@ -149,4 +149,99 @@ final class WarmWhisperServerTests: XCTestCase {
         XCTAssertGreaterThan(port1, 0)
         XCTAssertGreaterThan(port2, 0)
     }
+
+    // MARK: - Fix 1: idle-offload timer fires for warmed-but-unused servers
+
+    /// Verifies that a server started via ensureRunning (the warmUp path) gets an
+    /// idle-offload timer and is shut down after the idle interval elapses, even
+    /// when no transcription request is ever made. A launch-counter file written by
+    /// the stub lets us confirm the server was torn down and re-launched on the
+    /// second ensureRunning call.
+    func testWarmedServerIsOffloadedAfterIdleInterval() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+        let stubURL = tmpDir.appendingPathComponent("stub-http-server-\(UUID().uuidString)")
+        let counterURL = tmpDir.appendingPathComponent("stub-launch-count-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: stubURL)
+            try? FileManager.default.removeItem(at: counterURL)
+        }
+
+        // Stub: record each launch in counterURL, then serve whisper-cpp HTTP responses.
+        // We use a Python3 socket server because URLSession requires proper HTTP/1.1
+        // with Connection: close — plain nc exits before URLSession can read the body
+        // and produces NSURLErrorDomain -1005 "The network connection was lost."
+        // supervisedLaunch runs: sh -c <supervisorScript> scrawl-whisper-supervisor
+        //   <ownerPID> <ourStubURL> [server-args...]
+        // The supervisor script does: owner=$1; shift; "$@" &
+        // So our stub is exec'd with just the server args (e.g. --port 12345).
+        //
+        // The Python script is written to a sibling file to avoid quoting issues
+        // with heredocs embedded in a Swift string literal.
+        let pyScriptURL = tmpDir.appendingPathComponent("stub-server-\(UUID().uuidString).py")
+        defer { try? FileManager.default.removeItem(at: pyScriptURL) }
+        let pyScript = """
+        import sys, socket, threading
+        port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('127.0.0.1', port))
+        s.listen(10)
+        body = b'<title>Whisper.cpp Server</title>'
+        resp = (b'HTTP/1.1 200 OK\\r\\nContent-Type: text/html\\r\\n'
+                b'Content-Length: ' + str(len(body)).encode() + b'\\r\\n'
+                b'Connection: close\\r\\n\\r\\n' + body)
+        while True:
+            try:
+                conn, _ = s.accept()
+                def handle(c):
+                    try: c.recv(4096); c.sendall(resp)
+                    finally: c.close()
+                threading.Thread(target=handle, args=(conn,), daemon=True).start()
+            except Exception:
+                break
+        """
+        try pyScript.write(to: pyScriptURL, atomically: true, encoding: .utf8)
+
+        let stubScript = """
+        #!/bin/sh
+        port=""
+        while [ $# -gt 0 ]; do
+          case "$1" in --port) port="$2"; shift 2;; *) shift;; esac
+        done
+        printf '1\\n' >> "\(counterURL.path)"
+        exec python3 "\(pyScriptURL.path)" "$port"
+        """
+        try stubScript.write(to: stubURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stubURL.path)
+
+        // Use a very short idle interval so the test doesn't stall.
+        let config = WhisperCppConfig(
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/whisper-cli"),
+            serverExecutableURL: stubURL,
+            modelsDirectoryURL: FileManager.default.temporaryDirectory,
+            idleOffloadSeconds: 0.5
+        )
+        let server = WarmWhisperServer(config: config)
+
+        let key = WarmWhisperServer.ServerKey(modelID: "test", language: "en", forceNoGPU: false)
+        let modelPath = URL(fileURLWithPath: "/tmp/fake-model.bin")
+
+        // First ensureRunning — should succeed and schedule an idle-offload timer.
+        _ = try await server.ensureRunning(key: key, modelPath: modelPath)
+
+        // Wait long enough for the idle timer (0.5 s) to fire plus margin.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // A second ensureRunning after offload should re-launch the stub (a new process).
+        _ = try? await server.ensureRunning(key: key, modelPath: modelPath)
+
+        // If the idle-offload timer fired, the stub was launched at least twice.
+        let countText = (try? String(contentsOf: counterURL, encoding: .utf8)) ?? "0"
+        let launches = countText.components(separatedBy: "\n").filter { $0 == "1" }.count
+        XCTAssertGreaterThanOrEqual(launches, 2,
+            "Expected stub to be launched at least twice (warm-up + re-launch after idle offload); got \(launches). " +
+            "If the idle timer was not scheduled by ensureRunning, the server stays alive and no re-launch occurs.")
+
+        await server.shutdown()
+    }
 }

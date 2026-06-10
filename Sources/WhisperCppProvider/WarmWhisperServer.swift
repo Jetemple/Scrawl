@@ -163,6 +163,11 @@ actor WarmWhisperServer {
             self.process = process
             self.serverKey = key
             self.baseURL = url
+            // Schedule an idle-offload timer so a warmed-but-never-used server
+            // doesn't hold a loaded model forever. offloadIfIdle checks
+            // inFlightRequests before actually shutting down, and transcribe's
+            // defer reschedules after each request completes.
+            self.scheduleOffload()
             return url
         }
         startupTask = task
