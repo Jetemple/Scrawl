@@ -86,19 +86,15 @@ resolve_built_executable() {
         fi
     done
 
-    candidate="$(find "$REPO_ROOT/.build" -type f -path "*/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1)"
-    if [[ -n "$candidate" ]]; then
-        printf '%s\n' "$candidate"
-        return 0
-    fi
-
-    candidate="$(find "$REPO_ROOT/.build" -type f -path "*/$capitalized_configuration/$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1)"
-    if [[ -n "$candidate" ]]; then
-        printf '%s\n' "$candidate"
-        return 0
-    fi
-
-    find "$REPO_ROOT/.build" -type f -name "$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1
+    echo "Error: could not locate built executable '$EXECUTABLE_TARGET'." >&2
+    echo "Tried the following candidate paths:" >&2
+    for c in "${candidates[@]}"; do
+        echo "  $c" >&2
+    done
+    echo "  (find) $REPO_ROOT/.build/**/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET" >&2
+    echo "  (find) $REPO_ROOT/.build/**/$capitalized_configuration/$EXECUTABLE_TARGET" >&2
+    echo "Make sure the build completed successfully for configuration '$BUILD_CONFIGURATION'." >&2
+    exit 1
 }
 
 verify_signed_app() {

@@ -31,7 +31,7 @@ run-debug:
 	./scripts/run-local.sh --debug
 
 install: build
-	SCRAWL_SKIP_BUILD=1 ./scripts/install-app.sh "$(PREFIX)"
+	SCRAWL_SKIP_BUILD=1 SCRAWL_BUILD_CONFIGURATION="$(BUILD_CONFIG)" SCRAWL_BUILD_ARCHS="$(BUILD_ARCHS)" ./scripts/install-app.sh "$(PREFIX)"
 
 uninstall:
 	rm -rf "$(PREFIX)/$(APP_BUNDLE)"
