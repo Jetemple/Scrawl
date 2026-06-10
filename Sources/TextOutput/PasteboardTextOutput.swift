@@ -33,23 +33,39 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
             // input is active, and pasting spoken text into a password field would silently leak it.
             // Instead, leave the transcript on the clipboard (do NOT restore the previous contents) so
             // the user can paste it deliberately, and signal the caller to surface a message.
-            pasteboard.clearContents()
-            _ = pasteboard.setString(text, forType: .string)
+            PasteboardTextOutput.writeTranscript(text, to: pasteboard)
             throw TextOutputError.secureInputActive
         }
 
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
 
-        pasteboard.clearContents()
-        guard pasteboard.setString(text, forType: .string) else {
+        PasteboardTextOutput.writeTranscript(text, to: pasteboard)
+        guard pasteboard.pasteboardItems?.first?.string(forType: .string) == text else {
             throw TextOutputError.failedToWritePasteboard
         }
 
-        try sendCommandV()
+        let changeCountAfterWrite = pasteboard.changeCount
+
+        do {
+            try sendCommandV()
+        } catch {
+            snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: pasteboard.changeCount)
+            throw error
+        }
 
         // Wait briefly to let the focused app consume Cmd+V before restoring clipboard.
         try await Task.sleep(nanoseconds: 140_000_000)
-        snapshot.restore(into: pasteboard)
+        snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: changeCountAfterWrite)
+    }
+
+    static func writeTranscript(_ text: String, to pasteboard: NSPasteboard) {
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        // De-facto standard markers so clipboard managers skip/conceal dictated text.
+        item.setData(Data(), forType: .init("org.nspasteboard.TransientType"))
+        item.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+        pasteboard.clearContents()
+        pasteboard.writeObjects([item])
     }
 
     private func sendCommandV() throws {
@@ -69,7 +85,7 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
     }
 }
 
-private struct PasteboardSnapshot {
+struct PasteboardSnapshot {
     let items: [[NSPasteboard.PasteboardType: Data]]
 
     static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
@@ -85,7 +101,8 @@ private struct PasteboardSnapshot {
         return PasteboardSnapshot(items: snapshotItems)
     }
 
-    func restore(into pasteboard: NSPasteboard) {
+    func restoreIfUnchanged(into pasteboard: NSPasteboard, expectedChangeCount: Int) {
+        guard pasteboard.changeCount == expectedChangeCount else { return }
         pasteboard.clearContents()
         let restoredItems = items.map { typeMap -> NSPasteboardItem in
             let item = NSPasteboardItem()

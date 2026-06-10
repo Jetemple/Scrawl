@@ -101,6 +101,12 @@ let package = Package(
             dependencies: [
                 "WhisperCppProvider"
             ]
+        ),
+        .testTarget(
+            name: "TextOutputTests",
+            dependencies: [
+                "TextOutput"
+            ]
         )
     ]
 )
