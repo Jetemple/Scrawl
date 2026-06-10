@@ -26,7 +26,6 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
         case pressed(Date)
         case holdRecording
         case waitingForSecondTap(Date)
-        case secondTapPressed(Date, firstTapRelease: Date)
         case toggleRecording
         case toggleStopPressed
     }
@@ -48,7 +47,8 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
             state = .pressed(time)
         case .waitingForSecondTap(let firstRelease):
             if time.timeIntervalSince(firstRelease) <= config.doubleTapGap {
-                state = .secondTapPressed(time, firstTapRelease: firstRelease)
+                state = .toggleRecording
+                return [.startToggleRecording]
             } else {
                 state = .pressed(time)
             }
@@ -69,14 +69,6 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
         case .holdRecording:
             state = .idle
             return [.stopHoldRecording]
-
-        case .secondTapPressed(_, let firstTapRelease):
-            if time.timeIntervalSince(firstTapRelease) <= config.doubleTapGap {
-                state = .toggleRecording
-                return [.startToggleRecording]
-            }
-            state = .waitingForSecondTap(time)
-            return []
 
         case .toggleStopPressed:
             state = .idle
