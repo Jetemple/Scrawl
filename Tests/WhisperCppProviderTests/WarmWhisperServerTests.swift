@@ -90,4 +90,26 @@ final class WarmWhisperServerTests: XCTestCase {
             .shutdownAndFallback
         )
     }
+
+    // MARK: - Task 7: SIGKILL escalation
+
+    func testRunAndWaitKillsSIGTERMIgnoringProcess() async throws {
+        let provider = WhisperCppProvider(config: WhisperCppConfig(
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/whisper-cli"),
+            modelsDirectoryURL: FileManager.default.temporaryDirectory
+        ))
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "trap '' TERM; sleep 30"]
+
+        do {
+            _ = try await provider.runAndWait(process: process, timeoutSeconds: 1)
+            XCTFail("Expected timedOut error")
+        } catch TranscriptionError.timedOut(let seconds) {
+            XCTAssertEqual(seconds, 1)
+        }
+        // Process should be dead within a few seconds after SIGKILL
+        try await Task.sleep(nanoseconds: 4_000_000_000)
+        XCTAssertFalse(process.isRunning, "Process should have been killed by SIGKILL")
+    }
 }

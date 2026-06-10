@@ -446,7 +446,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
         return cleaned
     }
 
-    private func runAndWait(
+    internal func runAndWait(
         process: Process,
         timeoutSeconds: Int
     ) async throws -> Int32 {
@@ -473,6 +473,13 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
                 try await Task.sleep(nanoseconds: UInt64(max(timeoutSeconds, 1)) * 1_000_000_000)
                 if process.isRunning {
                     process.terminate()
+                    // Escalate to SIGKILL if the process ignores SIGTERM
+                    Task.detached {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        if process.isRunning {
+                            kill(process.processIdentifier, SIGKILL)
+                        }
+                    }
                 }
                 throw TranscriptionError.timedOut(seconds: timeoutSeconds)
             }
