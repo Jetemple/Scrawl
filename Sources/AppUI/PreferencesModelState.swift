@@ -6,6 +6,7 @@ struct PreferencesModelRow: Equatable, Sendable {
     let isInstalled: Bool
     let isSelected: Bool
     let isDownloading: Bool
+    var isCancelled: Bool = false
 
     var canDownload: Bool {
         !isInstalled && !isDownloading
@@ -16,28 +17,17 @@ struct PreferencesModelRow: Equatable, Sendable {
     }
 
     var statusText: String {
-        if isDownloading {
-            return "Downloading"
-        }
-        if isSelected {
-            return "Selected"
-        }
-        if isInstalled {
-            return "Installed"
-        }
+        if isDownloading { return "Downloading" }
+        if isCancelled { return "Download cancelled" }
+        if isSelected { return "Selected" }
+        if isInstalled { return "Installed" }
         return "Available"
     }
 
     var actionTitle: String {
-        if isDownloading {
-            return "Downloading"
-        }
-        if isSelected {
-            return "Selected"
-        }
-        if isInstalled {
-            return "Use"
-        }
+        if isDownloading { return "Downloading" }
+        if isSelected { return "Selected" }
+        if isInstalled { return "Use" }
         return "Download"
     }
 }
@@ -47,7 +37,8 @@ enum PreferencesModelState {
         downloadableModels: [DownloadableModel],
         installedModelIDs: [String],
         selectedModelID: String,
-        downloadingModelID: String?
+        downloadingModelID: String?,
+        cancelledModelID: String? = nil
     ) -> [PreferencesModelRow] {
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
@@ -65,12 +56,14 @@ enum PreferencesModelState {
             let installedModelID = installedIDs.contains(model.id) ? model.id : installedIDByFamily[canonicalFamily(model.id)]
             let rowModelID = installedModelID ?? model.id
             let isInstalled = installedModelID != nil
+            let isCancelled = (rowModelID == cancelledModelID || model.id == cancelledModelID)
             return PreferencesModelRow(
                 id: rowModelID,
                 displayName: model.displayName,
                 isInstalled: isInstalled,
                 isSelected: rowModelID == selectedModelID || model.id == selectedModelID,
-                isDownloading: rowModelID == downloadingModelID || model.id == downloadingModelID
+                isDownloading: rowModelID == downloadingModelID || model.id == downloadingModelID,
+                isCancelled: isCancelled
             )
         }
 

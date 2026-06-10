@@ -498,6 +498,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             selectModel: { _ in },
             downloadModel: { _ in },
             deleteSelectedModel: {},
+            cancelDownload: {},
             setHotkey: setHotkey,
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,

@@ -9,6 +9,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let selectModel: (String) -> Void
         let downloadModel: (DownloadableModel) -> Void
         let deleteSelectedModel: () -> Void
+        let cancelDownload: () -> Void
         let setHotkey: () -> Void
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
@@ -134,7 +135,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         modelsView = PreferencesModelsView(
             selectModel: actions.selectModel,
             downloadModel: actions.downloadModel,
-            deleteSelectedModel: actions.deleteSelectedModel
+            deleteSelectedModel: actions.deleteSelectedModel,
+            cancelDownload: actions.cancelDownload
         )
         keyboardView = PreferencesKeyboardView(setHotkey: actions.setHotkey)
         historyView = PreferencesHistoryView(actions: .init(

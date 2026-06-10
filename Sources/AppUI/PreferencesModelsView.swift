@@ -8,11 +8,13 @@ final class PreferencesModelsView: NSView {
     private let selectModel: (String) -> Void
     private let downloadModel: (DownloadableModel) -> Void
     private let deleteSelectedModel: () -> Void
+    private let cancelDownload: () -> Void
     private var downloadableModelsByID: [String: DownloadableModel] = [:]
 
     private let modelsStack = NSStackView()
     private let listView = PreferencesPageSupport.makeRoundedBackground()
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "Cancel Download", target: nil, action: nil)
     private var listHeightConstraint: NSLayoutConstraint?
     private var twoLineRowCount = 0
     private var selectedRowHasAction = false
@@ -33,11 +35,13 @@ final class PreferencesModelsView: NSView {
     init(
         selectModel: @escaping (String) -> Void,
         downloadModel: @escaping (DownloadableModel) -> Void,
-        deleteSelectedModel: @escaping () -> Void
+        deleteSelectedModel: @escaping () -> Void,
+        cancelDownload: @escaping () -> Void
     ) {
         self.selectModel = selectModel
         self.downloadModel = downloadModel
         self.deleteSelectedModel = deleteSelectedModel
+        self.cancelDownload = cancelDownload
         super.init(frame: .zero)
 
         modelsStack.orientation = .vertical
@@ -76,10 +80,18 @@ final class PreferencesModelsView: NSView {
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected(_:))
 
+        PreferencesPageSupport.configureSecondaryButton(cancelButton)
+        cancelButton.target = self
+        cancelButton.action = #selector(cancelDownloadAction(_:))
+        cancelButton.isHidden = true
+
+        let buttonRow = NSStackView(views: [deleteButton, cancelButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.spacing = 8
         let page = PreferencesPageSupport.makePage(
             title: "Models",
             description: "Select an installed model or download another.",
-            content: [listView, PreferencesPageSupport.makeButtonRow(deleteButton)]
+            content: [listView, buttonRow]
         )
         PreferencesPageSupport.fill(self, with: page)
         update(rows: [], downloadableModels: [], isDownloadInProgress: false)
@@ -93,6 +105,8 @@ final class PreferencesModelsView: NSView {
     func update(rows: [PreferencesModelRow], downloadableModels: [DownloadableModel], isDownloadInProgress: Bool) {
         downloadableModelsByID = Dictionary(uniqueKeysWithValues: downloadableModels.map { ($0.id, $0) })
         deleteButton.isEnabled = rows.contains { $0.isSelected && $0.isInstalled }
+        cancelButton.isEnabled = isDownloadInProgress
+        cancelButton.isHidden = !isDownloadInProgress
         twoLineRowCount = rows.count
         selectedRowHasAction = false
         listHeightConstraint?.constant = min(300, max(140, CGFloat(rows.count) * 64))
@@ -196,5 +210,9 @@ final class PreferencesModelsView: NSView {
 
     @objc private func deleteSelected(_ sender: NSButton) {
         deleteSelectedModel()
+    }
+
+    @objc private func cancelDownloadAction(_ sender: NSButton) {
+        cancelDownload()
     }
 }

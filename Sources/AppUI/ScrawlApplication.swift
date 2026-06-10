@@ -207,6 +207,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 deleteSelectedModel: { [weak self] in
                     self?.deleteSelectedModel(nil)
                 },
+                cancelDownload: { [weak self] in
+                    self?.cancelModelDownload()
+                },
                 setHotkey: { [weak self] in
                     self?.toggleHotkeyCapture(nil)
                 },
@@ -578,6 +581,15 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         } catch {
             setStatus("Delete failed: \(describe(error))")
         }
+    }
+
+    private func cancelModelDownload() {
+        modelManager.cancelDownload()
+        isModelDownloadInProgress = false
+        downloadingModelID = nil
+        refreshModelMenu()
+        refreshPreferencesWindow()
+        setStatus("Download cancelled")
     }
 
     private func startModelDownload(_ model: DownloadableModel) {

@@ -102,4 +102,27 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertEqual(row.statusText, "Available")
         XCTAssertEqual(row.actionTitle, "Download")
     }
+
+    func testCancelledModelShowsCancelledStatusAndCanBeReDownloaded() {
+        let rows = PreferencesModelState.rows(
+            downloadableModels: [
+                DownloadableModel(
+                    id: "ggml-medium",
+                    fileName: "ggml-medium.bin",
+                    displayName: "medium - multilingual, 1.5 GB",
+                    url: URL(string: "https://example.com/medium.bin")!,
+                    sha256: "dummy-sha256-for-tests"
+                )
+            ],
+            installedModelIDs: [],
+            selectedModelID: "",
+            downloadingModelID: nil,
+            cancelledModelID: "ggml-medium"
+        )
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertTrue(rows[0].isCancelled)
+        XCTAssertEqual(rows[0].statusText, "Download cancelled")
+        XCTAssertTrue(rows[0].canDownload)
+        XCTAssertFalse(rows[0].isDownloading)
+    }
 }

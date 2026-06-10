@@ -34,6 +34,10 @@ final class LocalModelManager: @unchecked Sendable {
 
     private let lock = NSLock()
     private let modelsDirectoryURL: URL
+    private(set) var isDownloadInProgress: Bool = false
+    private(set) var pendingResumeData: Data? = nil
+    private var activeDownloadTask: URLSessionDownloadTask? = nil
+    private var activeDownloadSession: URLSession? = nil
 
     init(modelsDirectoryURL: URL) {
         self.modelsDirectoryURL = modelsDirectoryURL
@@ -91,6 +95,21 @@ final class LocalModelManager: @unchecked Sendable {
             return
         }
         try FileManager.default.removeItem(at: url)
+    }
+
+    func cancelDownload() {
+        lock.lock()
+        let task = activeDownloadTask
+        activeDownloadTask = nil
+        isDownloadInProgress = false
+        lock.unlock()
+
+        guard let task else { return }
+        task.cancel(byProducingResumeData: { [weak self] data in
+            self?.lock.lock()
+            self?.pendingResumeData = data
+            self?.lock.unlock()
+        })
     }
 
     func download(model: DownloadableModel, onProgress: ProgressHandler? = nil) async throws -> URL {
@@ -151,6 +170,11 @@ final class LocalModelManager: @unchecked Sendable {
                 guard attempt < 2, isTransientNetworkError(error) else {
                     throw error
                 }
+                if let resumeDataFromError = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
+                    lock.lock()
+                    pendingResumeData = resumeDataFromError
+                    lock.unlock()
+                }
                 try await Task.sleep(nanoseconds: 600_000_000)
             }
         }
@@ -161,11 +185,27 @@ final class LocalModelManager: @unchecked Sendable {
     private func performDownload(from sourceURL: URL, onProgress: ProgressHandler?) async throws -> (URL, URLResponse) {
         let session = makeDownloadSession()
 
+        lock.lock()
+        activeDownloadSession = session
+        isDownloadInProgress = true
+        let resumeData = pendingResumeData
+        pendingResumeData = nil
+        lock.unlock()
+
+        defer {
+            lock.lock()
+            if activeDownloadSession === session {
+                activeDownloadSession = nil
+                isDownloadInProgress = false
+            }
+            lock.unlock()
+        }
+
         return try await withCheckedThrowingContinuation { continuation in
             var observation: NSKeyValueObservation?
             var downloadTask: URLSessionDownloadTask?
 
-            let task = session.downloadTask(with: sourceURL) { temporaryURL, response, error in
+            let completionHandler: @Sendable (URL?, URLResponse?, Error?) -> Void = { temporaryURL, response, error in
                 observation?.invalidate()
                 session.finishTasksAndInvalidate()
 
@@ -179,7 +219,6 @@ final class LocalModelManager: @unchecked Sendable {
                     return
                 }
 
-                // Move immediately — the temp file is only valid inside this callback.
                 let safeCopy = FileManager.default.temporaryDirectory
                     .appendingPathComponent("scrawl-download-\(UUID().uuidString).bin")
                 do {
@@ -195,7 +234,18 @@ final class LocalModelManager: @unchecked Sendable {
                 onProgress?(receivedBytes, totalBytes)
                 continuation.resume(returning: (safeCopy, response))
             }
+
+            let task: URLSessionDownloadTask
+            if let resumeData {
+                task = session.downloadTask(withResumeData: resumeData, completionHandler: completionHandler)
+            } else {
+                task = session.downloadTask(with: sourceURL, completionHandler: completionHandler)
+            }
             downloadTask = task
+
+            lock.lock()
+            activeDownloadTask = task
+            lock.unlock()
 
             if let onProgress {
                 observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { _, _ in
