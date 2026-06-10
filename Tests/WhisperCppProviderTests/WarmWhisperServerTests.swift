@@ -53,4 +53,41 @@ final class WarmWhisperServerTests: XCTestCase {
             XCTFail("Expected second call to throw")
         } catch {}
     }
+
+    // MARK: - Task 5: Warm path fallback decision
+
+    func testNoSpeechDetectedRethrownNotShutdown() {
+        XCTAssertEqual(
+            WhisperCppProvider.warmPathFallbackDecision(for: TranscriptionError.noSpeechDetected),
+            .rethrow
+        )
+    }
+
+    func testTimedOutRethrownNotShutdown() {
+        XCTAssertEqual(
+            WhisperCppProvider.warmPathFallbackDecision(for: TranscriptionError.timedOut(seconds: 30)),
+            .rethrow
+        )
+    }
+
+    func testCancellationErrorRethrownNotShutdown() {
+        XCTAssertEqual(
+            WhisperCppProvider.warmPathFallbackDecision(for: CancellationError()),
+            .rethrow
+        )
+    }
+
+    func testURLErrorCannotConnectTriggersShutdownAndFallback() {
+        XCTAssertEqual(
+            WhisperCppProvider.warmPathFallbackDecision(for: URLError(.cannotConnectToHost)),
+            .shutdownAndFallback
+        )
+    }
+
+    func testExecutionFailedTriggersShutdownAndFallback() {
+        XCTAssertEqual(
+            WhisperCppProvider.warmPathFallbackDecision(for: TranscriptionError.executionFailed("crash")),
+            .shutdownAndFallback
+        )
+    }
 }
