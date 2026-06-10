@@ -31,7 +31,7 @@ Requires macOS 14+, Xcode command line tools, and `whisper-cli` from whisper.cpp
 brew install whisper-cpp
 
 git clone https://github.com/Jetemple/Scrawl.git
-cd scrawl
+cd Scrawl
 make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```

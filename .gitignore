@@ -6,3 +6,8 @@ benchmarks/
 *.bench.csv
 .worktrees/
 .superpowers/
+.local/
+docs/PLAN.md
+docs/TODO.md
+docs/SESSION_PROGRESS.md
+docs/superpowers/
