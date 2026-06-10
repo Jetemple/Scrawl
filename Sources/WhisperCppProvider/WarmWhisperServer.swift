@@ -1,6 +1,15 @@
 import Foundation
 import TranscriptionCore
 
+/// Typed errors thrown internally during server startup. Mapped to
+/// `TranscriptionError.executionFailed` before leaving `ensureRunning`.
+private enum StartupFailure: Error {
+    /// The child process died before it could bind (port race or crash).
+    case earlyExit
+    /// The server did not respond in time.
+    case notReady
+}
+
 actor WarmWhisperServer {
     struct SupervisedLaunch {
         let executableURL: URL
@@ -19,6 +28,7 @@ actor WarmWhisperServer {
     private var baseURL: URL?
     private var startupTask: Task<URL, Error>?
     private var startupKey: ServerKey?
+    private var startupGeneration: UInt64 = 0
     private var idleOffloadSeconds: TimeInterval?
     private var idleTask: Task<Void, Never>?
     private var activityGeneration: UInt64 = 0
@@ -100,6 +110,7 @@ actor WarmWhisperServer {
         startupTask?.cancel()
         startupTask = nil
         startupKey = nil
+        startupGeneration &+= 1
         if let process, process.isRunning {
             process.terminate()
         }
@@ -125,8 +136,12 @@ actor WarmWhisperServer {
             return baseURL
         }
 
-        // Tear down any existing state and start fresh
+        // Tear down any existing state and start fresh; capture the generation
+        // that belongs to this startup attempt so the Task closure can guard its
+        // state clears against a racing shutdown() or a newer startup.
+        // shutdown() already increments startupGeneration; capture after that.
         shutdown()
+        let generation = startupGeneration
         startupKey = key
 
         let task = Task {
@@ -150,18 +165,17 @@ actor WarmWhisperServer {
                 process1.standardError = FileHandle.nullDevice
                 try process1.run()
             } catch {
-                if self.startupKey == key { self.startupTask = nil; self.startupKey = nil }
+                if self.startupGeneration == generation { self.startupTask = nil; self.startupKey = nil }
                 throw error
             }
 
-            // Wait for readiness; on "exited during startup" retry once with a fresh port.
+            // Wait for readiness; on earlyExit retry once with a fresh port.
             let process: Process
             let url: URL
             do {
                 try await self.waitUntilReady(process: process1, baseURL: url1)
                 (process, url) = (process1, url1)
-            } catch TranscriptionError.executionFailed(let msg)
-                where msg == "whisper-server exited during startup" {
+            } catch StartupFailure.earlyExit {
                 // The server exited before it could bind — likely a port race between
                 // allocatePort() closing the probe socket and whisper-server calling
                 // bind(). Terminate the (already-dead) supervisor wrapper defensively,
@@ -189,14 +203,30 @@ actor WarmWhisperServer {
                     try await self.waitUntilReady(process: process2, baseURL: url2)
                 } catch {
                     process2.terminate()
-                    if self.startupKey == key { self.startupTask = nil; self.startupKey = nil }
-                    throw error
+                    if self.startupGeneration == generation { self.startupTask = nil; self.startupKey = nil }
+                    // Map internal StartupFailure back to TranscriptionError for callers.
+                    switch error {
+                    case StartupFailure.earlyExit:
+                        throw TranscriptionError.executionFailed("whisper-server exited during startup")
+                    case StartupFailure.notReady:
+                        throw TranscriptionError.executionFailed("whisper-server did not become ready in 90 seconds")
+                    default:
+                        throw error
+                    }
                 }
                 (process, url) = (process2, url2)
             } catch {
                 process1.terminate()
-                if self.startupKey == key { self.startupTask = nil; self.startupKey = nil }
-                throw error
+                if self.startupGeneration == generation { self.startupTask = nil; self.startupKey = nil }
+                // Map internal StartupFailure back to TranscriptionError for callers.
+                switch error {
+                case StartupFailure.earlyExit:
+                    throw TranscriptionError.executionFailed("whisper-server exited during startup")
+                case StartupFailure.notReady:
+                    throw TranscriptionError.executionFailed("whisper-server did not become ready in 90 seconds")
+                default:
+                    throw error
+                }
             }
 
             // Only publish after readiness is confirmed
@@ -214,7 +244,10 @@ actor WarmWhisperServer {
 
         do {
             let url = try await task.value
-            startupTask = nil
+            // Identity-guard: only clear startupTask if it still belongs to this
+            // generation. A racing shutdown() increments startupGeneration, so a
+            // newer startup registered by another caller won't be clobbered here.
+            if self.startupGeneration == generation { startupTask = nil }
             return url
         } catch {
             throw error
@@ -249,7 +282,7 @@ actor WarmWhisperServer {
         // 60 iterations × (1s sleep + 0.5s probe timeout) ≈ 90s max budget
         for _ in 0..<60 {
             guard process.isRunning else {
-                throw TranscriptionError.executionFailed("whisper-server exited during startup")
+                throw StartupFailure.earlyExit
             }
             var request = URLRequest(url: baseURL)
             request.timeoutInterval = 0.5
@@ -259,7 +292,7 @@ actor WarmWhisperServer {
             }
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
-        throw TranscriptionError.executionFailed("whisper-server did not become ready in 90 seconds")
+        throw StartupFailure.notReady
     }
 
     /// Returns true when the HTTP response body looks like it came from whisper-server.
