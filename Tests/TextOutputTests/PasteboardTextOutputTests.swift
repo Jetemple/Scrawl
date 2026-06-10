@@ -23,4 +23,15 @@ final class PasteboardTextOutputTests: XCTestCase {
         snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: countAfterWrite)
         XCTAssertEqual(pasteboard.string(forType: .string), "user copied this meanwhile")
     }
+
+    func testRestoreAppliedWhenChangeCountMatches() {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        pasteboard.clearContents()
+        pasteboard.setString("original", forType: .string)
+        let snapshot = PasteboardSnapshot.capture(from: pasteboard)
+        PasteboardTextOutput.writeTranscript("transcript", to: pasteboard)
+        let countAfterWrite = pasteboard.changeCount
+        snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: countAfterWrite)
+        XCTAssertEqual(pasteboard.string(forType: .string), "original")
+    }
 }
