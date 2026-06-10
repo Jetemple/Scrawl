@@ -7,7 +7,7 @@ actor WarmWhisperServer {
         let arguments: [String]
     }
 
-    private struct ServerKey: Equatable {
+    struct ServerKey: Equatable {
         let modelID: String
         let language: String
         let forceNoGPU: Bool
@@ -17,6 +17,8 @@ actor WarmWhisperServer {
     private var process: Process?
     private var serverKey: ServerKey?
     private var baseURL: URL?
+    private var startupTask: Task<URL, Error>?
+    private var startupKey: ServerKey?
     private var idleOffloadSeconds: TimeInterval?
     private var idleTask: Task<Void, Never>?
     private var activityGeneration: UInt64 = 0
@@ -90,6 +92,9 @@ actor WarmWhisperServer {
     func shutdown() {
         idleTask?.cancel()
         idleTask = nil
+        startupTask?.cancel()
+        startupTask = nil
+        startupKey = nil
         if let process, process.isRunning {
             process.terminate()
         }
@@ -98,43 +103,73 @@ actor WarmWhisperServer {
         baseURL = nil
     }
 
-    private func ensureRunning(key: ServerKey, modelPath: URL) async throws -> URL {
+    internal func ensureRunning(key: ServerKey, modelPath: URL) async throws -> URL {
+        // In-flight startup for same key — join the existing task
+        if startupKey == key, let task = startupTask {
+            let url = try await task.value
+            // Startup succeeded; re-validate the process is still alive
+            guard let p = self.process, p.isRunning else {
+                shutdown()
+                return try await ensureRunning(key: key, modelPath: modelPath)
+            }
+            scheduleOffload()
+            return url
+        }
+
+        // Server already running and ready
         if serverKey == key, let process, process.isRunning, let baseURL {
             scheduleOffload()
             return baseURL
         }
+
+        // Tear down any existing state and start fresh
         shutdown()
+        startupKey = key
 
-        let port = Int.random(in: 20_000...49_999)
-        let baseURL = URL(string: "http://127.0.0.1:\(port)")!
-        let process = Process()
-        let serverArguments = makeServerArguments(
-            modelPath: modelPath,
-            language: key.language,
-            port: port,
-            forceNoGPU: key.forceNoGPU
-        )
-        let launch = Self.supervisedLaunch(
-            serverExecutableURL: config.serverExecutableURL,
-            serverArguments: serverArguments,
-            ownerPID: ProcessInfo.processInfo.processIdentifier
-        )
-        process.executableURL = launch.executableURL
-        process.arguments = launch.arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-
-        self.process = process
-        self.serverKey = key
-        self.baseURL = baseURL
+        let task = Task {
+            let port = Int.random(in: 20_000...49_999)
+            let url = URL(string: "http://127.0.0.1:\(port)")!
+            let process = Process()
+            let serverArguments = self.makeServerArguments(
+                modelPath: modelPath,
+                language: key.language,
+                port: port,
+                forceNoGPU: key.forceNoGPU
+            )
+            let launch = Self.supervisedLaunch(
+                serverExecutableURL: self.config.serverExecutableURL,
+                serverArguments: serverArguments,
+                ownerPID: ProcessInfo.processInfo.processIdentifier
+            )
+            process.executableURL = launch.executableURL
+            process.arguments = launch.arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            do {
+                try await self.waitUntilReady(process: process, baseURL: url)
+            } catch {
+                process.terminate()
+                if self.startupKey == key {
+                    self.startupTask = nil
+                    self.startupKey = nil
+                }
+                throw error
+            }
+            // Only publish after readiness is confirmed
+            self.process = process
+            self.serverKey = key
+            self.baseURL = url
+            return url
+        }
+        startupTask = task
 
         do {
-            try await waitUntilReady(process: process, baseURL: baseURL)
+            let url = try await task.value
+            startupTask = nil
             scheduleOffload()
-            return baseURL
+            return url
         } catch {
-            shutdown()
             throw error
         }
     }
@@ -163,7 +198,7 @@ actor WarmWhisperServer {
         return arguments
     }
 
-    private func waitUntilReady(process: Process, baseURL: URL) async throws {
+    internal func waitUntilReady(process: Process, baseURL: URL) async throws {
         for _ in 0..<100 {
             guard process.isRunning else {
                 throw TranscriptionError.executionFailed("whisper-server exited during startup")

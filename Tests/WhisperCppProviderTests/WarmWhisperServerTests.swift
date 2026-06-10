@@ -1,0 +1,56 @@
+import XCTest
+@testable import WhisperCppProvider
+import Foundation
+import TranscriptionCore
+
+final class WarmWhisperServerTests: XCTestCase {
+
+    // MARK: - Moved from WhisperCppPostProcessingTests
+
+    func testWarmServerLaunchIsSupervisedByOwnerProcess() {
+        let launch = WarmWhisperServer.supervisedLaunch(
+            serverExecutableURL: URL(filePath: "/opt/homebrew/bin/whisper-server"),
+            serverArguments: ["--port", "18432"],
+            ownerPID: 1234
+        )
+
+        XCTAssertEqual(launch.executableURL, URL(filePath: "/bin/sh"))
+        XCTAssertTrue(launch.arguments.contains("1234"))
+        XCTAssertTrue(launch.arguments.contains("/opt/homebrew/bin/whisper-server"))
+        XCTAssertTrue(launch.arguments.joined(separator: " ").contains("kill \"$child\""))
+    }
+
+    // MARK: - Task 4: Reentrancy
+
+    func testConcurrentEnsureRunningBothThrowWhenServerExitsImmediately() async throws {
+        // Create a stub executable that exits immediately
+        let tmpDir = FileManager.default.temporaryDirectory
+        let stubURL = tmpDir.appendingPathComponent("stub-server-\(UUID().uuidString)")
+        let stubScript = "#!/bin/sh\nexit 1\n"
+        try stubScript.write(to: stubURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stubURL.path)
+        defer { try? FileManager.default.removeItem(at: stubURL) }
+
+        let config = WhisperCppConfig(
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/whisper-cli"),
+            serverExecutableURL: stubURL,
+            modelsDirectoryURL: FileManager.default.temporaryDirectory
+        )
+        let server = WarmWhisperServer(config: config)
+
+        let key = WarmWhisperServer.ServerKey(modelID: "test", language: "en", forceNoGPU: false)
+        let modelPath = URL(fileURLWithPath: "/tmp/fake-model.bin")
+
+        async let result1: URL = server.ensureRunning(key: key, modelPath: modelPath)
+        async let result2: URL = server.ensureRunning(key: key, modelPath: modelPath)
+
+        do {
+            _ = try await result1
+            XCTFail("Expected first call to throw")
+        } catch {}
+        do {
+            _ = try await result2
+            XCTFail("Expected second call to throw")
+        } catch {}
+    }
+}
