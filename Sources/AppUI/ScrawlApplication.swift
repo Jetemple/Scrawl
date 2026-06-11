@@ -465,6 +465,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
+        // Refuse if a recording is active.  stopRecordingAndTranscribe is
+        // synchronous only up to the audio-stop; the transcription itself runs
+        // in an async Task that will call setState(.idle) when it finishes —
+        // which would race with and clobber the hotkeyCapture overlay state.
+        // Refusing is the safe choice: it preserves the in-flight recording and
+        // gives the user a clear message rather than silently breaking the UI.
+        if recordingOrigin != nil {
+            runtime.overlayController.showTransientMessage("Stop recording before changing the hotkey")
+            return
+        }
+
         teardownHotkeyHandling()
         isCapturingHotkey = true
         activeOperationGeneration.beginActiveOperation()
