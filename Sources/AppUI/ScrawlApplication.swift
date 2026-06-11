@@ -121,6 +121,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let tempDir = FileManager.default.temporaryDirectory
+        DispatchQueue.global(qos: .utility).async {
+            TempFileSweeper.sweep(directory: tempDir)
+        }
+
         setupStatusItem()
         observeWorkspaceActivations()
         cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized

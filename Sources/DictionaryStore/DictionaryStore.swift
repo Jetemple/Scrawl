@@ -330,6 +330,7 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
                 let bakURL = URL(fileURLWithPath: fileURL.path + ".bak")
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     try FileManager.default.copyItem(at: fileURL, to: bakURL)
+                    try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bakURL.path)
                 }
             }
 
@@ -362,6 +363,7 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(entries)
         try data.write(to: fileURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 
     private static func describe(_ error: Error) -> String {

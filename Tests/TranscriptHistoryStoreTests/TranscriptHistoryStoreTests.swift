@@ -151,6 +151,19 @@ final class TranscriptHistoryStoreTests: XCTestCase {
         XCTAssertEqual(store.records(), [existingRecord])
     }
 
+    func testJSONStoreWritesFileWithOwnerReadWriteOnlyPermissions() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appending(path: "history.json")
+        let store = JSONTranscriptHistoryStore(fileURL: fileURL)
+
+        try store.add(record(text: "secret"))
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let permissions = attrs[.posixPermissions] as? Int
+        XCTAssertEqual(permissions, 0o600, "history.json must be owner-read/write only (0600)")
+    }
+
     private func record(text: String) -> TranscriptRecord {
         TranscriptRecord(id: UUID(), createdAt: Date(), text: text)
     }

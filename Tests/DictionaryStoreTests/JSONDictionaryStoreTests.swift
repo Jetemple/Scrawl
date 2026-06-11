@@ -139,6 +139,37 @@ final class JSONDictionaryStoreTests: XCTestCase {
         XCTAssertTrue(JSONDictionaryStore(fileURL: fileURL).terms().isEmpty)
     }
 
+    // MARK: - File permissions
+
+    func testJSONStoreWritesFileWithOwnerReadWriteOnlyPermissions() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appending(path: "dictionary.json")
+        let store = JSONDictionaryStore(fileURL: fileURL)
+
+        try store.addTerm("Kubernetes")
+
+        let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let permissions = attrs[.posixPermissions] as? Int
+        XCTAssertEqual(permissions, 0o600, "dictionary.json must be owner-read/write only (0600)")
+    }
+
+    func testJSONStoreBakFileHasOwnerReadWriteOnlyPermissions() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appending(path: "dictionary.json")
+        try Data("not json{{{".utf8).write(to: fileURL)
+        let store = JSONDictionaryStore(fileURL: fileURL)
+
+        try store.clear()
+
+        let bakURL = directory.appending(path: "dictionary.json.bak")
+        let attrs = try FileManager.default.attributesOfItem(atPath: bakURL.path)
+        let permissions = attrs[.posixPermissions] as? Int
+        XCTAssertEqual(permissions, 0o600, "dictionary.json.bak must be owner-read/write only (0600)")
+    }
+
     // MARK: - Helpers
 
     private func temporaryDirectory() -> URL {
