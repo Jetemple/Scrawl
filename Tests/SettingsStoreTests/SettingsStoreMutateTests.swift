@@ -68,21 +68,24 @@ final class SettingsStoreMutateTests: XCTestCase {
     }
 
     func testConcurrentMutatesSingleFieldNeverLosesAWrite() throws {
-        // Serial writers on the same field: the count must be exactly N.
+        // Each concurrent iteration reads the current counter from selectedModelID,
+        // increments it, and writes it back — all inside a single mutate.  Because
+        // mutate holds the store lock for the entire read-modify-write, no increment
+        // can be lost.  Without the lock, concurrent load/save interleaving would
+        // silently drop updates and the final value would be less than N.
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let store = SettingsStore(defaults: defaults)
-        try store.save(AppSettings(selectedModelID: "counter:0"))
+        try store.save(AppSettings(selectedModelID: "0"))
 
         let iterations = 100
         var errors: [Error] = []
         let errorLock = NSLock()
-        let counterLock = NSLock()
-        var counter = 0
 
         DispatchQueue.concurrentPerform(iterations: iterations) { _ in
             do {
-                try store.mutate { _ in
-                    counterLock.withLock { counter += 1 }
+                try store.mutate { settings in
+                    let n = Int(settings.selectedModelID) ?? 0
+                    settings.selectedModelID = String(n + 1)
                 }
             } catch {
                 errorLock.withLock { errors.append(error) }
@@ -90,7 +93,7 @@ final class SettingsStoreMutateTests: XCTestCase {
         }
 
         XCTAssertTrue(errors.isEmpty, "mutate threw: \(errors)")
-        XCTAssertEqual(counter, iterations)
+        XCTAssertEqual(store.load().selectedModelID, String(iterations))
     }
 }
 

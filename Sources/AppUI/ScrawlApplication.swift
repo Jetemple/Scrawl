@@ -845,31 +845,36 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private func applyRecommendedModelDefaultsIfNeeded() {
         let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
         let recommendedID = runtime.recommendedDefaultModelID
-        var changed = false
+
+        // Pre-check: skip the write entirely when nothing needs changing.
+        // (There is a tiny TOCTOU between this read and the mutate below, but at startup
+        // with no concurrent writers that is acceptable.)
+        let current = runtime.settingsStore.load()
+        let needsChange = !hasStoredSettings
+            || current.defaultModelID.isEmpty || current.defaultModelID == "ggml-small"
+            || current.selectedModelID.isEmpty || current.selectedModelID == "ggml-small"
+        guard needsChange else { return }
+
         do {
             try runtime.settingsStore.mutate { settings in
                 if !hasStoredSettings {
                     settings.defaultModelID = recommendedID
                     settings.selectedModelID = recommendedID
-                    changed = true
                 }
                 if settings.defaultModelID.isEmpty || settings.defaultModelID == "ggml-small" {
                     settings.defaultModelID = recommendedID
-                    changed = true
                 }
                 if settings.selectedModelID.isEmpty || settings.selectedModelID == "ggml-small" {
                     settings.selectedModelID = settings.defaultModelID
-                    changed = true
                 }
             }
         } catch {
             setStatus("Settings error: \(describe(error))")
+            return
         }
-        if changed {
-            refreshSettingsRows()
-            refreshModelMenu()
-            refreshPreferencesWindow()
-        }
+        refreshSettingsRows()
+        refreshModelMenu()
+        refreshPreferencesWindow()
     }
 
     private func presentNoSpeechDetectedAlert() {
@@ -1657,40 +1662,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         await pasteToTargetApp(text, target: lastExternalActiveApp)
     }
 
-    private func saveSettings(_ settings: AppSettings) {
-        do {
-            var previousSettings: AppSettings?
-            // Atomically capture previous state and write the new value in one critical section.
-            try runtime.settingsStore.mutate { current in
-                previousSettings = current
-                current = settings
-            }
-            if let previousSettings, let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
-                Task {
-                    if previousSettings.modelID != settings.modelID {
-                        await provider.shutdown()
-                    }
-                    if previousSettings.modelOffloadPolicy != settings.modelOffloadPolicy {
-                        await provider.setIdleOffloadSeconds(settings.modelOffloadPolicy.idleSeconds)
-                    }
-                }
-            }
-            refreshSettingsRows()
-            refreshModelMenu()
-            refreshPreferencesWindow()
-            // NOTE: hotkey monitors are intentionally NOT rebuilt here. Only applyHotkey changes the
-            // hotkey, so rebuilding on every save (model select, download completion, launch defaults)
-            // was needless churn — and worse, teardownHotkeyHandling resets the gesture state machine,
-            // which could strand an in-progress recording until the 90s safety timeout. The rebuild now
-            // lives in applyHotkey, the one place the hotkey actually changes.
-        } catch {
-            setStatus("Settings error: \(describe(error))")
-        }
-    }
-
-    /// Atomically applies `transform` to the stored settings then triggers the same
-    /// provider side-effects and UI refresh as `saveSettings`.  Use this instead of a
-    /// local load → modify → saveSettings(modified) sequence.
+    /// Atomically applies `transform` to the stored settings, then triggers provider
+    /// side-effects (model shutdown / idle-offload update) and UI refresh.
+    ///
+    /// Hotkey monitors are intentionally NOT rebuilt here.  Only `applyHotkey` changes the
+    /// hotkey, so rebuilding on every mutate (model select, download completion, launch
+    /// defaults) was needless churn — and worse, `teardownHotkeyHandling` resets the gesture
+    /// state machine, which could strand an in-progress recording until the 90 s safety
+    /// timeout.  The rebuild lives in `applyHotkey`, the one place the hotkey actually changes.
     private func mutateSettings(_ transform: (inout AppSettings) -> Void) {
         do {
             var previousSettings: AppSettings?
@@ -1714,7 +1693,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             refreshSettingsRows()
             refreshModelMenu()
             refreshPreferencesWindow()
-            // NOTE: hotkey monitors are intentionally NOT rebuilt here — see saveSettings.
+            // NOTE: hotkey monitors are intentionally NOT rebuilt here — see doc-comment above.
         } catch {
             setStatus("Settings error: \(describe(error))")
         }
