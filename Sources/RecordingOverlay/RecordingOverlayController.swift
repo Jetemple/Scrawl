@@ -144,6 +144,28 @@ public final class RecordingOverlayController: @unchecked Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0.2), execute: workItem)
     }
 
+    // MARK: - Pill width computation
+
+    /// Returns the required panel width for the given label text, clamped to [minPillWidth, maxPillWidth].
+    ///
+    /// - Parameters:
+    ///   - text: The string that will be displayed in the title label.
+    ///   - font: The label font.
+    ///   - leadingAccessoryWidth: The width consumed by any leading accessory (dot, symbol, spinner)
+    ///     plus the gap between it and the label. Pass 0 when there is no accessory.
+    /// - Returns: A clamped pill width.
+    static func pillWidth(forText text: String, font: NSFont, leadingAccessoryWidth: CGFloat) -> CGFloat {
+        let padding: CGFloat = 14
+        let measuredText = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        let required = padding + leadingAccessoryWidth + measuredText + padding
+        return min(max(required, minPillWidth), maxPillWidth)
+    }
+
+    static let minPillWidth: CGFloat = 148
+    static let maxPillWidth: CGFloat = 420
+    static let pillHeight: CGFloat = 34
+    static let shadowMargin: CGFloat = 12
+
     // MARK: - Panel setup
 
     private func ensurePanel() {
@@ -151,8 +173,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
             return
         }
 
-        let pillWidth: CGFloat = 148
-        let pillHeight: CGFloat = 34
+        let pillWidth = Self.minPillWidth
+        let pillHeight = Self.pillHeight
         let frame = NSRect(x: 0, y: 0, width: pillWidth, height: pillHeight)
 
         let panel = NSPanel(
@@ -170,7 +192,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         panel.alphaValue = 0
 
         // Shadow host — draws a rounded shadow without clipping
-        let shadowMargin: CGFloat = 12
+        let shadowMargin = Self.shadowMargin
         let shadowFrame = NSRect(
             x: -shadowMargin,
             y: -shadowMargin,
@@ -185,12 +207,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         shadowHost.layer?.shadowOpacity = 0.2
         shadowHost.layer?.shadowRadius = 8
         shadowHost.layer?.shadowOffset = CGSize(width: 0, height: -2)
-        shadowHost.layer?.shadowPath = CGPath(
-            roundedRect: CGRect(x: shadowMargin, y: shadowMargin, width: pillWidth, height: pillHeight),
-            cornerWidth: pillHeight / 2,
-            cornerHeight: pillHeight / 2,
-            transform: nil
-        )
+        shadowHost.layer?.shadowPath = Self.makeShadowPath(pillWidth: pillWidth, pillHeight: pillHeight, shadowMargin: shadowMargin)
 
         let visual = NSVisualEffectView(frame: frame)
         visual.autoresizingMask = [.width, .height]
@@ -242,9 +259,63 @@ public final class RecordingOverlayController: @unchecked Sendable {
         self.spinner = spinner
     }
 
+    /// Generates the CGPath used for the shadow host's shadowPath.
+    private static func makeShadowPath(pillWidth: CGFloat, pillHeight: CGFloat, shadowMargin: CGFloat) -> CGPath {
+        CGPath(
+            roundedRect: CGRect(x: shadowMargin, y: shadowMargin, width: pillWidth, height: pillHeight),
+            cornerWidth: pillHeight / 2,
+            cornerHeight: pillHeight / 2,
+            transform: nil
+        )
+    }
+
+    /// Resizes the panel to fit the current label text, then regenerates the shadow path.
+    /// Must be called BEFORE `layoutSubviews()` positions child frames.
+    private func resizePanel() {
+        guard let panel, let titleLabel, let dotView, let symbolView, let spinner else { return }
+
+        let font = titleLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .medium)
+        let text = titleLabel.stringValue
+
+        // Determine leading accessory width + gap (matches layoutSubviews constants).
+        let leadingAccessoryWidth: CGFloat
+        if !dotView.isHidden {
+            leadingAccessoryWidth = 8 + 8   // dotSize(8) + gap(8)
+        } else if !symbolView.isHidden {
+            leadingAccessoryWidth = 15 + 8  // symbolSize(15) + gap(8)
+        } else if !spinner.isHidden {
+            leadingAccessoryWidth = 16 + 8  // spinnerSize(16) + gap(8)
+        } else {
+            leadingAccessoryWidth = 0
+        }
+
+        let newWidth = Self.pillWidth(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
+        let pillHeight = Self.pillHeight
+        let shadowMargin = Self.shadowMargin
+
+        // Resize panel (autoresizingMask on container/visual/shadowHost propagates the change).
+        panel.setFrame(
+            NSRect(origin: panel.frame.origin, size: NSSize(width: newWidth, height: pillHeight)),
+            display: false
+        )
+
+        // Regenerate shadow path to match new width.
+        if let shadowHost = panel.contentView?.subviews.first {
+            shadowHost.layer?.shadowPath = Self.makeShadowPath(
+                pillWidth: newWidth,
+                pillHeight: pillHeight,
+                shadowMargin: shadowMargin
+            )
+        }
+    }
+
     // MARK: - Layout
 
     private func layoutSubviews() {
+        // Resize the panel to fit the current text FIRST, so child frame
+        // calculations below use the updated panel width.
+        resizePanel()
+
         guard let panel, let dotView, let symbolView, let titleLabel, let spinner else {
             return
         }

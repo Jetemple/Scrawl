@@ -107,6 +107,12 @@ let package = Package(
             dependencies: [
                 "TextOutput"
             ]
+        ),
+        .testTarget(
+            name: "RecordingOverlayTests",
+            dependencies: [
+                "RecordingOverlay"
+            ]
         )
     ]
 )
