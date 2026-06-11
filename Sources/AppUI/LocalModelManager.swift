@@ -35,7 +35,10 @@ final class LocalModelManager: @unchecked Sendable {
     private let lock = NSLock()
     private let modelsDirectoryURL: URL
     private(set) var isDownloadInProgress: Bool = false
-    private(set) var pendingResumeData: Data? = nil
+    /// Resume data keyed by model ID — prevents stale data from a cancelled
+    /// download of model A being applied to a later download of model B.
+    private(set) var pendingResumeDataByModelID: [String: Data] = [:]
+    private var activeDownloadModelID: String? = nil
     private var activeDownloadTask: URLSessionDownloadTask? = nil
     private var activeDownloadSession: URLSession? = nil
 
@@ -100,15 +103,18 @@ final class LocalModelManager: @unchecked Sendable {
     func cancelDownload() {
         lock.lock()
         let task = activeDownloadTask
+        let modelID = activeDownloadModelID
         activeDownloadTask = nil
+        activeDownloadModelID = nil
         isDownloadInProgress = false
         lock.unlock()
 
         guard let task else { return }
         task.cancel(byProducingResumeData: { [weak self] data in
-            self?.lock.lock()
-            self?.pendingResumeData = data
-            self?.lock.unlock()
+            guard let self, let data, let modelID else { return }
+            self.lock.lock()
+            defer { self.lock.unlock() }
+            self.pendingResumeDataByModelID[modelID] = data
         })
     }
 
@@ -119,7 +125,7 @@ final class LocalModelManager: @unchecked Sendable {
         for sourceURL in model.candidateDownloadURLs {
             var temporaryURL: URL?
             do {
-                let downloadedURL = try await downloadFromURL(sourceURL, onProgress: onProgress)
+                let downloadedURL = try await downloadFromURL(sourceURL, modelID: model.id, onProgress: onProgress)
                 temporaryURL = downloadedURL
                 try ModelDownloadValidator.verifySHA256(of: downloadedURL, expected: model.sha256)
                 return try installDownloadedModel(from: downloadedURL, fileName: model.fileName)
@@ -152,11 +158,11 @@ final class LocalModelManager: @unchecked Sendable {
         return value
     }
 
-    private func downloadFromURL(_ sourceURL: URL, onProgress: ProgressHandler?) async throws -> URL {
+    private func downloadFromURL(_ sourceURL: URL, modelID: String, onProgress: ProgressHandler?) async throws -> URL {
         var lastError: Error?
         for attempt in 1 ... 2 {
             do {
-                let (temporaryURL, response) = try await performDownload(from: sourceURL, onProgress: onProgress)
+                let (temporaryURL, response) = try await performDownload(from: sourceURL, modelID: modelID, onProgress: onProgress)
                 guard let http = response as? HTTPURLResponse else {
                     throw ModelDownloadError.invalidHTTPResponse(sourceURL)
                 }
@@ -170,10 +176,11 @@ final class LocalModelManager: @unchecked Sendable {
                 guard attempt < 2, isTransientNetworkError(error) else {
                     throw error
                 }
+                // Stash any resume data from the system for the next attempt of this same model.
                 if let resumeDataFromError = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
                     lock.lock()
-                    pendingResumeData = resumeDataFromError
-                    lock.unlock()
+                    defer { lock.unlock() }
+                    pendingResumeDataByModelID[modelID] = resumeDataFromError
                 }
                 try await Task.sleep(nanoseconds: 600_000_000)
             }
@@ -182,28 +189,35 @@ final class LocalModelManager: @unchecked Sendable {
         throw lastError ?? ModelDownloadError.invalidHTTPResponse(sourceURL)
     }
 
-    private func performDownload(from sourceURL: URL, onProgress: ProgressHandler?) async throws -> (URL, URLResponse) {
+    private func performDownload(from sourceURL: URL, modelID: String, onProgress: ProgressHandler?) async throws -> (URL, URLResponse) {
         let session = makeDownloadSession()
 
         lock.lock()
         activeDownloadSession = session
+        activeDownloadModelID = modelID
         isDownloadInProgress = true
-        let resumeData = pendingResumeData
-        pendingResumeData = nil
+        let resumeData = pendingResumeDataByModelID.removeValue(forKey: modelID)
         lock.unlock()
 
         defer {
             lock.lock()
+            defer { lock.unlock() }
             if activeDownloadSession === session {
                 activeDownloadSession = nil
+                activeDownloadModelID = nil
                 isDownloadInProgress = false
             }
-            lock.unlock()
         }
 
         return try await withCheckedThrowingContinuation { continuation in
             var observation: NSKeyValueObservation?
-            var downloadTask: URLSessionDownloadTask?
+            // Weak box so the completion handler can report final bytes without
+            // creating a retain cycle through the URLSessionDownloadTask.
+            final class WeakTaskBox: @unchecked Sendable {
+                weak var task: URLSessionDownloadTask?
+                init(_ task: URLSessionDownloadTask) { self.task = task }
+            }
+            var taskBox: WeakTaskBox?
 
             let completionHandler: @Sendable (URL?, URLResponse?, Error?) -> Void = { temporaryURL, response, error in
                 observation?.invalidate()
@@ -228,10 +242,12 @@ final class LocalModelManager: @unchecked Sendable {
                     return
                 }
 
-                let expected = downloadTask?.countOfBytesExpectedToReceive ?? -1
+                // Final progress callback so callers see 100 % on success.
+                let expected = taskBox?.task?.countOfBytesExpectedToReceive ?? -1
                 let totalBytes = expected > 0 ? expected : nil
-                let receivedBytes = downloadTask?.countOfBytesReceived ?? 0
+                let receivedBytes = taskBox?.task?.countOfBytesReceived ?? 0
                 onProgress?(receivedBytes, totalBytes)
+
                 continuation.resume(returning: (safeCopy, response))
             }
 
@@ -241,17 +257,19 @@ final class LocalModelManager: @unchecked Sendable {
             } else {
                 task = session.downloadTask(with: sourceURL, completionHandler: completionHandler)
             }
-            downloadTask = task
+            taskBox = WeakTaskBox(task)
 
+            // Register task under lock BEFORE resume() to eliminate the window
+            // where cancelDownload() could see activeDownloadTask == nil.
             lock.lock()
             activeDownloadTask = task
             lock.unlock()
 
             if let onProgress {
-                observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { _, _ in
-                    let expected = downloadTask?.countOfBytesExpectedToReceive ?? -1
+                observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak task] _, _ in
+                    let expected = task?.countOfBytesExpectedToReceive ?? -1
                     let totalBytes = expected > 0 ? expected : nil
-                    let receivedBytes = downloadTask?.countOfBytesReceived ?? 0
+                    let receivedBytes = task?.countOfBytesReceived ?? 0
                     onProgress(receivedBytes, totalBytes)
                 }
             }

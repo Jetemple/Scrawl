@@ -102,6 +102,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private var isModelDownloadInProgress = false
     private var downloadingModelID: String?
+    private var cancelledModelID: String?
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
     private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
@@ -265,7 +266,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             downloadableModels: downloadableModels,
             installedModelIDs: installedModelIDs,
             selectedModelID: settings.modelID,
-            downloadingModelID: downloadingModelID
+            downloadingModelID: downloadingModelID,
+            cancelledModelID: cancelledModelID
         )
 
         preferencesWindowController.update(
@@ -584,9 +586,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func cancelModelDownload() {
+        let cancelledID = downloadingModelID
         modelManager.cancelDownload()
         isModelDownloadInProgress = false
         downloadingModelID = nil
+        cancelledModelID = cancelledID
         refreshModelMenu()
         refreshPreferencesWindow()
         setStatus("Download cancelled")
@@ -603,6 +607,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         isModelDownloadInProgress = true
         downloadingModelID = model.id
+        cancelledModelID = nil
         refreshModelMenu()
         refreshPreferencesWindow()
         setStatus("Downloading \(model.displayName)...")
