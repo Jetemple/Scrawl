@@ -1326,6 +1326,18 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 cancelHotkeyCapture(status: "Hotkey capture cancelled")
                 return nil
             }
+
+            // Reject keys that would type visible text (printable characters,
+            // arrow keys) — they cannot be used safely as hotkeys because the
+            // global monitor cannot swallow keystrokes.
+            if !HotkeyCaptureFilter.isAccepted(keyCode: event.keyCode, characters: event.characters) {
+                runtime.overlayController.showTransientMessage(
+                    "That key types text — choose a modifier, Fn, or a function key."
+                )
+                // Keep capture active so the user can try another key.
+                return nil
+            }
+
             let label = (event.charactersIgnoringModifiers ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let display = label.isEmpty ? "KeyCode \(event.keyCode)" : label.uppercased()
