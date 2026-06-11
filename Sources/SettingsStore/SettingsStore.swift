@@ -144,6 +144,16 @@ public final class SettingsStore: @unchecked Sendable {
         }
     }
 
+    /// Atomically loads, transforms, and saves settings in a single critical section.
+    /// Use instead of a manual load → mutate → save sequence to prevent interleaved writes.
+    public func mutate(_ transform: (inout AppSettings) -> Void) throws {
+        try lock.withLock {
+            var settings = loadUnlocked()
+            transform(&settings)
+            try saveUnlocked(settings)
+        }
+    }
+
     private func loadUnlocked() -> AppSettings {
         guard let data = defaults.data(forKey: key) else {
             return AppSettings()

@@ -321,9 +321,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func setModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
-        var settings = runtime.settingsStore.load()
-        settings.modelOffloadPolicy = policy
-        saveSettings(settings)
+        mutateSettings { $0.modelOffloadPolicy = policy }
     }
 
     private func copyTranscript(id: UUID) {
@@ -548,12 +546,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func selectModel(id modelID: String) {
-        var settings = runtime.settingsStore.load()
-        settings.selectedModelID = modelID
-        if settings.defaultModelID.isEmpty {
-            settings.defaultModelID = modelID
+        mutateSettings {
+            $0.selectedModelID = modelID
+            if $0.defaultModelID.isEmpty {
+                $0.defaultModelID = modelID
+            }
         }
-        saveSettings(settings)
         setStatus("Selected model: \(modelID)")
     }
 
@@ -568,17 +566,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @objc private func deleteSelectedModel(_ sender: Any?) {
-        let settings = runtime.settingsStore.load()
-        let selected = settings.selectedModelID
+        let selected = runtime.settingsStore.load().selectedModelID
 
         do {
             try modelManager.deleteModel(id: selected)
-            var updated = settings
             let installed = modelManager.installedModelIDs()
-            if let fallback = installed.first {
-                updated.selectedModelID = fallback
+            mutateSettings { settings in
+                if let fallback = installed.first {
+                    settings.selectedModelID = fallback
+                }
             }
-            saveSettings(updated)
             setStatus("Deleted model: \(selected)")
         } catch {
             setStatus("Delete failed: \(describe(error))")
@@ -619,14 +616,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     guard let self else { return }
                     self.setStatus(self.downloadProgressText(for: model, receivedBytes: receivedBytes, totalBytes: totalBytes))
                 }
-                var workingSettings = self.runtime.settingsStore.load()
-                workingSettings.selectedModelID = model.id
-                if workingSettings.defaultModelID.isEmpty {
-                    workingSettings.defaultModelID = model.id
-                }
-                let updatedSettings = workingSettings
                 await MainActor.run {
-                    self.saveSettings(updatedSettings)
+                    self.mutateSettings {
+                        $0.selectedModelID = model.id
+                        if $0.defaultModelID.isEmpty {
+                            $0.defaultModelID = model.id
+                        }
+                    }
                     self.setStatus("Downloaded \(model.id)")
                 }
             } catch {
@@ -698,9 +694,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let installed = modelManager.installedModelIDs()
         if let fallback = installed.first {
-            var updated = settings
-            updated.selectedModelID = fallback
-            saveSettings(updated)
+            mutateSettings { $0.selectedModelID = fallback }
             return true
         }
 
@@ -850,27 +844,31 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func applyRecommendedModelDefaultsIfNeeded() {
         let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
-        var settings = runtime.settingsStore.load()
+        let recommendedID = runtime.recommendedDefaultModelID
         var changed = false
-
-        if !hasStoredSettings {
-            settings.defaultModelID = runtime.recommendedDefaultModelID
-            settings.selectedModelID = runtime.recommendedDefaultModelID
-            changed = true
+        do {
+            try runtime.settingsStore.mutate { settings in
+                if !hasStoredSettings {
+                    settings.defaultModelID = recommendedID
+                    settings.selectedModelID = recommendedID
+                    changed = true
+                }
+                if settings.defaultModelID.isEmpty || settings.defaultModelID == "ggml-small" {
+                    settings.defaultModelID = recommendedID
+                    changed = true
+                }
+                if settings.selectedModelID.isEmpty || settings.selectedModelID == "ggml-small" {
+                    settings.selectedModelID = settings.defaultModelID
+                    changed = true
+                }
+            }
+        } catch {
+            setStatus("Settings error: \(describe(error))")
         }
-
-        if settings.defaultModelID.isEmpty || settings.defaultModelID == "ggml-small" {
-            settings.defaultModelID = runtime.recommendedDefaultModelID
-            changed = true
-        }
-
-        if settings.selectedModelID.isEmpty || settings.selectedModelID == "ggml-small" {
-            settings.selectedModelID = settings.defaultModelID
-            changed = true
-        }
-
         if changed {
-            saveSettings(settings)
+            refreshSettingsRows()
+            refreshModelMenu()
+            refreshPreferencesWindow()
         }
     }
 
@@ -1318,9 +1316,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func applyHotkey(_ hotkey: HotkeySetting) {
-        var settings = runtime.settingsStore.load()
-        settings.hotkey = hotkey
-        saveSettings(settings)
+        mutateSettings { $0.hotkey = hotkey }
         // The hotkey changed, so rebuild the monitors to listen for the new key. This is also the
         // path that re-arms hotkey handling after a capture session (which tore it down).
         teardownHotkeyHandling()
@@ -1663,9 +1659,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func saveSettings(_ settings: AppSettings) {
         do {
-            let previousSettings = runtime.settingsStore.load()
-            try runtime.settingsStore.save(settings)
-            if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
+            var previousSettings: AppSettings?
+            // Atomically capture previous state and write the new value in one critical section.
+            try runtime.settingsStore.mutate { current in
+                previousSettings = current
+                current = settings
+            }
+            if let previousSettings, let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
                 Task {
                     if previousSettings.modelID != settings.modelID {
                         await provider.shutdown()
@@ -1683,6 +1683,38 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             // was needless churn — and worse, teardownHotkeyHandling resets the gesture state machine,
             // which could strand an in-progress recording until the 90s safety timeout. The rebuild now
             // lives in applyHotkey, the one place the hotkey actually changes.
+        } catch {
+            setStatus("Settings error: \(describe(error))")
+        }
+    }
+
+    /// Atomically applies `transform` to the stored settings then triggers the same
+    /// provider side-effects and UI refresh as `saveSettings`.  Use this instead of a
+    /// local load → modify → saveSettings(modified) sequence.
+    private func mutateSettings(_ transform: (inout AppSettings) -> Void) {
+        do {
+            var previousSettings: AppSettings?
+            var updatedSettings: AppSettings?
+            try runtime.settingsStore.mutate { current in
+                previousSettings = current
+                transform(&current)
+                updatedSettings = current
+            }
+            if let previousSettings, let updatedSettings,
+               let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
+                Task {
+                    if previousSettings.modelID != updatedSettings.modelID {
+                        await provider.shutdown()
+                    }
+                    if previousSettings.modelOffloadPolicy != updatedSettings.modelOffloadPolicy {
+                        await provider.setIdleOffloadSeconds(updatedSettings.modelOffloadPolicy.idleSeconds)
+                    }
+                }
+            }
+            refreshSettingsRows()
+            refreshModelMenu()
+            refreshPreferencesWindow()
+            // NOTE: hotkey monitors are intentionally NOT rebuilt here — see saveSettings.
         } catch {
             setStatus("Settings error: \(describe(error))")
         }
