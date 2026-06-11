@@ -17,6 +17,11 @@ public final class RecordingOverlayController: @unchecked Sendable {
     private var titleLabel: NSTextField?
     private var spinner: NSProgressIndicator?
     private var transientDismissWorkItem: DispatchWorkItem?
+    /// Incremented every time the panel is shown or faded in.
+    /// Fade-out completion handlers capture the value at the time they are
+    /// scheduled and skip `orderOut` / teardown if the generation has advanced
+    /// (meaning a new show/fade-in arrived before the animation finished).
+    private var fadeGeneration = 0
 
     public init() {}
 
@@ -58,6 +63,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             symbolView.isHidden = true
             spinner.stopAnimation(nil)
             spinner.isHidden = true
+            fadeGeneration += 1
             fadeOut(panel)
 
         case .hotkeyCapture:
@@ -76,6 +82,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             startSymbolPulse()
             layoutSubviews()
             positionPanel(panel)
+            fadeGeneration += 1
             fadeIn(panel, wasHidden: previous == .idle)
 
         case .recording:
@@ -88,6 +95,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             startDotPulse()
             layoutSubviews()
             positionPanel(panel)
+            fadeGeneration += 1
             fadeIn(panel, wasHidden: previous == .idle)
 
         case .transcribing:
@@ -100,11 +108,15 @@ public final class RecordingOverlayController: @unchecked Sendable {
             spinner.startAnimation(nil)
             layoutSubviews()
             positionPanel(panel)
+            fadeGeneration += 1
             fadeIn(panel, wasHidden: previous == .idle)
         }
     }
 
     private func applyTransientMessage(_ text: String, duration: TimeInterval) {
+        transientDismissWorkItem?.cancel()
+        transientDismissWorkItem = nil
+
         ensurePanel()
         guard let panel, let dotView, let symbolView, let titleLabel, let spinner else {
             return
@@ -119,6 +131,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         titleLabel.textColor = .secondaryLabelColor
         layoutSubviews()
         positionPanel(panel)
+        fadeGeneration += 1
         fadeIn(panel, wasHidden: panel.alphaValue == 0)
 
         let workItem = DispatchWorkItem { [weak self] in
@@ -127,7 +140,6 @@ public final class RecordingOverlayController: @unchecked Sendable {
                 self.fadeOut(panel)
             }
         }
-        transientDismissWorkItem?.cancel()
         transientDismissWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0.2), execute: workItem)
     }
@@ -388,10 +400,12 @@ public final class RecordingOverlayController: @unchecked Sendable {
             panel.orderOut(nil)
             return
         }
+        let generation = fadeGeneration
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             panel.animator().alphaValue = 0.0
-        } completionHandler: {
+        } completionHandler: { [weak self] in
+            guard let self, self.fadeGeneration == generation else { return }
             panel.orderOut(nil)
         }
     }

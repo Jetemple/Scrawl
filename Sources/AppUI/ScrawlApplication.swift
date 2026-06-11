@@ -1332,9 +1332,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func cancelHotkeyCapture(status: String) {
         setStatus(status)
-        runtime.overlayController.showTransientMessage(status)
         stopHotkeyCapture()
         setupHotkeyHandling()
+        runtime.overlayController.showTransientMessage(status)
     }
 
     private func stopHotkeyCapture() {
