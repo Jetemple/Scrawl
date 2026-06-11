@@ -35,9 +35,9 @@ final class LocalModelManager: @unchecked Sendable {
     private let lock = NSLock()
     private let modelsDirectoryURL: URL
     private(set) var isDownloadInProgress: Bool = false
-    /// Resume data keyed by model ID — prevents stale data from a cancelled
-    /// download of model A being applied to a later download of model B.
-    private(set) var pendingResumeDataByModelID: [String: Data] = [:]
+    /// Resume data keyed by source URL string — resume data is URL-specific and
+    /// cannot be replayed against a different mirror URL.
+    private(set) var pendingResumeDataBySourceURL: [String: Data] = [:]
     private var activeDownloadModelID: String? = nil
     private var activeDownloadTask: URLSessionDownloadTask? = nil
     private var activeDownloadSession: URLSession? = nil
@@ -103,7 +103,9 @@ final class LocalModelManager: @unchecked Sendable {
     func cancelDownload() {
         lock.lock()
         let task = activeDownloadTask
-        let modelID = activeDownloadModelID
+        // Capture the URL before cancelling so resume data can be stored under
+        // the exact URL the task was running against (resume data is URL-specific).
+        let taskURL = task?.currentRequest?.url ?? task?.originalRequest?.url
         activeDownloadTask = nil
         activeDownloadModelID = nil
         isDownloadInProgress = false
@@ -111,10 +113,10 @@ final class LocalModelManager: @unchecked Sendable {
 
         guard let task else { return }
         task.cancel(byProducingResumeData: { [weak self] data in
-            guard let self, let data, let modelID else { return }
+            guard let self, let data, let urlKey = taskURL?.absoluteString else { return }
             self.lock.lock()
             defer { self.lock.unlock() }
-            self.pendingResumeDataByModelID[modelID] = data
+            self.pendingResumeDataBySourceURL[urlKey] = data
         })
     }
 
@@ -132,6 +134,10 @@ final class LocalModelManager: @unchecked Sendable {
             } catch {
                 if let temp = temporaryURL {
                     try? FileManager.default.removeItem(at: temp)
+                }
+                // User-initiated cancel: stop immediately without trying other mirrors.
+                if (error as? URLError)?.code == .cancelled {
+                    throw error
                 }
                 if error is ModelDownloadValidator.HashMismatchError {
                     failures.append("\(sourceURL.absoluteString): SHA-256 mismatch")
@@ -166,11 +172,11 @@ final class LocalModelManager: @unchecked Sendable {
                 guard attempt < 2, isTransientNetworkError(error) else {
                     throw error
                 }
-                // Stash any resume data from the system for the next attempt of this same model.
+                // Stash any resume data from the system for the next attempt of this same URL.
                 if let resumeDataFromError = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
                     lock.lock()
                     defer { lock.unlock() }
-                    pendingResumeDataByModelID[modelID] = resumeDataFromError
+                    pendingResumeDataBySourceURL[sourceURL.absoluteString] = resumeDataFromError
                 }
                 try await Task.sleep(nanoseconds: 600_000_000)
             }
@@ -186,7 +192,7 @@ final class LocalModelManager: @unchecked Sendable {
         activeDownloadSession = session
         activeDownloadModelID = modelID
         isDownloadInProgress = true
-        let resumeData = pendingResumeDataByModelID.removeValue(forKey: modelID)
+        let resumeData = pendingResumeDataBySourceURL.removeValue(forKey: sourceURL.absoluteString)
         lock.unlock()
 
         defer {

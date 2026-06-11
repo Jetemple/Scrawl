@@ -631,6 +631,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 }
             } catch {
                 await MainActor.run {
+                    // User-initiated cancel: the quiet "Download cancelled" status
+                    // set by cancelModelDownload() is the only user-visible surface.
+                    if (error as? URLError)?.code == .cancelled { return }
                     let details = self.describe(error)
                     self.setStatus("Download failed")
                     _ = self.presentAlert(
@@ -644,6 +647,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 }
             }
             await MainActor.run {
+                // Only reset state if this Task still owns the download slot.
+                // A cancel + immediate restart of a new download would otherwise
+                // let the old Task's cleanup clobber the new download's UI state.
+                guard self.downloadingModelID == model.id else { return }
                 self.isModelDownloadInProgress = false
                 self.downloadingModelID = nil
                 self.refreshModelMenu()

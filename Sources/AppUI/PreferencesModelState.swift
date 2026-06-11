@@ -6,7 +6,7 @@ struct PreferencesModelRow: Equatable, Sendable {
     let isInstalled: Bool
     let isSelected: Bool
     let isDownloading: Bool
-    var isCancelled: Bool = false
+    let isCancelled: Bool
 
     var canDownload: Bool {
         !isInstalled && !isDownloading
@@ -76,7 +76,8 @@ enum PreferencesModelState {
                     displayName: displayName(forInstalledModelID: modelID),
                     isInstalled: true,
                     isSelected: modelID == selectedModelID,
-                    isDownloading: modelID == downloadingModelID
+                    isDownloading: modelID == downloadingModelID,
+                    isCancelled: false
                 )
             }
 

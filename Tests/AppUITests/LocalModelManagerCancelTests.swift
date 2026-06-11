@@ -7,6 +7,6 @@ final class LocalModelManagerCancelTests: XCTestCase {
         manager.cancelDownload()
         // No active download — flags must stay false/clear after a no-op cancel.
         XCTAssertFalse(manager.isDownloadInProgress)
-        XCTAssertTrue(manager.pendingResumeDataByModelID.isEmpty)
+        XCTAssertTrue(manager.pendingResumeDataBySourceURL.isEmpty)
     }
 }

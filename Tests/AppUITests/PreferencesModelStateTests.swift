@@ -98,7 +98,8 @@ final class PreferencesModelStateTests: XCTestCase {
             displayName: "medium - multilingual, 1.5 GB",
             isInstalled: false,
             isSelected: false,
-            isDownloading: false
+            isDownloading: false,
+            isCancelled: false
         )
 
         XCTAssertEqual(row.statusText, "Available")

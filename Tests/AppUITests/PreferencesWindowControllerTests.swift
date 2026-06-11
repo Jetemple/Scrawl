@@ -63,14 +63,16 @@ final class PreferencesWindowControllerTests: XCTestCase {
                 displayName: "tiny.en — fast, 75 MB",
                 isInstalled: true,
                 isSelected: false,
-                isDownloading: false
+                isDownloading: false,
+                isCancelled: false
             ),
             PreferencesModelRow(
                 id: "large-v3-turbo",
                 displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
                 isInstalled: true,
                 isSelected: true,
-                isDownloading: false
+                isDownloading: false,
+                isCancelled: false
             )
         ]))
         controller.selectSection(.models)
