@@ -91,6 +91,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var lastExternalActiveApp: NSRunningApplication?
 
     private var workspaceActivationObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
     private var hotkeyMonitor: HotkeyMonitor?
     private var hotkeyGestureTimer: Timer?
 
@@ -1286,12 +1288,46 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 self.lastExternalActiveApp = app
             }
         }
+
+        // Stop any active recording before the system sleeps so audio capture
+        // is not left open across a lid-close / sleep cycle.
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.recordingOrigin != nil else { return }
+            self.setStatus("Auto-stopping...")
+            self.stopRecordingAndTranscribe(reason: "System sleep")
+        }
+
+        // On wake, reset the hotkey gesture state machine so any partially
+        // recognised gesture (e.g. a hold that started before sleep) does not
+        // fire spuriously when the keyboard becomes active again.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.hotkeyGestureTimer?.invalidate()
+            self.hotkeyGestureTimer = nil
+            self.runtime.hotkeyStateMachine.reset()
+        }
     }
 
     private func stopObservingWorkspaceActivations() {
         if let workspaceActivationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
             self.workspaceActivationObserver = nil
+        }
+        if let sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver)
+            self.sleepObserver = nil
+        }
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
         }
     }
 
