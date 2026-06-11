@@ -136,6 +136,17 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("—"))
     }
 
+    func testBareTheArticleHallucinationIsTreatedAsNoSpeech() {
+        // "The" is whisper's classic short-clip hallucination on ambient noise
+        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("The"))
+        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("the."))
+        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript(" The "))
+    }
+
+    func testSentenceStartingWithTheIsNotFilteredAsNoSpeech() {
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("The quick brown fox"))
+    }
+
     func testTimeoutIsNotRetriedOnCPU() {
         // A timeout means the run was too slow, not that the GPU is broken. Re-running the same
         // long input on CPU is typically slower and can time out again (~2x the stall), so a

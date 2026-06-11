@@ -326,6 +326,10 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
             return true
         }
 
+        if wordOnly == "THE" {
+            return true
+        }
+
         let condensed = line
             .uppercased()
             .replacingOccurrences(of: " ", with: "")

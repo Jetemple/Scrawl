@@ -6,17 +6,31 @@ public struct AudioCaptureConfig: Sendable {
     public var channels: Int
     public var minimumDurationSeconds: Double
     public var silenceThresholdRMS: Double
+    /// Minimum total active-window duration (in seconds) required before sending audio to the
+    /// transcriber. Windows are `activeWindowSeconds` wide; a window is "active" when its RMS
+    /// exceeds `activeWindowRMS`. Raising this value reduces hallucinations on ambient noise at
+    /// the cost of clipping very quiet or whispery speech — tune `activeWindowRMS` downward if
+    /// that tradeoff is unacceptable for your use-case.
+    public var minimumActiveSeconds: Double
+    public var activeWindowSeconds: Double
+    public var activeWindowRMS: Double
 
     public init(
         sampleRate: Double = 16_000,
         channels: Int = 1,
         minimumDurationSeconds: Double = 0.18,
-        silenceThresholdRMS: Double = 0.001
+        silenceThresholdRMS: Double = 0.001,
+        minimumActiveSeconds: Double = 0.15,
+        activeWindowSeconds: Double = 0.03,
+        activeWindowRMS: Double = 0.0075
     ) {
         self.sampleRate = sampleRate
         self.channels = channels
         self.minimumDurationSeconds = minimumDurationSeconds
         self.silenceThresholdRMS = silenceThresholdRMS
+        self.minimumActiveSeconds = minimumActiveSeconds
+        self.activeWindowSeconds = activeWindowSeconds
+        self.activeWindowRMS = activeWindowRMS
     }
 }
 
@@ -129,6 +143,17 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             fileURL: outputURL,
             minimumRMS: config.silenceThresholdRMS
         )) == true {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw AudioCaptureError.audioLevelTooLow
+        }
+
+        let activeSeconds = (try? AudioLevelAnalyzer.activeAudioSeconds(
+            fileURL: outputURL,
+            sampleRate: config.sampleRate,
+            windowSeconds: config.activeWindowSeconds,
+            activeRMS: config.activeWindowRMS
+        )) ?? config.minimumActiveSeconds
+        if activeSeconds < config.minimumActiveSeconds {
             try? FileManager.default.removeItem(at: outputURL)
             throw AudioCaptureError.audioLevelTooLow
         }
