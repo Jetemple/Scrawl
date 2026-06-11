@@ -496,6 +496,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             Task { @MainActor in
                 self?.handleHotkeyCaptureEvent(event)
             }
+            // Return nil to consume the event so captured keypresses don't
+            // also type into the prefs window or trigger window actions.
+            // flagsChanged events are not consumed here — they represent
+            // modifier key state and returning nil for them causes issues
+            // with the event dispatch system.
+            if event.type == .keyDown {
+                return nil
+            }
             return event
         }
 

@@ -219,7 +219,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         save.target = self
         save.action = #selector(saveEditor(_:))
         window.beginSheet(panel)
-        window.makeFirstResponder(field)
+        panel.makeFirstResponder(field)
     }
 
     @objc private func cancelEditor(_ sender: NSButton) {
