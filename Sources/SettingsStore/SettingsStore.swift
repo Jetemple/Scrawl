@@ -52,6 +52,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var modelsDirectoryPath: String?
     public var isTranscriptHistoryEnabled: Bool
     public var modelOffloadPolicy: ModelOffloadPolicy
+    /// When `true`, transcripts are written to the pasteboard without the
+    /// `org.nspasteboard.TransientType` / `ConcealedType` markers so clipboard
+    /// managers (e.g. Raycast, Paste) can record them.  Defaults to `false`.
+    public var keepTranscriptsInClipboardHistory: Bool
 
     public init(
         defaultModelID: String = "ggml-small.en",
@@ -60,7 +64,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hotkey: HotkeySetting = HotkeySetting(),
         modelsDirectoryPath: String? = nil,
         isTranscriptHistoryEnabled: Bool = true,
-        modelOffloadPolicy: ModelOffloadPolicy = .fiveMinutes
+        modelOffloadPolicy: ModelOffloadPolicy = .fiveMinutes,
+        keepTranscriptsInClipboardHistory: Bool = false
     ) {
         self.defaultModelID = defaultModelID
         self.selectedModelID = selectedModelID
@@ -69,6 +74,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.modelsDirectoryPath = modelsDirectoryPath
         self.isTranscriptHistoryEnabled = isTranscriptHistoryEnabled
         self.modelOffloadPolicy = modelOffloadPolicy
+        self.keepTranscriptsInClipboardHistory = keepTranscriptsInClipboardHistory
     }
 
     public var modelID: String {
@@ -84,6 +90,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case modelsDirectoryPath
         case isTranscriptHistoryEnabled
         case modelOffloadPolicy
+        case keepTranscriptsInClipboardHistory
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,6 +102,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         modelsDirectoryPath = try container.decodeIfPresent(String.self, forKey: .modelsDirectoryPath)
         isTranscriptHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTranscriptHistoryEnabled) ?? true
         modelOffloadPolicy = try container.decodeIfPresent(ModelOffloadPolicy.self, forKey: .modelOffloadPolicy) ?? .fiveMinutes
+        keepTranscriptsInClipboardHistory = try container.decodeIfPresent(Bool.self, forKey: .keepTranscriptsInClipboardHistory) ?? false
 
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
             self.hotkey = hotkey
@@ -113,6 +121,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try container.encodeIfPresent(modelsDirectoryPath, forKey: .modelsDirectoryPath)
         try container.encode(isTranscriptHistoryEnabled, forKey: .isTranscriptHistoryEnabled)
         try container.encode(modelOffloadPolicy, forKey: .modelOffloadPolicy)
+        try container.encode(keepTranscriptsInClipboardHistory, forKey: .keepTranscriptsInClipboardHistory)
     }
 }
 

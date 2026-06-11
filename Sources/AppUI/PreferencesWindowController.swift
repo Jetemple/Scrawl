@@ -14,6 +14,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
         let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
+        let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
         let setTranscriptHistoryEnabled: (Bool) -> Void
         let copyTranscript: (UUID) -> Void
         let repasteTranscript: (UUID) -> Void
@@ -127,12 +128,14 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     var modelsSelectedRowHasAction: Bool { modelsView.visibleSelectedRowHasAction }
     var generalModelOffloadChoices: [String] { generalView.modelOffloadChoices }
     var generalSelectedModelOffloadPolicy: ModelOffloadPolicy? { generalView.selectedModelOffloadPolicy }
+    var generalIsClipboardHistoryEnabled: Bool { generalView.isClipboardHistoryEnabled }
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
             requestMicrophone: actions.requestMicrophone,
             requestAccessibility: actions.requestAccessibility,
-            setModelOffloadPolicy: actions.setModelOffloadPolicy
+            setModelOffloadPolicy: actions.setModelOffloadPolicy,
+            setKeepTranscriptsInClipboardHistory: actions.setKeepTranscriptsInClipboardHistory
         )
         modelsView = PreferencesModelsView(
             selectModel: actions.selectModel,

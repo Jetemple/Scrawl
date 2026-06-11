@@ -11,9 +11,11 @@ final class PreferencesGeneralView: NSView {
     private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
     private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
     private let offloadPopup = NSPopUpButton()
+    private let clipboardHistoryCheckbox = NSButton(checkboxWithTitle: "Keep transcripts in clipboard history", target: nil, action: nil)
     private let requestMicrophone: () -> Void
     private let requestAccessibility: () -> Void
     private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
+    private let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
 
     var modelOffloadChoices: [String] { offloadPopup.itemTitles }
     var selectedModelOffloadPolicy: ModelOffloadPolicy? {
@@ -24,11 +26,13 @@ final class PreferencesGeneralView: NSView {
     init(
         requestMicrophone: @escaping () -> Void,
         requestAccessibility: @escaping () -> Void,
-        setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void
+        setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void,
+        setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in }
     ) {
         self.requestMicrophone = requestMicrophone
         self.requestAccessibility = requestAccessibility
         self.setModelOffloadPolicy = setModelOffloadPolicy
+        self.setKeepTranscriptsInClipboardHistory = setKeepTranscriptsInClipboardHistory
         super.init(frame: .zero)
 
         PreferencesPageSupport.configureSecondaryButton(microphoneButton)
@@ -42,6 +46,19 @@ final class PreferencesGeneralView: NSView {
         offloadPopup.controlSize = .small
         offloadPopup.target = self
         offloadPopup.action = #selector(modelOffloadChanged(_:))
+
+        clipboardHistoryCheckbox.target = self
+        clipboardHistoryCheckbox.action = #selector(clipboardHistoryChanged(_:))
+        clipboardHistoryCheckbox.font = .systemFont(ofSize: 13)
+
+        let clipboardHistorySubtitle = NSTextField(labelWithString: "Allows clipboard managers to save your dictations")
+        clipboardHistorySubtitle.font = .systemFont(ofSize: 11)
+        clipboardHistorySubtitle.textColor = .secondaryLabelColor
+
+        let clipboardGroup = NSStackView(views: [clipboardHistoryCheckbox, clipboardHistorySubtitle])
+        clipboardGroup.orientation = .vertical
+        clipboardGroup.alignment = .leading
+        clipboardGroup.spacing = 3
 
         let page = PreferencesPageSupport.makePage(
             title: "General",
@@ -60,7 +77,8 @@ final class PreferencesGeneralView: NSView {
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
                     PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton)
-                ])
+                ]),
+                clipboardGroup
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
@@ -89,6 +107,7 @@ final class PreferencesGeneralView: NSView {
         microphoneButton.isHidden = microphoneStatus == .authorized
         accessibilityButton.isHidden = accessibilityStatus == .authorized
         offloadPopup.selectItem(at: ModelOffloadPolicy.allCases.firstIndex(of: settings.modelOffloadPolicy) ?? 0)
+        clipboardHistoryCheckbox.state = settings.keepTranscriptsInClipboardHistory ? .on : .off
     }
 
     func selectModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
@@ -110,10 +129,18 @@ final class PreferencesGeneralView: NSView {
         }
     }
 
+    var isClipboardHistoryEnabled: Bool {
+        clipboardHistoryCheckbox.state == .on
+    }
+
     @objc private func requestMicrophoneAccess(_ sender: NSButton) { requestMicrophone() }
     @objc private func requestAccessibilityAccess(_ sender: NSButton) { requestAccessibility() }
     @objc private func modelOffloadChanged(_ sender: NSPopUpButton) {
         guard sender.indexOfSelectedItem >= 0 else { return }
         setModelOffloadPolicy(ModelOffloadPolicy.allCases[sender.indexOfSelectedItem])
+    }
+
+    @objc private func clipboardHistoryChanged(_ sender: NSButton) {
+        setKeepTranscriptsInClipboardHistory(sender.state == .on)
     }
 }

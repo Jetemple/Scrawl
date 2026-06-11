@@ -169,7 +169,7 @@ private struct StubAudioCaptureService: AudioCaptureServing {
 }
 
 private struct StubTextOutputTarget: TextOutputTarget {
-    func output(_ text: String) async throws {}
+    func output(_ text: String, markPrivate: Bool) async throws {}
 }
 
 private struct StubTranscriptionProvider: TranscriptionProvider {

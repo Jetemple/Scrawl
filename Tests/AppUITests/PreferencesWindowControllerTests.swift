@@ -305,6 +305,29 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneralClipboardHistoryCheckboxReflectsSettingAndDispatchesAction() {
+        var capturedValue: Bool?
+        let controller = PreferencesWindowController(actions: makeActions(
+            setKeepTranscriptsInClipboardHistory: { capturedValue = $0 }
+        ))
+
+        // Defaults to false.
+        controller.update(snapshot: makeSnapshot())
+        XCTAssertFalse(controller.generalIsClipboardHistoryEnabled)
+
+        // Reflects true when setting is on.
+        controller.update(snapshot: makeSnapshot(keepTranscriptsInClipboardHistory: true))
+        XCTAssertTrue(controller.generalIsClipboardHistoryEnabled)
+
+        // Clicking dispatches the action.
+        let contentView = controller.window?.contentView
+        let checkbox = contentView?.button(titled: "Keep transcripts in clipboard history")
+        XCTAssertNotNil(checkbox)
+        checkbox?.performClick(nil)
+        XCTAssertNotNil(capturedValue)
+    }
+
+    @MainActor
     func testGeneralModelOffloadControlShowsChoicesAndDispatchesSelection() {
         var selectedPolicy: ModelOffloadPolicy?
         let controller = PreferencesWindowController(actions: makeActions(
@@ -474,12 +497,14 @@ final class PreferencesWindowControllerTests: XCTestCase {
         records: [TranscriptRecord] = [],
         dictionaryEntries: [DictionaryEntry] = [],
         modelRows: [PreferencesModelRow] = [],
-        downloadProgressText: String? = nil
+        downloadProgressText: String? = nil,
+        keepTranscriptsInClipboardHistory: Bool = false
     ) -> PreferencesWindowController.Snapshot {
         PreferencesWindowController.Snapshot(
             settings: AppSettings(
                 isTranscriptHistoryEnabled: isHistoryEnabled,
-                modelOffloadPolicy: modelOffloadPolicy
+                modelOffloadPolicy: modelOffloadPolicy,
+                keepTranscriptsInClipboardHistory: keepTranscriptsInClipboardHistory
             ),
             downloadableModels: [],
             modelRows: modelRows,
@@ -502,6 +527,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         openProjectPage: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
+        setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
         copyTranscript: @escaping (UUID) -> Void = { _ in },
         repasteTranscript: @escaping (UUID) -> Void = { _ in },
         deleteTranscripts: @escaping (Set<UUID>) -> Void = { _ in },
@@ -521,6 +547,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,
             setModelOffloadPolicy: setModelOffloadPolicy,
+            setKeepTranscriptsInClipboardHistory: setKeepTranscriptsInClipboardHistory,
             setTranscriptHistoryEnabled: setTranscriptHistoryEnabled,
             copyTranscript: copyTranscript,
             repasteTranscript: repasteTranscript,

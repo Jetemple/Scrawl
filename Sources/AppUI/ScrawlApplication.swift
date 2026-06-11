@@ -231,6 +231,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 setModelOffloadPolicy: { [weak self] policy in
                     self?.setModelOffloadPolicy(policy)
                 },
+                setKeepTranscriptsInClipboardHistory: { [weak self] keep in
+                    self?.mutateSettings { $0.keepTranscriptsInClipboardHistory = keep }
+                },
                 setTranscriptHistoryEnabled: { [weak self] enabled in
                     self?.setTranscriptHistoryEnabled(enabled)
                 },
@@ -1784,7 +1787,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         Self.restoreFocus(to: target)
         try? await Task.sleep(nanoseconds: 180_000_000)
         do {
-            try await runtime.textOutputTarget.output(text)
+            let keepInHistory = runtime.settingsStore.load().keepTranscriptsInClipboardHistory
+            try await runtime.textOutputTarget.output(text, markPrivate: !keepInHistory)
             return .pasted
         } catch TextOutputError.secureInputActive {
             setStatus("Secure field — transcript copied to clipboard")

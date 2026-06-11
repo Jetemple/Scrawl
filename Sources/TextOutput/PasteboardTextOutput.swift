@@ -13,7 +13,7 @@ public enum TextOutputError: Error {
 }
 
 public protocol TextOutputTarget: Sendable {
-    func output(_ text: String) async throws
+    func output(_ text: String, markPrivate: Bool) async throws
 }
 
 public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
@@ -23,7 +23,7 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
         self.pasteboard = pasteboard
     }
 
-    public func output(_ text: String) async throws {
+    public func output(_ text: String, markPrivate: Bool = true) async throws {
         guard AXIsProcessTrusted() else {
             throw TextOutputError.accessibilityPermissionRequired
         }
@@ -33,13 +33,15 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
             // input is active, and pasting spoken text into a password field would silently leak it.
             // Instead, leave the transcript on the clipboard (do NOT restore the previous contents) so
             // the user can paste it deliberately, and signal the caller to surface a message.
-            PasteboardTextOutput.writeTranscript(text, to: pasteboard)
+            // Always mark private in the secure-input path regardless of user preferences —
+            // a password-field context must never feed clipboard managers.
+            PasteboardTextOutput.writeTranscript(text, to: pasteboard, markPrivate: true)
             throw TextOutputError.secureInputActive
         }
 
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
 
-        PasteboardTextOutput.writeTranscript(text, to: pasteboard)
+        PasteboardTextOutput.writeTranscript(text, to: pasteboard, markPrivate: markPrivate)
         guard pasteboard.pasteboardItems?.first?.string(forType: .string) == text else {
             throw TextOutputError.failedToWritePasteboard
         }
@@ -58,12 +60,14 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
         snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: changeCountAfterWrite)
     }
 
-    static func writeTranscript(_ text: String, to pasteboard: NSPasteboard) {
+    static func writeTranscript(_ text: String, to pasteboard: NSPasteboard, markPrivate: Bool = true) {
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)
-        // De-facto standard markers so clipboard managers skip/conceal dictated text.
-        item.setData(Data(), forType: .init("org.nspasteboard.TransientType"))
-        item.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+        if markPrivate {
+            // De-facto standard markers so clipboard managers skip/conceal dictated text.
+            item.setData(Data(), forType: .init("org.nspasteboard.TransientType"))
+            item.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+        }
         pasteboard.clearContents()
         pasteboard.writeObjects([item])
     }
