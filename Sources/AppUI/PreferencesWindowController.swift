@@ -31,6 +31,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let accessibilityStatus: PermissionStatus
         let isCapturingHotkey: Bool
         let isModelDownloadInProgress: Bool
+        /// Non-nil while a download is active, e.g. "25% (412/1621 MB)".
+        let downloadProgressText: String?
         let transcriptHistory: [TranscriptRecord]
         let transcriptHistoryLoadErrorDescription: String?
         let dictionaryEntries: [DictionaryEntry]

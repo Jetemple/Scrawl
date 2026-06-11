@@ -142,7 +142,9 @@ final class PreferencesModelsView: NSView {
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let detail = displayParts.dropFirst().joined(separator: " — ")
-        let detailLabel = NSTextField(labelWithString: detail.isEmpty ? row.statusText : detail)
+        let baseDetailText = detail.isEmpty ? row.statusText : detail
+        let detailText = row.downloadProgressText.map { "\(baseDetailText) — \($0)" } ?? baseDetailText
+        let detailLabel = NSTextField(labelWithString: detailText)
         detailLabel.font = .systemFont(ofSize: 11)
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.lineBreakMode = .byTruncatingTail

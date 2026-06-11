@@ -105,6 +105,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var isModelDownloadInProgress = false
     private var downloadingModelID: String?
     private var cancelledModelID: String?
+    private var currentDownloadProgressText: String?
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
     private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
@@ -274,7 +275,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             installedModelIDs: installedModelIDs,
             selectedModelID: settings.modelID,
             downloadingModelID: downloadingModelID,
-            cancelledModelID: cancelledModelID
+            cancelledModelID: cancelledModelID,
+            downloadProgressText: currentDownloadProgressText
         )
 
         preferencesWindowController.update(
@@ -286,6 +288,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 accessibilityStatus: runtime.permissionManager.accessibilityStatus(),
                 isCapturingHotkey: isCapturingHotkey,
                 isModelDownloadInProgress: isModelDownloadInProgress,
+                downloadProgressText: currentDownloadProgressText,
                 transcriptHistory: runtime.transcriptHistoryStore.records(),
                 transcriptHistoryLoadErrorDescription: runtime.transcriptHistoryStore.loadErrorDescription,
                 dictionaryEntries: runtime.dictionaryStore.terms().map {
@@ -654,6 +657,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         isModelDownloadInProgress = false
         downloadingModelID = nil
         cancelledModelID = cancelledID
+        currentDownloadProgressText = nil
         refreshModelMenu()
         refreshPreferencesWindow()
         setStatus("Download cancelled")
@@ -671,6 +675,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         isModelDownloadInProgress = true
         downloadingModelID = model.id
         cancelledModelID = nil
+        currentDownloadProgressText = nil
         refreshModelMenu()
         refreshPreferencesWindow()
         setStatus("Downloading \(model.displayName)...")
@@ -680,7 +685,18 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             do {
                 _ = try await self.modelManager.download(model: model) { [weak self] receivedBytes, totalBytes in
                     guard let self else { return }
-                    self.setStatus(self.downloadProgressText(for: model, receivedBytes: receivedBytes, totalBytes: totalBytes))
+                    let newText = self.downloadProgressText(for: model, receivedBytes: receivedBytes, totalBytes: totalBytes)
+                    self.setStatus(newText)
+                    // Only rebuild the Models page when the rendered progress string
+                    // changes — the callback fires on every URLSession data chunk,
+                    // which is far more often than the text visually changes.
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        let progressLabel = self.formatProgressLabel(receivedBytes: receivedBytes, totalBytes: totalBytes)
+                        guard progressLabel != self.currentDownloadProgressText else { return }
+                        self.currentDownloadProgressText = progressLabel
+                        self.refreshPreferencesWindow()
+                    }
                 }
                 await MainActor.run {
                     self.mutateSettings {
@@ -715,6 +731,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 guard self.downloadingModelID == model.id else { return }
                 self.isModelDownloadInProgress = false
                 self.downloadingModelID = nil
+                self.currentDownloadProgressText = nil
                 self.refreshModelMenu()
                 self.refreshPreferencesWindow()
             }
@@ -733,6 +750,18 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
         let percent = Int((ratio * 100).rounded())
         return "Downloading \(modelName): \(percent)% (\(receivedMB)/\(totalMB) MB)"
+    }
+
+    /// Compact progress string shown inline in the Models page row, e.g. "25% (412/1621 MB)".
+    private func formatProgressLabel(receivedBytes: Int64, totalBytes: Int64?) -> String {
+        let receivedMB = formatMegabytes(receivedBytes)
+        guard let totalBytes, totalBytes > 0 else {
+            return "\(receivedMB) MB"
+        }
+        let totalMB = formatMegabytes(totalBytes)
+        let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
+        let percent = Int((ratio * 100).rounded())
+        return "\(percent)% (\(receivedMB)/\(totalMB) MB)"
     }
 
     private func formatMegabytes(_ bytes: Int64) -> String {

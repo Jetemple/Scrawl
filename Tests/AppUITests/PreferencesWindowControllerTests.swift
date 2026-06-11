@@ -64,7 +64,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
                 isInstalled: true,
                 isSelected: false,
                 isDownloading: false,
-                isCancelled: false
+                isCancelled: false,
+                downloadProgressText: nil
             ),
             PreferencesModelRow(
                 id: "large-v3-turbo",
@@ -72,7 +73,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
                 isInstalled: true,
                 isSelected: true,
                 isDownloading: false,
-                isCancelled: false
+                isCancelled: false,
+                downloadProgressText: nil
             )
         ]))
         controller.selectSection(.models)
@@ -81,6 +83,18 @@ final class PreferencesWindowControllerTests: XCTestCase {
         XCTAssertTrue(controller.modelsListIsTopAnchored)
         XCTAssertEqual(controller.modelsTwoLineRowCount, 2)
         XCTAssertFalse(controller.modelsSelectedRowHasAction)
+    }
+
+    @MainActor
+    func testSnapshotCarriesDownloadProgressText() {
+        let snapshot = makeSnapshot(downloadProgressText: "42% (630/1500 MB)")
+        XCTAssertEqual(snapshot.downloadProgressText, "42% (630/1500 MB)")
+    }
+
+    @MainActor
+    func testSnapshotDownloadProgressTextDefaultsToNil() {
+        let snapshot = makeSnapshot()
+        XCTAssertNil(snapshot.downloadProgressText)
     }
 
     @MainActor
@@ -459,7 +473,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
         historyLoadErrorDescription: String? = nil,
         records: [TranscriptRecord] = [],
         dictionaryEntries: [DictionaryEntry] = [],
-        modelRows: [PreferencesModelRow] = []
+        modelRows: [PreferencesModelRow] = [],
+        downloadProgressText: String? = nil
     ) -> PreferencesWindowController.Snapshot {
         PreferencesWindowController.Snapshot(
             settings: AppSettings(
@@ -472,6 +487,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             accessibilityStatus: .notDetermined,
             isCapturingHotkey: false,
             isModelDownloadInProgress: false,
+            downloadProgressText: downloadProgressText,
             transcriptHistory: records,
             transcriptHistoryLoadErrorDescription: historyLoadErrorDescription,
             dictionaryEntries: dictionaryEntries

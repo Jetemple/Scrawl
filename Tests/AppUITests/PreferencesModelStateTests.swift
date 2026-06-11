@@ -99,7 +99,8 @@ final class PreferencesModelStateTests: XCTestCase {
             isInstalled: false,
             isSelected: false,
             isDownloading: false,
-            isCancelled: false
+            isCancelled: false,
+            downloadProgressText: nil
         )
 
         XCTAssertEqual(row.statusText, "Available")
@@ -151,6 +152,56 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertNotNil(mediumRow, "ggml-medium row must be present")
         XCTAssertFalse(mediumRow!.isInstalled, "ggml-medium must not be considered installed when only ggml-medium.en is present")
         XCTAssertTrue(mediumRow!.canDownload, "ggml-medium must remain downloadable")
+    }
+
+    func testDownloadProgressTextAppearsOnlyOnDownloadingRow() {
+        let rows = PreferencesModelState.rows(
+            downloadableModels: [
+                DownloadableModel(
+                    id: "ggml-small.en",
+                    fileName: "ggml-small.en.bin",
+                    displayName: "small.en - recommended, 466 MB",
+                    url: URL(string: "https://example.com/small.bin")!,
+                    sha256: "dummy-sha256-for-tests"
+                ),
+                DownloadableModel(
+                    id: "ggml-medium",
+                    fileName: "ggml-medium.bin",
+                    displayName: "medium - multilingual, 1.5 GB",
+                    url: URL(string: "https://example.com/medium.bin")!,
+                    sha256: "dummy-sha256-for-tests"
+                )
+            ],
+            installedModelIDs: ["ggml-small.en"],
+            selectedModelID: "ggml-small.en",
+            downloadingModelID: "ggml-medium",
+            downloadProgressText: "38% (576/1500 MB)"
+        )
+
+        // The installed row should have no progress text.
+        XCTAssertNil(rows[0].downloadProgressText)
+        // The downloading row should carry the progress string.
+        XCTAssertEqual(rows[1].downloadProgressText, "38% (576/1500 MB)")
+    }
+
+    func testDownloadProgressTextIsNilWhenNoDownloadIsActive() {
+        let rows = PreferencesModelState.rows(
+            downloadableModels: [
+                DownloadableModel(
+                    id: "ggml-small.en",
+                    fileName: "ggml-small.en.bin",
+                    displayName: "small.en - recommended, 466 MB",
+                    url: URL(string: "https://example.com/small.bin")!,
+                    sha256: "dummy-sha256-for-tests"
+                )
+            ],
+            installedModelIDs: ["ggml-small.en"],
+            selectedModelID: "ggml-small.en",
+            downloadingModelID: nil,
+            downloadProgressText: "38% (576/1500 MB)"
+        )
+        // No model is downloading, so the progress text should not appear on any row.
+        XCTAssertNil(rows[0].downloadProgressText)
     }
 
     // Regression: installed ggml-medium must NOT satisfy the downloadable ggml-medium.en.

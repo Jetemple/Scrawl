@@ -7,6 +7,8 @@ struct PreferencesModelRow: Equatable, Sendable {
     let isSelected: Bool
     let isDownloading: Bool
     let isCancelled: Bool
+    /// Non-nil only while this row's model is being downloaded, e.g. "25% (412/1621 MB)".
+    let downloadProgressText: String?
 
     var canDownload: Bool {
         !isInstalled && !isDownloading
@@ -38,7 +40,8 @@ enum PreferencesModelState {
         installedModelIDs: [String],
         selectedModelID: String,
         downloadingModelID: String?,
-        cancelledModelID: String? = nil
+        cancelledModelID: String? = nil,
+        downloadProgressText: String? = nil
     ) -> [PreferencesModelRow] {
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
@@ -57,13 +60,15 @@ enum PreferencesModelState {
             let rowModelID = installedModelID ?? model.id
             let isInstalled = installedModelID != nil
             let isCancelled = (rowModelID == cancelledModelID || model.id == cancelledModelID)
+            let isDownloading = rowModelID == downloadingModelID || model.id == downloadingModelID
             return PreferencesModelRow(
                 id: rowModelID,
                 displayName: model.displayName,
                 isInstalled: isInstalled,
                 isSelected: rowModelID == selectedModelID || model.id == selectedModelID,
-                isDownloading: rowModelID == downloadingModelID || model.id == downloadingModelID,
-                isCancelled: isCancelled
+                isDownloading: isDownloading,
+                isCancelled: isCancelled,
+                downloadProgressText: isDownloading ? downloadProgressText : nil
             )
         }
 
@@ -71,13 +76,15 @@ enum PreferencesModelState {
             .filter { !downloadableIDs.contains($0) && !downloadableFamilies.contains(canonicalFamily($0)) }
             .sorted()
             .map { modelID in
-                PreferencesModelRow(
+                let isDownloading = modelID == downloadingModelID
+                return PreferencesModelRow(
                     id: modelID,
                     displayName: displayName(forInstalledModelID: modelID),
                     isInstalled: true,
                     isSelected: modelID == selectedModelID,
-                    isDownloading: modelID == downloadingModelID,
-                    isCancelled: false
+                    isDownloading: isDownloading,
+                    isCancelled: false,
+                    downloadProgressText: isDownloading ? downloadProgressText : nil
                 )
             }
 
