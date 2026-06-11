@@ -88,16 +88,16 @@ enum PreferencesModelState {
         modelID.replacingOccurrences(of: "ggml-", with: "")
     }
 
-    private static func canonicalFamily(_ raw: String) -> String {
+    /// Strips the `ggml-` prefix and `.bin` extension so that files stored with
+    /// or without those decorations compare equal.  The `.en` suffix is intentionally
+    /// preserved: `ggml-medium.en` and `ggml-medium` are distinct model families.
+    static func canonicalFamily(_ raw: String) -> String {
         var value = raw.lowercased()
         if value.hasSuffix(".bin") {
             value = String(value.dropLast(4))
         }
         if value.hasPrefix("ggml-") {
             value = String(value.dropFirst(5))
-        }
-        if value.hasSuffix(".en") {
-            value = String(value.dropLast(3))
         }
         return value
     }

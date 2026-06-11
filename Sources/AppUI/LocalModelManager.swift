@@ -145,17 +145,7 @@ final class LocalModelManager: @unchecked Sendable {
     }
 
     private func canonicalFamily(from raw: String) -> String {
-        var value = raw.lowercased()
-        if value.hasSuffix(".bin") {
-            value = String(value.dropLast(4))
-        }
-        if value.hasPrefix("ggml-") {
-            value = String(value.dropFirst(5))
-        }
-        if value.hasSuffix(".en") {
-            value = String(value.dropLast(3))
-        }
-        return value
+        PreferencesModelState.canonicalFamily(raw)
     }
 
     private func downloadFromURL(_ sourceURL: URL, modelID: String, onProgress: ProgressHandler?) async throws -> URL {
