@@ -589,15 +589,55 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     @objc private func deleteSelectedModel(_ sender: Any?) {
         let selected = runtime.settingsStore.load().selectedModelID
 
+        guard modelManager.modelExists(id: selected) else {
+            setStatus("No installed model to delete")
+            return
+        }
+
+        // Build confirmation alert matching existing NSAlert style in this file.
+        let displayName = LocalModelManager.downloadableModels
+            .first(where: { $0.id == selected })?.displayName
+            ?? selected.replacingOccurrences(of: "ggml-", with: "")
+
+        let modelURL = modelManager.modelURL(id: selected)
+        var sizeNote = ""
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
+           let bytes = attrs[.size] as? Int64, bytes > 0 {
+            let mb = Double(bytes) / (1024 * 1024)
+            sizeNote = " (\(String(format: "%.0f", mb)) MB)"
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete \"\(displayName)\"?"
+        alert.informativeText = "This removes the model file\(sizeNote) from your Mac. You can re-download it later."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
         do {
             try modelManager.deleteModel(id: selected)
             let installed = modelManager.installedModelIDs()
-            mutateSettings { settings in
-                if let fallback = installed.first {
+            if let fallback = installed.first {
+                mutateSettings { settings in
                     settings.selectedModelID = fallback
                 }
+                setStatus("Deleted model: \(selected)")
+            } else {
+                // No models remain — clear the dangling selection so the menu
+                // shows a truthful "no model" state and transcription prereq
+                // checks prompt the user to download.
+                mutateSettings { settings in
+                    settings.selectedModelID = ""
+                }
+                setStatus("No model installed — download one in Settings → Models")
+                runtime.overlayController.showTransientMessage(
+                    "No model installed — download one in Settings → Models"
+                )
             }
-            setStatus("Deleted model: \(selected)")
         } catch {
             setStatus("Delete failed: \(describe(error))")
         }
