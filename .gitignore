@@ -1,8 +1,15 @@
 .build/
 .swiftpm/
+coverage.lcov
+*.lcov
 DerivedData/
 .DS_Store
 benchmarks/
 *.bench.csv
 .worktrees/
 .superpowers/
+.local/
+docs/PLAN.md
+docs/TODO.md
+docs/SESSION_PROGRESS.md
+docs/superpowers/

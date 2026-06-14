@@ -8,6 +8,25 @@ import TextOutput
 import TranscriptHistoryStore
 import TranscriptionCore
 
+/// Pure decision for how to guide the user toward granting Accessibility, given the
+/// current authorization state and whether the macOS system prompt has already been
+/// shown this session. Side-effect-free so it is unit-testable.
+///
+/// The macOS prompt (shown by `AXIsProcessTrustedWithOptions(prompt:)`) already includes
+/// an "Open System Settings" button and only appears once per TCC record, so the first
+/// request must show the prompt *only* — opening Settings as well pops the notification
+/// AND the Settings page at once. Settings is the fallback for a later, still-denied retry.
+enum AccessibilityPromptDecision: Equatable {
+    case alreadyAuthorized
+    case showSystemPrompt
+    case openSettings
+
+    static func decide(isAuthorized: Bool, hasShownSystemPrompt: Bool) -> AccessibilityPromptDecision {
+        if isAuthorized { return .alreadyAuthorized }
+        return hasShownSystemPrompt ? .openSettings : .showSystemPrompt
+    }
+}
+
 public final class ScrawlApplication {
     public init() {}
 
@@ -91,6 +110,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var lastExternalActiveApp: NSRunningApplication?
 
     private var workspaceActivationObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
     private var hotkeyMonitor: HotkeyMonitor?
     private var hotkeyGestureTimer: Timer?
 
@@ -102,6 +123,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private var isModelDownloadInProgress = false
     private var downloadingModelID: String?
+    private var cancelledModelID: String?
+    private var currentDownloadProgressText: String?
+    private var modelDownloadGeneration: UUID?
+    private var modelDownloadTask: Task<Void, Never>?
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
     private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
@@ -118,6 +143,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let tempDir = FileManager.default.temporaryDirectory
+        DispatchQueue.global(qos: .utility).async {
+            TempFileSweeper.sweep(directory: tempDir)
+        }
+
         setupStatusItem()
         observeWorkspaceActivations()
         cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
@@ -175,7 +205,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @objc private func requestAccessibilityPermission(_ sender: Any?) {
-        promptForAccessibilityPermission(force: true)
+        promptForAccessibilityPermission()
     }
 
     @objc private func toggleHotkeyCapture(_ sender: Any?) {
@@ -207,6 +237,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 deleteSelectedModel: { [weak self] in
                     self?.deleteSelectedModel(nil)
                 },
+                cancelDownload: { [weak self] in
+                    self?.cancelModelDownload()
+                },
                 setHotkey: { [weak self] in
                     self?.toggleHotkeyCapture(nil)
                 },
@@ -218,6 +251,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 },
                 setModelOffloadPolicy: { [weak self] policy in
                     self?.setModelOffloadPolicy(policy)
+                },
+                setKeepTranscriptsInClipboardHistory: { [weak self] keep in
+                    self?.mutateSettings { $0.keepTranscriptsInClipboardHistory = keep }
                 },
                 setTranscriptHistoryEnabled: { [weak self] enabled in
                     self?.setTranscriptHistoryEnabled(enabled)
@@ -242,6 +278,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 deleteDictionaryEntries: { [weak self] wrongValues, completion in
                     self?.deleteDictionaryEntries(wrongValues: wrongValues, completion: completion)
                 },
+                recoverDictionary: { [weak self] completion in
+                    self?.recoverDictionary(completion: completion)
+                },
                 openProjectPage: {
                     guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
                     NSWorkspace.shared.open(url)
@@ -262,7 +301,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             downloadableModels: downloadableModels,
             installedModelIDs: installedModelIDs,
             selectedModelID: settings.modelID,
-            downloadingModelID: downloadingModelID
+            downloadingModelID: downloadingModelID,
+            cancelledModelID: cancelledModelID,
+            downloadProgressText: currentDownloadProgressText
         )
 
         preferencesWindowController.update(
@@ -274,11 +315,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 accessibilityStatus: runtime.permissionManager.accessibilityStatus(),
                 isCapturingHotkey: isCapturingHotkey,
                 isModelDownloadInProgress: isModelDownloadInProgress,
+                downloadProgressText: currentDownloadProgressText,
                 transcriptHistory: runtime.transcriptHistoryStore.records(),
                 transcriptHistoryLoadErrorDescription: runtime.transcriptHistoryStore.loadErrorDescription,
                 dictionaryEntries: runtime.dictionaryStore.terms().map {
                     DictionaryEntry(wrong: $0.value, correct: $0.value)
-                }
+                },
+                dictionaryLoadErrorDescription: runtime.dictionaryStore.loadErrorDescription
             )
         )
     }
@@ -316,9 +359,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func setModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
-        var settings = runtime.settingsStore.load()
-        settings.modelOffloadPolicy = policy
-        saveSettings(settings)
+        mutateSettings { $0.modelOffloadPolicy = policy }
     }
 
     private func copyTranscript(id: UUID) {
@@ -405,6 +446,30 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
+    private func recoverDictionary(completion: @escaping (Result<Void, Error>) -> Void) {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Reset Vocabulary?"
+        alert.informativeText = "The unreadable vocabulary file will be preserved as a backup before Scrawl creates an empty vocabulary."
+        alert.addButton(withTitle: "Reset Vocabulary")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            completion(.success(()))
+            return
+        }
+
+        let store = runtime.dictionaryStore
+        dictionaryActionQueue.async { [weak self] in
+            let result = Result { try store.clear() }
+            DispatchQueue.main.async {
+                if case .success = result {
+                    self?.refreshPreferencesWindow()
+                }
+                completion(result)
+            }
+        }
+    }
+
     @MainActor
     private func handleHistoryActionCompletion(
         action: UInt64,
@@ -462,6 +527,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
+        // Refuse if a recording is active.  stopRecordingAndTranscribe is
+        // synchronous only up to the audio-stop; the transcription itself runs
+        // in an async Task that will call setState(.idle) when it finishes —
+        // which would race with and clobber the hotkeyCapture overlay state.
+        // Refusing is the safe choice: it preserves the in-flight recording and
+        // gives the user a clear message rather than silently breaking the UI.
+        if recordingOrigin != nil {
+            runtime.overlayController.showTransientMessage("Stop recording before changing the hotkey")
+            return
+        }
+
         teardownHotkeyHandling()
         isCapturingHotkey = true
         activeOperationGeneration.beginActiveOperation()
@@ -481,6 +557,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         hotkeyCaptureLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
             Task { @MainActor in
                 self?.handleHotkeyCaptureEvent(event)
+            }
+            // Return nil to consume the event so captured keypresses don't
+            // also type into the prefs window or trigger window actions.
+            // flagsChanged events are not consumed here — they represent
+            // modifier key state and returning nil for them causes issues
+            // with the event dispatch system.
+            if event.type == .keyDown {
+                return nil
             }
             return event
         }
@@ -543,12 +627,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func selectModel(id modelID: String) {
-        var settings = runtime.settingsStore.load()
-        settings.selectedModelID = modelID
-        if settings.defaultModelID.isEmpty {
-            settings.defaultModelID = modelID
+        mutateSettings {
+            $0.selectedModelID = modelID
+            if $0.defaultModelID.isEmpty {
+                $0.defaultModelID = modelID
+            }
         }
-        saveSettings(settings)
         setStatus("Selected model: \(modelID)")
     }
 
@@ -563,21 +647,81 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @objc private func deleteSelectedModel(_ sender: Any?) {
-        let settings = runtime.settingsStore.load()
-        let selected = settings.selectedModelID
+        let selected = runtime.settingsStore.load().selectedModelID
+
+        guard modelManager.modelExists(id: selected) else {
+            setStatus("No installed model to delete")
+            return
+        }
+
+        // Build confirmation alert matching existing NSAlert style in this file.
+        let displayName = LocalModelManager.downloadableModels
+            .first(where: { $0.id == selected })?.displayName
+            ?? selected.replacingOccurrences(of: "ggml-", with: "")
+
+        let modelURL = modelManager.modelURL(id: selected)
+        var sizeNote = ""
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
+           let bytes = attrs[.size] as? Int64, bytes > 0 {
+            let mb = Double(bytes) / (1024 * 1024)
+            sizeNote = " (\(String(format: "%.0f", mb)) MB)"
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Delete \"\(displayName)\"?"
+        alert.informativeText = "This removes the model file\(sizeNote) from your Mac. You can re-download it later."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
 
         do {
             try modelManager.deleteModel(id: selected)
-            var updated = settings
             let installed = modelManager.installedModelIDs()
             if let fallback = installed.first {
-                updated.selectedModelID = fallback
+                mutateSettings { settings in
+                    settings.selectedModelID = fallback
+                }
+                setStatus("Deleted model: \(selected)")
+            } else {
+                // No models remain — clear the dangling selection so the menu
+                // shows a truthful "no model" state and transcription prereq
+                // checks prompt the user to download.
+                mutateSettings { settings in
+                    settings.selectedModelID = ""
+                }
+                setStatus("No model installed — download one in Settings → Models")
+                runtime.overlayController.showTransientMessage(
+                    "No model installed — download one in Settings → Models"
+                )
             }
-            saveSettings(updated)
-            setStatus("Deleted model: \(selected)")
         } catch {
             setStatus("Delete failed: \(describe(error))")
         }
+    }
+
+    private func cancelModelDownload() {
+        // `isModelDownloadInProgress` is the UI's source of truth: it flips true
+        // synchronously when the user starts a download — before the async Task registers
+        // the operation inside LocalModelManager. Tearing down on this flag (rather than on
+        // the manager's return value) guarantees a cancel during that window, or as the
+        // download finishes, still resets the UI instead of leaving it stuck on "Downloading".
+        guard isModelDownloadInProgress else { return }
+        _ = modelManager.cancelDownload()
+        let cancelledID = downloadingModelID
+        modelDownloadGeneration = nil
+        modelDownloadTask?.cancel()
+        modelDownloadTask = nil
+        isModelDownloadInProgress = false
+        downloadingModelID = nil
+        cancelledModelID = cancelledID
+        currentDownloadProgressText = nil
+        refreshModelMenu()
+        refreshPreferencesWindow()
+        setStatus("Download cancelled")
     }
 
     private func startModelDownload(_ model: DownloadableModel) {
@@ -591,29 +735,52 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         isModelDownloadInProgress = true
         downloadingModelID = model.id
+        cancelledModelID = nil
+        currentDownloadProgressText = nil
+        let downloadGeneration = UUID()
+        modelDownloadGeneration = downloadGeneration
         refreshModelMenu()
         refreshPreferencesWindow()
         setStatus("Downloading \(model.displayName)...")
 
-        Task { [weak self] in
+        modelDownloadTask = Task { [weak self] in
             guard let self else { return }
             do {
                 _ = try await self.modelManager.download(model: model) { [weak self] receivedBytes, totalBytes in
                     guard let self else { return }
-                    self.setStatus(self.downloadProgressText(for: model, receivedBytes: receivedBytes, totalBytes: totalBytes))
+                    Task { @MainActor [weak self] in
+                        guard let self, self.modelDownloadGeneration == downloadGeneration else { return }
+                        let newText = self.downloadProgressText(
+                            for: model,
+                            receivedBytes: receivedBytes,
+                            totalBytes: totalBytes
+                        )
+                        self.setStatus(newText)
+                        // Only rebuild the Models page when the rendered progress string
+                        // changes — the callback fires on every URLSession data chunk,
+                        // which is far more often than the text visually changes.
+                        let progressLabel = self.formatProgressLabel(receivedBytes: receivedBytes, totalBytes: totalBytes)
+                        guard progressLabel != self.currentDownloadProgressText else { return }
+                        self.currentDownloadProgressText = progressLabel
+                        self.refreshPreferencesWindow()
+                    }
                 }
-                var workingSettings = self.runtime.settingsStore.load()
-                workingSettings.selectedModelID = model.id
-                if workingSettings.defaultModelID.isEmpty {
-                    workingSettings.defaultModelID = model.id
-                }
-                let updatedSettings = workingSettings
                 await MainActor.run {
-                    self.saveSettings(updatedSettings)
+                    guard self.modelDownloadGeneration == downloadGeneration else { return }
+                    self.mutateSettings {
+                        $0.selectedModelID = model.id
+                        if $0.defaultModelID.isEmpty {
+                            $0.defaultModelID = model.id
+                        }
+                    }
                     self.setStatus("Downloaded \(model.id)")
                 }
             } catch {
                 await MainActor.run {
+                    guard self.modelDownloadGeneration == downloadGeneration else { return }
+                    // User-initiated cancel: the quiet "Download cancelled" status
+                    // set by cancelModelDownload() is the only user-visible surface.
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                     let details = self.describe(error)
                     self.setStatus("Download failed")
                     _ = self.presentAlert(
@@ -627,8 +794,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 }
             }
             await MainActor.run {
+                guard self.modelDownloadGeneration == downloadGeneration else { return }
+                self.modelDownloadGeneration = nil
+                self.modelDownloadTask = nil
                 self.isModelDownloadInProgress = false
                 self.downloadingModelID = nil
+                self.currentDownloadProgressText = nil
                 self.refreshModelMenu()
                 self.refreshPreferencesWindow()
             }
@@ -647,6 +818,18 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
         let percent = Int((ratio * 100).rounded())
         return "Downloading \(modelName): \(percent)% (\(receivedMB)/\(totalMB) MB)"
+    }
+
+    /// Compact progress string shown inline in the Models page row, e.g. "25% (412/1621 MB)".
+    private func formatProgressLabel(receivedBytes: Int64, totalBytes: Int64?) -> String {
+        let receivedMB = formatMegabytes(receivedBytes)
+        guard let totalBytes, totalBytes > 0 else {
+            return "\(receivedMB) MB"
+        }
+        let totalMB = formatMegabytes(totalBytes)
+        let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
+        let percent = Int((ratio * 100).rounded())
+        return "\(percent)% (\(receivedMB)/\(totalMB) MB)"
     }
 
     private func formatMegabytes(_ bytes: Int64) -> String {
@@ -674,9 +857,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let installed = modelManager.installedModelIDs()
         if let fallback = installed.first {
-            var updated = settings
-            updated.selectedModelID = fallback
-            saveSettings(updated)
+            mutateSettings { $0.selectedModelID = fallback }
             return true
         }
 
@@ -730,36 +911,40 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         )
     }
 
-    private func promptForAccessibilityPermission(force: Bool) {
-        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
-        if cachedAccessibilityAuthorized {
+    private func promptForAccessibilityPermission() {
+        let isAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        cachedAccessibilityAuthorized = isAuthorized
+
+        switch AccessibilityPromptDecision.decide(
+            isAuthorized: isAuthorized,
+            hasShownSystemPrompt: hasPromptedAccessibilityForHotkeyAttempt
+        ) {
+        case .alreadyAuthorized:
             hasPromptedAccessibilityForHotkeyAttempt = false
             updatePermissionRows()
             teardownHotkeyHandling()
             setupHotkeyHandling()
             setStatus("Hotkey ready")
-            return
-        }
 
-        if hasPromptedAccessibilityForHotkeyAttempt && !force {
-            openAccessibilitySettings()
-            runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
-            setStatus("Enable Accessibility in System Settings")
-            return
-        }
+        case .showSystemPrompt:
+            hasPromptedAccessibilityForHotkeyAttempt = true
+            // The macOS prompt already includes an "Open System Settings" button, so we
+            // must NOT also open Settings — doing both pops the notification AND the
+            // Settings page at once. Settings is reserved for a later still-denied retry.
+            _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
+            cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+            updatePermissionRows()
+            if cachedAccessibilityAuthorized {
+                hasPromptedAccessibilityForHotkeyAttempt = false
+                teardownHotkeyHandling()
+                setupHotkeyHandling()
+                setStatus("Hotkey ready")
+            } else {
+                runtime.overlayController.showTransientMessage("Allow Accessibility for Scrawl, then try again")
+                setStatus("Waiting for Accessibility permission")
+            }
 
-        hasPromptedAccessibilityForHotkeyAttempt = true
-
-        _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
-        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
-        updatePermissionRows()
-
-        if cachedAccessibilityAuthorized {
-            hasPromptedAccessibilityForHotkeyAttempt = false
-            teardownHotkeyHandling()
-            setupHotkeyHandling()
-            setStatus("Hotkey ready")
-        } else {
+        case .openSettings:
             openAccessibilitySettings()
             runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
             setStatus("Enable Accessibility in System Settings")
@@ -826,28 +1011,37 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func applyRecommendedModelDefaultsIfNeeded() {
         let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
-        var settings = runtime.settingsStore.load()
-        var changed = false
+        let recommendedID = runtime.recommendedDefaultModelID
 
-        if !hasStoredSettings {
-            settings.defaultModelID = runtime.recommendedDefaultModelID
-            settings.selectedModelID = runtime.recommendedDefaultModelID
-            changed = true
-        }
+        // Pre-check: skip the write entirely when nothing needs changing.
+        // (There is a tiny TOCTOU between this read and the mutate below, but at startup
+        // with no concurrent writers that is acceptable.)
+        let current = runtime.settingsStore.load()
+        let needsChange = !hasStoredSettings
+            || current.defaultModelID.isEmpty || current.defaultModelID == "ggml-small"
+            || current.selectedModelID.isEmpty || current.selectedModelID == "ggml-small"
+        guard needsChange else { return }
 
-        if settings.defaultModelID.isEmpty || settings.defaultModelID == "ggml-small" {
-            settings.defaultModelID = runtime.recommendedDefaultModelID
-            changed = true
+        do {
+            try runtime.settingsStore.mutate { settings in
+                if !hasStoredSettings {
+                    settings.defaultModelID = recommendedID
+                    settings.selectedModelID = recommendedID
+                }
+                if settings.defaultModelID.isEmpty || settings.defaultModelID == "ggml-small" {
+                    settings.defaultModelID = recommendedID
+                }
+                if settings.selectedModelID.isEmpty || settings.selectedModelID == "ggml-small" {
+                    settings.selectedModelID = settings.defaultModelID
+                }
+            }
+        } catch {
+            setStatus("Settings error: \(describe(error))")
+            return
         }
-
-        if settings.selectedModelID.isEmpty || settings.selectedModelID == "ggml-small" {
-            settings.selectedModelID = settings.defaultModelID
-            changed = true
-        }
-
-        if changed {
-            saveSettings(settings)
-        }
+        refreshSettingsRows()
+        refreshModelMenu()
+        refreshPreferencesWindow()
     }
 
     private func presentNoSpeechDetectedAlert() {
@@ -1121,7 +1315,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         if runtime.permissionManager.accessibilityStatus() != .authorized {
-            promptForAccessibilityPermission(force: false)
+            promptForAccessibilityPermission()
             return
         }
 
@@ -1240,12 +1434,46 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 self.lastExternalActiveApp = app
             }
         }
+
+        // Stop any active recording before the system sleeps so audio capture
+        // is not left open across a lid-close / sleep cycle.
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.recordingOrigin != nil else { return }
+            self.setStatus("Auto-stopping...")
+            self.stopRecordingAndTranscribe(reason: "System sleep")
+        }
+
+        // On wake, reset the hotkey gesture state machine so any partially
+        // recognised gesture (e.g. a hold that started before sleep) does not
+        // fire spuriously when the keyboard becomes active again.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.hotkeyGestureTimer?.invalidate()
+            self.hotkeyGestureTimer = nil
+            self.runtime.hotkeyStateMachine.reset()
+        }
     }
 
     private func stopObservingWorkspaceActivations() {
         if let workspaceActivationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(workspaceActivationObserver)
             self.workspaceActivationObserver = nil
+        }
+        if let sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver)
+            self.sleepObserver = nil
+        }
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+            self.wakeObserver = nil
         }
     }
 
@@ -1280,6 +1508,18 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 cancelHotkeyCapture(status: "Hotkey capture cancelled")
                 return nil
             }
+
+            // Reject keys that would type visible text (printable characters,
+            // arrow keys) — they cannot be used safely as hotkeys because the
+            // global monitor cannot swallow keystrokes.
+            if !HotkeyCaptureFilter.isAccepted(keyCode: event.keyCode, characters: event.characters) {
+                runtime.overlayController.showTransientMessage(
+                    "That key types text — choose a modifier, Fn, or a function key."
+                )
+                // Keep capture active so the user can try another key.
+                return nil
+            }
+
             let label = (event.charactersIgnoringModifiers ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let display = label.isEmpty ? "KeyCode \(event.keyCode)" : label.uppercased()
@@ -1294,9 +1534,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func applyHotkey(_ hotkey: HotkeySetting) {
-        var settings = runtime.settingsStore.load()
-        settings.hotkey = hotkey
-        saveSettings(settings)
+        mutateSettings { $0.hotkey = hotkey }
         // The hotkey changed, so rebuild the monitors to listen for the new key. This is also the
         // path that re-arms hotkey handling after a capture session (which tore it down).
         teardownHotkeyHandling()
@@ -1307,9 +1545,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func cancelHotkeyCapture(status: String) {
         setStatus(status)
-        runtime.overlayController.showTransientMessage(status)
         stopHotkeyCapture()
         setupHotkeyHandling()
+        runtime.overlayController.showTransientMessage(status)
     }
 
     private func stopHotkeyCapture() {
@@ -1618,7 +1856,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         Self.restoreFocus(to: target)
         try? await Task.sleep(nanoseconds: 180_000_000)
         do {
-            try await runtime.textOutputTarget.output(text)
+            let keepInHistory = runtime.settingsStore.load().keepTranscriptsInClipboardHistory
+            try await runtime.textOutputTarget.output(text, markPrivate: !keepInHistory)
             return .pasted
         } catch TextOutputError.secureInputActive {
             setStatus("Secure field — transcript copied to clipboard")
@@ -1637,28 +1876,38 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         await pasteToTargetApp(text, target: lastExternalActiveApp)
     }
 
-    private func saveSettings(_ settings: AppSettings) {
+    /// Atomically applies `transform` to the stored settings, then triggers provider
+    /// side-effects (model shutdown / idle-offload update) and UI refresh.
+    ///
+    /// Hotkey monitors are intentionally NOT rebuilt here.  Only `applyHotkey` changes the
+    /// hotkey, so rebuilding on every mutate (model select, download completion, launch
+    /// defaults) was needless churn — and worse, `teardownHotkeyHandling` resets the gesture
+    /// state machine, which could strand an in-progress recording until the 90 s safety
+    /// timeout.  The rebuild lives in `applyHotkey`, the one place the hotkey actually changes.
+    private func mutateSettings(_ transform: (inout AppSettings) -> Void) {
         do {
-            let previousSettings = runtime.settingsStore.load()
-            try runtime.settingsStore.save(settings)
-            if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
+            var previousSettings: AppSettings?
+            var updatedSettings: AppSettings?
+            try runtime.settingsStore.mutate { current in
+                previousSettings = current
+                transform(&current)
+                updatedSettings = current
+            }
+            if let previousSettings, let updatedSettings,
+               let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
                 Task {
-                    if previousSettings.modelID != settings.modelID {
+                    if previousSettings.modelID != updatedSettings.modelID {
                         await provider.shutdown()
                     }
-                    if previousSettings.modelOffloadPolicy != settings.modelOffloadPolicy {
-                        await provider.setIdleOffloadSeconds(settings.modelOffloadPolicy.idleSeconds)
+                    if previousSettings.modelOffloadPolicy != updatedSettings.modelOffloadPolicy {
+                        await provider.setIdleOffloadSeconds(updatedSettings.modelOffloadPolicy.idleSeconds)
                     }
                 }
             }
             refreshSettingsRows()
             refreshModelMenu()
             refreshPreferencesWindow()
-            // NOTE: hotkey monitors are intentionally NOT rebuilt here. Only applyHotkey changes the
-            // hotkey, so rebuilding on every save (model select, download completion, launch defaults)
-            // was needless churn — and worse, teardownHotkeyHandling resets the gesture state machine,
-            // which could strand an in-progress recording until the 90s safety timeout. The rebuild now
-            // lives in applyHotkey, the one place the hotkey actually changes.
+            // NOTE: hotkey monitors are intentionally NOT rebuilt here — see doc-comment above.
         } catch {
             setStatus("Settings error: \(describe(error))")
         }

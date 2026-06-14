@@ -1,13 +1,22 @@
 import Foundation
 import TranscriptionCore
 
+/// Typed errors thrown internally during server startup. Mapped to
+/// `TranscriptionError.executionFailed` before leaving `ensureRunning`.
+private enum StartupFailure: Error {
+    /// The child process died before it could bind (port race or crash).
+    case earlyExit
+    /// The server did not respond in time.
+    case notReady
+}
+
 actor WarmWhisperServer {
     struct SupervisedLaunch {
         let executableURL: URL
         let arguments: [String]
     }
 
-    private struct ServerKey: Equatable {
+    struct ServerKey: Equatable {
         let modelID: String
         let language: String
         let forceNoGPU: Bool
@@ -17,9 +26,13 @@ actor WarmWhisperServer {
     private var process: Process?
     private var serverKey: ServerKey?
     private var baseURL: URL?
+    private var startupTask: Task<URL, Error>?
+    private var startupKey: ServerKey?
+    private var startupGeneration: UInt64 = 0
     private var idleOffloadSeconds: TimeInterval?
     private var idleTask: Task<Void, Never>?
     private var activityGeneration: UInt64 = 0
+    private var inFlightRequests = 0
 
     init(config: WhisperCppConfig) {
         self.config = config
@@ -75,12 +88,16 @@ actor WarmWhisperServer {
         )
         httpRequest.timeoutInterval = TimeInterval(config.transcriptionTimeoutSeconds)
 
+        inFlightRequests += 1
+        defer {
+            inFlightRequests -= 1
+            scheduleOffload()
+        }
         let (data, response) = try await URLSession.shared.data(for: httpRequest)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw TranscriptionError.executionFailed("whisper-server returned an invalid response")
         }
         let text = try WhisperCppProvider.decodeServerTranscript(data)
-        scheduleOffload()
         return TranscriptionResult(
             text: text,
             latencyMS: Int(Date().timeIntervalSince(startedAt) * 1_000)
@@ -90,6 +107,10 @@ actor WarmWhisperServer {
     func shutdown() {
         idleTask?.cancel()
         idleTask = nil
+        startupTask?.cancel()
+        startupTask = nil
+        startupKey = nil
+        startupGeneration &+= 1
         if let process, process.isRunning {
             process.terminate()
         }
@@ -98,43 +119,138 @@ actor WarmWhisperServer {
         baseURL = nil
     }
 
-    private func ensureRunning(key: ServerKey, modelPath: URL) async throws -> URL {
+    internal func ensureRunning(key: ServerKey, modelPath: URL) async throws -> URL {
+        // In-flight startup for same key — join the existing task
+        if startupKey == key, let task = startupTask {
+            let url = try await task.value
+            // Startup succeeded; re-validate the process is still alive
+            guard let p = self.process, p.isRunning else {
+                shutdown()
+                return try await ensureRunning(key: key, modelPath: modelPath)
+            }
+            return url
+        }
+
+        // Server already running and ready
         if serverKey == key, let process, process.isRunning, let baseURL {
             scheduleOffload()
             return baseURL
         }
+
+        // Tear down any existing state and start fresh; capture the generation
+        // that belongs to this startup attempt so the Task closure can guard its
+        // state clears against a racing shutdown() or a newer startup.
+        // shutdown() already increments startupGeneration; capture after that.
         shutdown()
+        let generation = startupGeneration
+        startupKey = key
 
-        let port = Int.random(in: 20_000...49_999)
-        let baseURL = URL(string: "http://127.0.0.1:\(port)")!
-        let process = Process()
-        let serverArguments = makeServerArguments(
-            modelPath: modelPath,
-            language: key.language,
-            port: port,
-            forceNoGPU: key.forceNoGPU
-        )
-        let launch = Self.supervisedLaunch(
-            serverExecutableURL: config.serverExecutableURL,
-            serverArguments: serverArguments,
-            ownerPID: ProcessInfo.processInfo.processIdentifier
-        )
-        process.executableURL = launch.executableURL
-        process.arguments = launch.arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
+        let task = Task {
+            // First launch attempt
+            let port1 = try Self.allocatePort()
+            let url1 = URL(string: "http://127.0.0.1:\(port1)")!
+            let process1 = Process()
+            do {
+                let serverArguments = self.makeServerArguments(
+                    modelPath: modelPath, language: key.language,
+                    port: port1, forceNoGPU: key.forceNoGPU
+                )
+                let launch = Self.supervisedLaunch(
+                    serverExecutableURL: self.config.serverExecutableURL,
+                    serverArguments: serverArguments,
+                    ownerPID: ProcessInfo.processInfo.processIdentifier
+                )
+                process1.executableURL = launch.executableURL
+                process1.arguments = launch.arguments
+                process1.standardOutput = FileHandle.nullDevice
+                process1.standardError = FileHandle.nullDevice
+                try process1.run()
+            } catch {
+                if self.startupGeneration == generation { self.startupTask = nil; self.startupKey = nil }
+                throw error
+            }
 
-        self.process = process
-        self.serverKey = key
-        self.baseURL = baseURL
+            // Wait for readiness; on earlyExit retry once with a fresh port.
+            let process: Process
+            let url: URL
+            do {
+                try await self.waitUntilReady(process: process1, baseURL: url1)
+                (process, url) = (process1, url1)
+            } catch StartupFailure.earlyExit {
+                // The server exited before it could bind — likely a port race between
+                // allocatePort() closing the probe socket and whisper-server calling
+                // bind(). Terminate the (already-dead) supervisor wrapper defensively,
+                // then retry with a freshly allocated port. Concurrent callers
+                // awaiting this Task transparently get the retry result.
+                process1.terminate()
+                let port2 = try Self.allocatePort()
+                let url2 = URL(string: "http://127.0.0.1:\(port2)")!
+                let process2 = Process()
+                do {
+                    let serverArguments = self.makeServerArguments(
+                        modelPath: modelPath, language: key.language,
+                        port: port2, forceNoGPU: key.forceNoGPU
+                    )
+                    let launch = Self.supervisedLaunch(
+                        serverExecutableURL: self.config.serverExecutableURL,
+                        serverArguments: serverArguments,
+                        ownerPID: ProcessInfo.processInfo.processIdentifier
+                    )
+                    process2.executableURL = launch.executableURL
+                    process2.arguments = launch.arguments
+                    process2.standardOutput = FileHandle.nullDevice
+                    process2.standardError = FileHandle.nullDevice
+                    try process2.run()
+                    try await self.waitUntilReady(process: process2, baseURL: url2)
+                } catch {
+                    process2.terminate()
+                    if self.startupGeneration == generation { self.startupTask = nil; self.startupKey = nil }
+                    // Map internal StartupFailure back to TranscriptionError for callers.
+                    switch error {
+                    case StartupFailure.earlyExit:
+                        throw TranscriptionError.executionFailed("whisper-server exited during startup")
+                    case StartupFailure.notReady:
+                        throw TranscriptionError.executionFailed("whisper-server did not become ready in 90 seconds")
+                    default:
+                        throw error
+                    }
+                }
+                (process, url) = (process2, url2)
+            } catch {
+                process1.terminate()
+                if self.startupGeneration == generation { self.startupTask = nil; self.startupKey = nil }
+                // Map internal StartupFailure back to TranscriptionError for callers.
+                switch error {
+                case StartupFailure.earlyExit:
+                    throw TranscriptionError.executionFailed("whisper-server exited during startup")
+                case StartupFailure.notReady:
+                    throw TranscriptionError.executionFailed("whisper-server did not become ready in 90 seconds")
+                default:
+                    throw error
+                }
+            }
+
+            // Only publish after readiness is confirmed
+            self.process = process
+            self.serverKey = key
+            self.baseURL = url
+            // Schedule an idle-offload timer so a warmed-but-never-used server
+            // doesn't hold a loaded model forever. offloadIfIdle checks
+            // inFlightRequests before actually shutting down, and transcribe's
+            // defer reschedules after each request completes.
+            self.scheduleOffload()
+            return url
+        }
+        startupTask = task
 
         do {
-            try await waitUntilReady(process: process, baseURL: baseURL)
-            scheduleOffload()
-            return baseURL
+            let url = try await task.value
+            // Identity-guard: only clear startupTask if it still belongs to this
+            // generation. A racing shutdown() increments startupGeneration, so a
+            // newer startup registered by another caller won't be clobbered here.
+            if self.startupGeneration == generation { startupTask = nil }
+            return url
         } catch {
-            shutdown()
             throw error
         }
     }
@@ -163,19 +279,31 @@ actor WarmWhisperServer {
         return arguments
     }
 
-    private func waitUntilReady(process: Process, baseURL: URL) async throws {
-        for _ in 0..<100 {
+    internal func waitUntilReady(process: Process, baseURL: URL) async throws {
+        // 60 iterations × (1s sleep + 0.5s probe timeout) ≈ 90s max budget
+        for _ in 0..<60 {
             guard process.isRunning else {
-                throw TranscriptionError.executionFailed("whisper-server exited during startup")
+                throw StartupFailure.earlyExit
             }
             var request = URLRequest(url: baseURL)
-            request.timeoutInterval = 0.2
-            if (try? await URLSession.shared.data(for: request)) != nil {
+            request.timeoutInterval = 0.5
+            if let (data, _) = try? await URLSession.shared.data(for: request),
+               Self.isWhisperServerResponse(data) {
                 return
             }
-            try await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 1_000_000_000)
         }
-        throw TranscriptionError.executionFailed("whisper-server did not become ready")
+        throw StartupFailure.notReady
+    }
+
+    /// Returns true when the HTTP response body looks like it came from whisper-server.
+    /// Empirically verified against whisper-server 1.x (Homebrew): GET / returns an HTML page
+    /// with the title "Whisper.cpp Server". A foreign service on the same port (e.g. a dev server
+    /// returning 404 or a non-whisper process) will not contain these strings.
+    internal static func isWhisperServerResponse(_ data: Data) -> Bool {
+        guard let body = String(data: data, encoding: .utf8) else { return false }
+        let lower = body.lowercased()
+        return lower.contains("whisper.cpp") || lower.contains("whisper-server")
     }
 
     private func scheduleOffload() {
@@ -192,6 +320,10 @@ actor WarmWhisperServer {
 
     private func offloadIfIdle(generation: UInt64) {
         guard generation == activityGeneration else { return }
+        if inFlightRequests > 0 {
+            scheduleOffload()
+            return
+        }
         shutdown()
     }
 
@@ -211,6 +343,41 @@ actor WarmWhisperServer {
         }
         append("--\(boundary)--\r\n")
         return body
+    }
+
+    /// Asks the kernel for a free TCP port by binding to :0 and reading the assigned address.
+    /// This eliminates the random-range collision risk and TOCTOU window is minimal because the
+    /// port is passed directly to whisper-server before other callers can claim it.
+    internal static func allocatePort() throws -> Int {
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        guard sock >= 0 else {
+            throw TranscriptionError.executionFailed("socket() failed: could not allocate port")
+        }
+        defer { close(sock) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = INADDR_ANY
+        let bindResult = withUnsafeMutablePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindResult == 0 else {
+            throw TranscriptionError.executionFailed("bind() failed: could not allocate port")
+        }
+        var boundAddr = sockaddr_in()
+        var boundLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let nameResult = withUnsafeMutablePointer(to: &boundAddr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                getsockname(sock, $0, &boundLen)
+            }
+        }
+        guard nameResult == 0 else {
+            throw TranscriptionError.executionFailed("getsockname() failed: could not read port")
+        }
+        return Int(UInt16(bigEndian: boundAddr.sin_port))
     }
 
     static func supervisedLaunch(

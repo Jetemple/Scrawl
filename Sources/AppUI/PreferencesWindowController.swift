@@ -9,16 +9,19 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let selectModel: (String) -> Void
         let downloadModel: (DownloadableModel) -> Void
         let deleteSelectedModel: () -> Void
+        let cancelDownload: () -> Void
         let setHotkey: () -> Void
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
         let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
+        let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
         let setTranscriptHistoryEnabled: (Bool) -> Void
         let copyTranscript: (UUID) -> Void
         let repasteTranscript: (UUID) -> Void
         let deleteTranscripts: (Set<UUID>) -> Void
         let saveDictionaryEntry: (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void
         let deleteDictionaryEntries: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
+        let recoverDictionary: (@escaping (Result<Void, Error>) -> Void) -> Void
         let openProjectPage: () -> Void
     }
 
@@ -30,9 +33,12 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let accessibilityStatus: PermissionStatus
         let isCapturingHotkey: Bool
         let isModelDownloadInProgress: Bool
+        /// Non-nil while a download is active, e.g. "25% (412/1621 MB)".
+        let downloadProgressText: String?
         let transcriptHistory: [TranscriptRecord]
         let transcriptHistoryLoadErrorDescription: String?
         let dictionaryEntries: [DictionaryEntry]
+        let dictionaryLoadErrorDescription: String?
     }
 
     enum Section: Int, CaseIterable {
@@ -124,17 +130,20 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     var modelsSelectedRowHasAction: Bool { modelsView.visibleSelectedRowHasAction }
     var generalModelOffloadChoices: [String] { generalView.modelOffloadChoices }
     var generalSelectedModelOffloadPolicy: ModelOffloadPolicy? { generalView.selectedModelOffloadPolicy }
+    var generalIsClipboardHistoryEnabled: Bool { generalView.isClipboardHistoryEnabled }
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
             requestMicrophone: actions.requestMicrophone,
             requestAccessibility: actions.requestAccessibility,
-            setModelOffloadPolicy: actions.setModelOffloadPolicy
+            setModelOffloadPolicy: actions.setModelOffloadPolicy,
+            setKeepTranscriptsInClipboardHistory: actions.setKeepTranscriptsInClipboardHistory
         )
         modelsView = PreferencesModelsView(
             selectModel: actions.selectModel,
             downloadModel: actions.downloadModel,
-            deleteSelectedModel: actions.deleteSelectedModel
+            deleteSelectedModel: actions.deleteSelectedModel,
+            cancelDownload: actions.cancelDownload
         )
         keyboardView = PreferencesKeyboardView(setHotkey: actions.setHotkey)
         historyView = PreferencesHistoryView(actions: .init(
@@ -145,7 +154,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         ))
         dictionaryView = PreferencesDictionaryView(actions: .init(
             save: actions.saveDictionaryEntry,
-            delete: actions.deleteDictionaryEntries
+            delete: actions.deleteDictionaryEntries,
+            recover: actions.recoverDictionary
         ))
         aboutView = PreferencesAboutView(openProjectPage: actions.openProjectPage)
 
@@ -198,7 +208,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             isEnabled: snapshot.settings.isTranscriptHistoryEnabled,
             loadErrorDescription: snapshot.transcriptHistoryLoadErrorDescription
         )
-        dictionaryView.update(entries: snapshot.dictionaryEntries)
+        dictionaryView.update(
+            entries: snapshot.dictionaryEntries,
+            loadErrorDescription: snapshot.dictionaryLoadErrorDescription
+        )
     }
 
     func selectGeneralModelOffloadPolicy(_ policy: ModelOffloadPolicy) {

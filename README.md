@@ -2,9 +2,33 @@
   <img src="Config/AppIcon.png" alt="Scrawl" width="128">
 </p>
 
-# Scrawl
+<h1 align="center">Scrawl</h1>
 
-Local-first voice-to-text for macOS. Press a key, talk, text appears at your cursor. Everything runs on-device via [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — nothing leaves your machine.
+<p align="center">
+  <strong>Local-first voice-to-text for macOS.</strong><br>
+  Press a key, talk, and your words appear at the cursor — everything runs on-device via
+  <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a>. Nothing leaves your machine.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Jetemple/Scrawl/actions/workflows/ci.yml"><img src="https://github.com/Jetemple/Scrawl/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/Jetemple/Scrawl"><img src="https://codecov.io/gh/Jetemple/Scrawl/branch/master/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/Jetemple/Scrawl/releases/latest"><img src="https://img.shields.io/github/v/release/Jetemple/Scrawl?sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/Jetemple/Scrawl/releases"><img src="https://img.shields.io/github/downloads/Jetemple/Scrawl/total" alt="Downloads"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
+
+<!-- TODO: add a demo GIF — the single highest-impact addition for a GUI app.
+     Record ~5s (hold Right Option → speak → text pastes into a focused field),
+     save it as docs/demo.gif, then uncomment the block below. -->
+<!--
+<p align="center">
+  <img src="docs/demo.gif" alt="Scrawl in action" width="640">
+</p>
+-->
+
+> Press your hotkey, speak, release — Scrawl transcribes locally and pastes the text into whatever app you're using. No cloud, no account, no telemetry.
 
 ## How it works
 
@@ -20,7 +44,19 @@ Or double-tap the hotkey to toggle recording on, then single-tap to stop.
 
 ```bash
 brew tap jetemple/tap
+brew trust jetemple/tap        # one-time: recent Homebrew requires trusting third-party taps
 brew install --cask scrawl
+```
+
+`brew trust` is a one-time, per-machine step that newer Homebrew requires before it will
+load any non-official tap (it's stored in `~/.homebrew/trust.json`). Without it, install
+and upgrades fail with `Refusing to load cask … from untrusted tap`.
+
+To update later:
+
+```bash
+brew update
+brew upgrade --cask scrawl
 ```
 
 ### From source
@@ -31,7 +67,7 @@ Requires macOS 14+, Xcode command line tools, and `whisper-cli` from whisper.cpp
 brew install whisper-cpp
 
 git clone https://github.com/Jetemple/Scrawl.git
-cd scrawl
+cd Scrawl
 make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```

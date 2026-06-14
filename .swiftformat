@@ -1,0 +1,15 @@
+# SwiftFormat configuration for Scrawl.
+#
+# NOTE: the codebase has not been reformatted with SwiftFormat yet, so the first
+# `make format` will produce a sizable one-time diff (~700 lines). Apply it as
+# its own dedicated commit (e.g. "style: apply swiftformat"), separate from
+# feature work, then turn on the `swiftformat --lint` gate in CI.
+
+--swiftversion 5.10
+--ranges nospace
+--exclude .build,.worktrees,.swiftpm,.git
+
+# redundantSendable is a Swift-6-language-mode transform that strips explicit
+# `Sendable` conformances. This package targets the 5.10 language mode, where
+# those conformances are not redundant, so keep them.
+--disable redundantSendable

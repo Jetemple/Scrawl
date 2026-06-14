@@ -63,14 +63,18 @@ final class PreferencesWindowControllerTests: XCTestCase {
                 displayName: "tiny.en — fast, 75 MB",
                 isInstalled: true,
                 isSelected: false,
-                isDownloading: false
+                isDownloading: false,
+                isCancelled: false,
+                downloadProgressText: nil
             ),
             PreferencesModelRow(
                 id: "large-v3-turbo",
                 displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
                 isInstalled: true,
                 isSelected: true,
-                isDownloading: false
+                isDownloading: false,
+                isCancelled: false,
+                downloadProgressText: nil
             )
         ]))
         controller.selectSection(.models)
@@ -79,6 +83,18 @@ final class PreferencesWindowControllerTests: XCTestCase {
         XCTAssertTrue(controller.modelsListIsTopAnchored)
         XCTAssertEqual(controller.modelsTwoLineRowCount, 2)
         XCTAssertFalse(controller.modelsSelectedRowHasAction)
+    }
+
+    @MainActor
+    func testSnapshotCarriesDownloadProgressText() {
+        let snapshot = makeSnapshot(downloadProgressText: "42% (630/1500 MB)")
+        XCTAssertEqual(snapshot.downloadProgressText, "42% (630/1500 MB)")
+    }
+
+    @MainActor
+    func testSnapshotDownloadProgressTextDefaultsToNil() {
+        let snapshot = makeSnapshot()
+        XCTAssertNil(snapshot.downloadProgressText)
     }
 
     @MainActor
@@ -289,6 +305,29 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneralClipboardHistoryCheckboxReflectsSettingAndDispatchesAction() {
+        var capturedValue: Bool?
+        let controller = PreferencesWindowController(actions: makeActions(
+            setKeepTranscriptsInClipboardHistory: { capturedValue = $0 }
+        ))
+
+        // Defaults to false.
+        controller.update(snapshot: makeSnapshot())
+        XCTAssertFalse(controller.generalIsClipboardHistoryEnabled)
+
+        // Reflects true when setting is on.
+        controller.update(snapshot: makeSnapshot(keepTranscriptsInClipboardHistory: true))
+        XCTAssertTrue(controller.generalIsClipboardHistoryEnabled)
+
+        // Clicking dispatches the action.
+        let contentView = controller.window?.contentView
+        let checkbox = contentView?.button(titled: "Keep transcripts in clipboard history")
+        XCTAssertNotNil(checkbox)
+        checkbox?.performClick(nil)
+        XCTAssertNotNil(capturedValue)
+    }
+
+    @MainActor
     func testGeneralModelOffloadControlShowsChoicesAndDispatchesSelection() {
         var selectedPolicy: ModelOffloadPolicy?
         let controller = PreferencesWindowController(actions: makeActions(
@@ -337,6 +376,25 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.update(snapshot: makeSnapshot())
 
         XCTAssertEqual(controller.dictionaryState, .empty)
+    }
+
+    @MainActor
+    func testDictionaryPageShowsUnavailableStateAndDispatchesRecovery() throws {
+        var didRecover = false
+        let controller = PreferencesWindowController(actions: makeActions(
+            recoverDictionary: { completion in
+                didRecover = true
+                completion(.success(()))
+            }
+        ))
+
+        controller.update(snapshot: makeSnapshot(dictionaryLoadErrorDescription: "corrupt"))
+        controller.selectSection(.dictionary)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        XCTAssertEqual(controller.dictionaryState, .unavailable)
+        try XCTUnwrap(contentView.button(titled: "Reset Vocabulary")).performClick(nil)
+        XCTAssertTrue(didRecover)
     }
 
     @MainActor
@@ -457,12 +515,16 @@ final class PreferencesWindowControllerTests: XCTestCase {
         historyLoadErrorDescription: String? = nil,
         records: [TranscriptRecord] = [],
         dictionaryEntries: [DictionaryEntry] = [],
-        modelRows: [PreferencesModelRow] = []
+        dictionaryLoadErrorDescription: String? = nil,
+        modelRows: [PreferencesModelRow] = [],
+        downloadProgressText: String? = nil,
+        keepTranscriptsInClipboardHistory: Bool = false
     ) -> PreferencesWindowController.Snapshot {
         PreferencesWindowController.Snapshot(
             settings: AppSettings(
                 isTranscriptHistoryEnabled: isHistoryEnabled,
-                modelOffloadPolicy: modelOffloadPolicy
+                modelOffloadPolicy: modelOffloadPolicy,
+                keepTranscriptsInClipboardHistory: keepTranscriptsInClipboardHistory
             ),
             downloadableModels: [],
             modelRows: modelRows,
@@ -470,9 +532,11 @@ final class PreferencesWindowControllerTests: XCTestCase {
             accessibilityStatus: .notDetermined,
             isCapturingHotkey: false,
             isModelDownloadInProgress: false,
+            downloadProgressText: downloadProgressText,
             transcriptHistory: records,
             transcriptHistoryLoadErrorDescription: historyLoadErrorDescription,
-            dictionaryEntries: dictionaryEntries
+            dictionaryEntries: dictionaryEntries,
+            dictionaryLoadErrorDescription: dictionaryLoadErrorDescription
         )
     }
 
@@ -484,6 +548,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         openProjectPage: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
+        setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
         copyTranscript: @escaping (UUID) -> Void = { _ in },
         repasteTranscript: @escaping (UUID) -> Void = { _ in },
         deleteTranscripts: @escaping (Set<UUID>) -> Void = { _ in },
@@ -492,22 +557,28 @@ final class PreferencesWindowControllerTests: XCTestCase {
         },
         deleteDictionaryEntries: @escaping (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void = {
             _, completion in completion(.success(()))
+        },
+        recoverDictionary: @escaping (@escaping (Result<Void, Error>) -> Void) -> Void = {
+            completion in completion(.success(()))
         }
     ) -> PreferencesWindowController.Actions {
         PreferencesWindowController.Actions(
             selectModel: { _ in },
             downloadModel: { _ in },
             deleteSelectedModel: {},
+            cancelDownload: {},
             setHotkey: setHotkey,
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,
             setModelOffloadPolicy: setModelOffloadPolicy,
+            setKeepTranscriptsInClipboardHistory: setKeepTranscriptsInClipboardHistory,
             setTranscriptHistoryEnabled: setTranscriptHistoryEnabled,
             copyTranscript: copyTranscript,
             repasteTranscript: repasteTranscript,
             deleteTranscripts: deleteTranscripts,
             saveDictionaryEntry: saveDictionaryEntry,
             deleteDictionaryEntries: deleteDictionaryEntries,
+            recoverDictionary: recoverDictionary,
             openProjectPage: openProjectPage
         )
     }

@@ -152,6 +152,7 @@ public final class JSONTranscriptHistoryStore: TranscriptHistoryStoring, @unchec
                 withIntermediateDirectories: true
             )
             try encoder.encode(newRecords).write(to: fileURL, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
             cachedRecords = newRecords
             loadError = nil
         }

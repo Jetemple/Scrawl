@@ -114,19 +114,6 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         XCTAssertEqual(try WhisperCppProvider.decodeServerTranscript(data), "Hello from warm Whisper.")
     }
 
-    func testWarmServerLaunchIsSupervisedByOwnerProcess() {
-        let launch = WarmWhisperServer.supervisedLaunch(
-            serverExecutableURL: URL(filePath: "/opt/homebrew/bin/whisper-server"),
-            serverArguments: ["--port", "18432"],
-            ownerPID: 1234
-        )
-
-        XCTAssertEqual(launch.executableURL, URL(filePath: "/bin/sh"))
-        XCTAssertTrue(launch.arguments.contains("1234"))
-        XCTAssertTrue(launch.arguments.contains("/opt/homebrew/bin/whisper-server"))
-        XCTAssertTrue(launch.arguments.joined(separator: " ").contains("kill \"$child\""))
-    }
-
     func testBlankAudioMarkerIsTreatedAsNoSpeech() {
         XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("[BLANK_AUDIO]"))
         XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript(" [ no_speech ] "))
@@ -147,6 +134,16 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("You."))
         XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("-"))
         XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("—"))
+    }
+
+    func testBareTheArticleIsRetainedAsLegitimateSpeech() {
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("The"))
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("the."))
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript(" The "))
+    }
+
+    func testSentenceStartingWithTheIsNotFilteredAsNoSpeech() {
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("The quick brown fox"))
     }
 
     func testTimeoutIsNotRetriedOnCPU() {

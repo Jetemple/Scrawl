@@ -23,8 +23,11 @@ KEEP_ACCESSIBILITY_GRANT=0
 SIGNED_APP=0
 SKIP_LAUNCH="${SCRAWL_SKIP_LAUNCH:-0}"
 
-BUILD_OUTPUT_DIR="$REPO_ROOT/.build/$BUILD_CONFIGURATION"
-BUILT_EXECUTABLE="$BUILD_OUTPUT_DIR/$EXECUTABLE_TARGET"
+BUILD_ARGS=(-c "$BUILD_CONFIGURATION")
+for arch in $BUILD_ARCHS; do
+    BUILD_ARGS+=(--arch "$arch")
+done
+BUILD_ARGS+=(--product "$EXECUTABLE_TARGET")
 
 STAGING_DIR="$REPO_ROOT/.build/install"
 STAGED_APP_PATH="$STAGING_DIR/$APP_BUNDLE_NAME"
@@ -73,7 +76,10 @@ capitalized_build_configuration() {
 resolve_built_executable() {
     local capitalized_configuration
     capitalized_configuration="$(capitalized_build_configuration)"
+    local swiftpm_bin_path
+    swiftpm_bin_path="$(cd "$REPO_ROOT" && swift build "${BUILD_ARGS[@]}" --show-bin-path)"
     local candidates=(
+        "$swiftpm_bin_path/$EXECUTABLE_TARGET"
         "$REPO_ROOT/.build/apple/Products/$capitalized_configuration/$EXECUTABLE_TARGET"
         "$REPO_ROOT/.build/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET"
     )
@@ -86,19 +92,15 @@ resolve_built_executable() {
         fi
     done
 
-    candidate="$(find "$REPO_ROOT/.build" -type f -path "*/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1)"
-    if [[ -n "$candidate" ]]; then
-        printf '%s\n' "$candidate"
-        return 0
-    fi
-
-    candidate="$(find "$REPO_ROOT/.build" -type f -path "*/$capitalized_configuration/$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1)"
-    if [[ -n "$candidate" ]]; then
-        printf '%s\n' "$candidate"
-        return 0
-    fi
-
-    find "$REPO_ROOT/.build" -type f -name "$EXECUTABLE_TARGET" -perm -111 | sort | head -n 1
+    echo "Error: could not locate built executable '$EXECUTABLE_TARGET'." >&2
+    echo "Tried the following candidate paths:" >&2
+    for c in "${candidates[@]}"; do
+        echo "  $c" >&2
+    done
+    echo "  (find) $REPO_ROOT/.build/**/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET" >&2
+    echo "  (find) $REPO_ROOT/.build/**/$capitalized_configuration/$EXECUTABLE_TARGET" >&2
+    echo "Make sure the build completed successfully for configuration '$BUILD_CONFIGURATION'." >&2
+    exit 1
 }
 
 verify_signed_app() {
@@ -111,12 +113,7 @@ verify_signed_app() {
 
 if [[ "${SCRAWL_SKIP_BUILD:-0}" != "1" ]]; then
     echo "Building $EXECUTABLE_TARGET ($BUILD_CONFIGURATION)..."
-    BUILD_ARGS=(-c "$BUILD_CONFIGURATION")
-    for arch in $BUILD_ARCHS; do
-        BUILD_ARGS+=(--arch "$arch")
-    done
-    BUILD_ARGS+=(--product "$EXECUTABLE_TARGET")
-    swift build "${BUILD_ARGS[@]}"
+    (cd "$REPO_ROOT" && swift build "${BUILD_ARGS[@]}")
 fi
 
 BUILT_EXECUTABLE="$(resolve_built_executable)"

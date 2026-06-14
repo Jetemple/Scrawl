@@ -33,12 +33,10 @@ final class TranscriptHistoryCoordinator: @unchecked Sendable {
 
     func setEnabled(_ enabled: Bool) throws {
         try lock.withLock {
-            var settings = settingsStore.load()
             if !enabled {
                 try historyStore.clear()
             }
-            settings.isTranscriptHistoryEnabled = enabled
-            try settingsStore.save(settings)
+            try settingsStore.mutate { $0.isTranscriptHistoryEnabled = enabled }
         }
     }
 }

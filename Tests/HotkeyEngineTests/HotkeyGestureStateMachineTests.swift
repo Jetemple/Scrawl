@@ -22,8 +22,9 @@ final class HotkeyGestureStateMachineTests: XCTestCase {
 
         XCTAssertEqual(machine.keyDown(at: t0), [])
         XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.08)), [])
-        XCTAssertEqual(machine.keyDown(at: t0.addingTimeInterval(0.16)), [])
-        XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.22)), [.startToggleRecording])
+        // Toggle fires on the second key-down, not on key-up
+        XCTAssertEqual(machine.keyDown(at: t0.addingTimeInterval(0.16)), [.startToggleRecording])
+        XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.22)), [])
     }
 
     func testSingleTapStopsToggleRecording() {
@@ -34,8 +35,9 @@ final class HotkeyGestureStateMachineTests: XCTestCase {
 
         XCTAssertEqual(machine.keyDown(at: t0), [])
         XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.08)), [])
-        XCTAssertEqual(machine.keyDown(at: t0.addingTimeInterval(0.16)), [])
-        XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.22)), [.startToggleRecording])
+        // Toggle fires on the second key-down, not on key-up
+        XCTAssertEqual(machine.keyDown(at: t0.addingTimeInterval(0.16)), [.startToggleRecording])
+        XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.22)), [])
 
         XCTAssertEqual(machine.keyDown(at: t0.addingTimeInterval(0.50)), [])
         XCTAssertEqual(machine.keyUp(at: t0.addingTimeInterval(0.56)), [.stopToggleRecording])
@@ -77,6 +79,20 @@ final class HotkeyGestureStateMachineTests: XCTestCase {
         XCTAssertEqual(deadline.timeIntervalSinceReferenceDate, t0.addingTimeInterval(0.18).timeIntervalSinceReferenceDate, accuracy: 0.000_001)
         XCTAssertEqual(machine.tick(at: deadline.addingTimeInterval(0.001)), [.startHoldRecording])
         XCTAssertNil(machine.nextActionDeadline(at: deadline.addingTimeInterval(0.001)))
+    }
+
+    func testDoubleTapWithHeldSecondTapStillTogglesRecording() {
+        let machine = HotkeyGestureStateMachine()
+        let t0 = Date(timeIntervalSinceReferenceDate: 0)
+        _ = machine.keyDown(at: t0)
+        _ = machine.keyUp(at: t0.addingTimeInterval(0.05))            // first tap
+        let actions = machine.keyDown(at: t0.addingTimeInterval(0.25)) // second press within gap
+        XCTAssertEqual(actions, [.startToggleRecording])               // emitted on DOWN, immediately
+        let upActions = machine.keyUp(at: t0.addingTimeInterval(0.40)) // held 150ms — must not matter
+        XCTAssertEqual(upActions, [])
+        _ = machine.keyDown(at: t0.addingTimeInterval(2.0))            // later single press
+        let stop = machine.keyUp(at: t0.addingTimeInterval(2.05))
+        XCTAssertEqual(stop, [.stopToggleRecording])
     }
 
     func testNextDeadlineTracksSecondTapExpiry() throws {

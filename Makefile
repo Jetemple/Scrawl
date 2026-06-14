@@ -6,7 +6,7 @@ APP_BUNDLE := $(APP_NAME).app
 EXECUTABLE_TARGET := ScrawlApp
 SWIFT_ARCH_FLAGS := $(foreach arch,$(BUILD_ARCHS),--arch $(arch))
 
-.PHONY: build install uninstall clean test run run-debug check-deps doctor
+.PHONY: build install uninstall clean test coverage lint format format-check run run-debug check-deps doctor
 
 check-deps:
 	@command -v swift >/dev/null 2>&1 || { echo "Error: swift is not installed. Install Xcode command line tools: xcode-select --install"; exit 1; }
@@ -24,6 +24,28 @@ build: check-deps
 test:
 	swift test
 
+coverage:
+	swift test --enable-code-coverage
+	@bin=$$(swift build --show-bin-path); \
+	xctest=$$(find "$$bin" -maxdepth 1 -name '*.xctest' | head -1); \
+	name=$$(basename "$$xctest" .xctest); \
+	xcrun llvm-cov export -format=lcov "$$xctest/Contents/MacOS/$$name" \
+		-instr-profile "$$bin/codecov/default.profdata" \
+		-ignore-filename-regex='(Tests|\.build)' > coverage.lcov; \
+	echo "Wrote coverage.lcov ($$(wc -l < coverage.lcov) lines)"
+
+lint:
+	@command -v swiftlint >/dev/null 2>&1 || { echo "Error: swiftlint not installed. Run: brew install swiftlint"; exit 1; }
+	swiftlint lint --quiet
+
+format:
+	@command -v swiftformat >/dev/null 2>&1 || { echo "Error: swiftformat not installed. Run: brew install swiftformat"; exit 1; }
+	swiftformat Sources Tests
+
+format-check:
+	@command -v swiftformat >/dev/null 2>&1 || { echo "Error: swiftformat not installed. Run: brew install swiftformat"; exit 1; }
+	swiftformat Sources Tests --lint
+
 run:
 	./scripts/run-local.sh
 
@@ -31,7 +53,7 @@ run-debug:
 	./scripts/run-local.sh --debug
 
 install: build
-	SCRAWL_SKIP_BUILD=1 ./scripts/install-app.sh "$(PREFIX)"
+	SCRAWL_SKIP_BUILD=1 SCRAWL_BUILD_CONFIGURATION="$(BUILD_CONFIG)" SCRAWL_BUILD_ARCHS="$(BUILD_ARCHS)" ./scripts/install-app.sh "$(PREFIX)"
 
 uninstall:
 	rm -rf "$(PREFIX)/$(APP_BUNDLE)"

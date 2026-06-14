@@ -6,6 +6,9 @@ struct PreferencesModelRow: Equatable, Sendable {
     let isInstalled: Bool
     let isSelected: Bool
     let isDownloading: Bool
+    let isCancelled: Bool
+    /// Non-nil only while this row's model is being downloaded, e.g. "25% (412/1621 MB)".
+    let downloadProgressText: String?
 
     var canDownload: Bool {
         !isInstalled && !isDownloading
@@ -16,28 +19,19 @@ struct PreferencesModelRow: Equatable, Sendable {
     }
 
     var statusText: String {
-        if isDownloading {
-            return "Downloading"
-        }
-        if isSelected {
-            return "Selected"
-        }
-        if isInstalled {
-            return "Installed"
-        }
+        if isDownloading { return "Downloading" }
+        // Installed/selected truth wins over a stale cancelled flag: a model that is
+        // actually on disk is never "cancelled", even if a cancel raced its install.
+        if isSelected { return "Selected" }
+        if isInstalled { return "Installed" }
+        if isCancelled { return "Download cancelled" }
         return "Available"
     }
 
     var actionTitle: String {
-        if isDownloading {
-            return "Downloading"
-        }
-        if isSelected {
-            return "Selected"
-        }
-        if isInstalled {
-            return "Use"
-        }
+        if isDownloading { return "Downloading" }
+        if isSelected { return "Selected" }
+        if isInstalled { return "Use" }
         return "Download"
     }
 }
@@ -47,7 +41,9 @@ enum PreferencesModelState {
         downloadableModels: [DownloadableModel],
         installedModelIDs: [String],
         selectedModelID: String,
-        downloadingModelID: String?
+        downloadingModelID: String?,
+        cancelledModelID: String? = nil,
+        downloadProgressText: String? = nil
     ) -> [PreferencesModelRow] {
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
@@ -65,12 +61,18 @@ enum PreferencesModelState {
             let installedModelID = installedIDs.contains(model.id) ? model.id : installedIDByFamily[canonicalFamily(model.id)]
             let rowModelID = installedModelID ?? model.id
             let isInstalled = installedModelID != nil
+            // An installed model is never "cancelled" — a cancel that races a finishing
+            // download must not leave the row showing "Download cancelled" next to "Use".
+            let isCancelled = !isInstalled && (rowModelID == cancelledModelID || model.id == cancelledModelID)
+            let isDownloading = rowModelID == downloadingModelID || model.id == downloadingModelID
             return PreferencesModelRow(
                 id: rowModelID,
                 displayName: model.displayName,
                 isInstalled: isInstalled,
                 isSelected: rowModelID == selectedModelID || model.id == selectedModelID,
-                isDownloading: rowModelID == downloadingModelID || model.id == downloadingModelID
+                isDownloading: isDownloading,
+                isCancelled: isCancelled,
+                downloadProgressText: isDownloading ? downloadProgressText : nil
             )
         }
 
@@ -78,12 +80,15 @@ enum PreferencesModelState {
             .filter { !downloadableIDs.contains($0) && !downloadableFamilies.contains(canonicalFamily($0)) }
             .sorted()
             .map { modelID in
-                PreferencesModelRow(
+                let isDownloading = modelID == downloadingModelID
+                return PreferencesModelRow(
                     id: modelID,
                     displayName: displayName(forInstalledModelID: modelID),
                     isInstalled: true,
                     isSelected: modelID == selectedModelID,
-                    isDownloading: modelID == downloadingModelID
+                    isDownloading: isDownloading,
+                    isCancelled: false,
+                    downloadProgressText: isDownloading ? downloadProgressText : nil
                 )
             }
 
@@ -95,16 +100,16 @@ enum PreferencesModelState {
         modelID.replacingOccurrences(of: "ggml-", with: "")
     }
 
-    private static func canonicalFamily(_ raw: String) -> String {
+    /// Strips the `ggml-` prefix and `.bin` extension so that files stored with
+    /// or without those decorations compare equal.  The `.en` suffix is intentionally
+    /// preserved: `ggml-medium.en` and `ggml-medium` are distinct model families.
+    static func canonicalFamily(_ raw: String) -> String {
         var value = raw.lowercased()
         if value.hasSuffix(".bin") {
             value = String(value.dropLast(4))
         }
         if value.hasPrefix("ggml-") {
             value = String(value.dropFirst(5))
-        }
-        if value.hasSuffix(".en") {
-            value = String(value.dropLast(3))
         }
         return value
     }

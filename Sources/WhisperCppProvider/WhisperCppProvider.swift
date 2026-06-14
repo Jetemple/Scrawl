@@ -68,7 +68,18 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
                     startedAt: startedAt
                 )
             } catch {
-                await warmServer.shutdown()
+                let mapped: Error
+                if let urlError = error as? URLError, urlError.code == .timedOut {
+                    mapped = TranscriptionError.timedOut(seconds: config.transcriptionTimeoutSeconds)
+                } else {
+                    mapped = error
+                }
+                switch Self.warmPathFallbackDecision(for: mapped) {
+                case .rethrow:
+                    throw mapped
+                case .shutdownAndFallback:
+                    await warmServer.shutdown()
+                }
             }
         }
 
@@ -227,6 +238,28 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
 
     private func shouldRetryWithCPU(after error: TranscriptionError, forceNoGPU: Bool) -> Bool {
         Self.isRetryableWithCPU(error: error, forceNoGPU: forceNoGPU)
+    }
+
+    enum WarmPathFallback: Equatable { case rethrow, shutdownAndFallback }
+
+    /// Decides what to do when the warm-server path throws. Only transport/execution failures
+    /// warrant tearing down the warm server and retrying via CLI. Correct verdicts
+    /// (noSpeechDetected), timeouts (which would double-stall on CLI), and cancellations
+    /// are rethrown directly without touching the warm server.
+    ///
+    /// Note: URLError.timedOut is mapped to TranscriptionError.timedOut by the caller before
+    /// this function is invoked, so only non-timeout URLErrors reach the default .shutdownAndFallback branch.
+    static func warmPathFallbackDecision(for error: Error) -> WarmPathFallback {
+        if let te = error as? TranscriptionError {
+            switch te {
+            case .noSpeechDetected: return .rethrow
+            case .timedOut: return .rethrow
+            case .modelMissing, .providerUnavailable: return .rethrow
+            case .executionFailed: return .shutdownAndFallback
+            }
+        }
+        if error is CancellationError { return .rethrow }
+        return .shutdownAndFallback
     }
 
     /// A GPU run should only fall back to CPU when the GPU genuinely failed to execute. A timeout
@@ -413,7 +446,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
         return cleaned
     }
 
-    private func runAndWait(
+    internal func runAndWait(
         process: Process,
         timeoutSeconds: Int
     ) async throws -> Int32 {
@@ -440,6 +473,13 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
                 try await Task.sleep(nanoseconds: UInt64(max(timeoutSeconds, 1)) * 1_000_000_000)
                 if process.isRunning {
                     process.terminate()
+                    // Escalate to SIGKILL if the process ignores SIGTERM
+                    Task.detached {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        if process.isRunning {
+                            kill(process.processIdentifier, SIGKILL)
+                        }
+                    }
                 }
                 throw TranscriptionError.timedOut(seconds: timeoutSeconds)
             }

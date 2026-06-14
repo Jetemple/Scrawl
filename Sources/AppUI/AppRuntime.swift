@@ -95,35 +95,58 @@ public struct AppRuntime {
     }
 
     private static func resolveWhisperExecutable(home: URL) -> URL {
+        let trustedDirs = [
+            URL(filePath: "/opt/homebrew/bin"),
+            URL(filePath: "/usr/local/bin"),
+            URL(filePath: "/usr/bin")
+        ]
+        return resolveWhisperExecutable(
+            environment: ProcessInfo.processInfo.environment,
+            trustedDirs: trustedDirs
+        )
+    }
+
+    /// Injectable overload used in tests. Resolution order:
+    ///   1. SCRAWL_WHISPER_EXECUTABLE — absolute paths only
+    ///   2. WHISPER_CPP_EXECUTABLE    — absolute paths only
+    ///   3. Trusted directories (checked in order)
+    ///   4. Fallback: first trusted dir / whisper-cli (binary may not exist)
+    /// The general PATH scan is intentionally absent: a binary planted in any
+    /// writable early-PATH directory would otherwise silently receive all raw
+    /// recordings under Scrawl's TCC grants.
+    static func resolveWhisperExecutable(
+        environment env: [String: String],
+        trustedDirs: [URL]
+    ) -> URL {
         let fileManager = FileManager.default
-        let env = ProcessInfo.processInfo.environment
-        if let override = env["SCRAWL_WHISPER_EXECUTABLE"], !override.isEmpty {
+
+        // 1. SCRAWL_WHISPER_EXECUTABLE — absolute path only
+        if let override = env["SCRAWL_WHISPER_EXECUTABLE"],
+           !override.isEmpty,
+           override.hasPrefix("/")
+        {
             return URL(filePath: override)
         }
 
-        if let pathValue = env["PATH"], !pathValue.isEmpty {
-            let candidatesFromPath = pathValue
-                .split(separator: ":")
-                .map { URL(fileURLWithPath: String($0)).appendingPathComponent("whisper-cli") }
-            if let fromPath = candidatesFromPath.first(where: { fileManager.isExecutableFile(atPath: $0.path) }) {
-                return fromPath
+        // 2. WHISPER_CPP_EXECUTABLE — absolute path only
+        if let override = env["WHISPER_CPP_EXECUTABLE"],
+           !override.isEmpty,
+           override.hasPrefix("/")
+        {
+            return URL(filePath: override)
+        }
+
+        // 3. Trusted directories
+        for dir in trustedDirs {
+            let candidate = dir.appending(path: "whisper-cli")
+            if fileManager.isExecutableFile(atPath: candidate.path) {
+                return candidate
             }
         }
 
-        if let override = env["WHISPER_CPP_EXECUTABLE"], !override.isEmpty {
-            return URL(filePath: override)
-        }
-
-        let candidates = [
-            URL(filePath: "/opt/homebrew/bin/whisper-cli"),
-            URL(filePath: "/usr/local/bin/whisper-cli"),
-            URL(filePath: "/usr/bin/whisper-cli")
-        ]
-
-        if let existing = candidates.first(where: { fileManager.isExecutableFile(atPath: $0.path) }) {
-            return existing
-        }
-        return candidates[0]
+        // 4. Fallback: first trusted dir (or a default if list is empty)
+        let fallbackDir = trustedDirs.first ?? URL(filePath: "/opt/homebrew/bin")
+        return fallbackDir.appending(path: "whisper-cli")
     }
 
     private static func resolveModelsDirectory(appSupportDirectory: URL, settings: AppSettings) -> URL {

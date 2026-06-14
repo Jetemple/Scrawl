@@ -2,11 +2,17 @@ name: CI
 
 on:
   push:
+    branches:
+      - master
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: swift-actions/setup-swift@v2
@@ -14,5 +20,45 @@ jobs:
         run: swift --version
       - name: Build
         run: swift build
-      - name: Test
-        run: swift test
+      - name: Test (with coverage)
+        run: swift test --enable-code-coverage
+      # Coverage is best-effort: it must never fail the test job. On CI the
+      # Xcode `xcrun llvm-cov` can be older than the Swift toolchain that wrote
+      # the profile ("unsupported instrumentation profile format version"), so
+      # we tolerate failure and simply skip the upload when export doesn't work.
+      - name: Export coverage (lcov)
+        continue-on-error: true
+        run: |
+          set +e
+          bin=$(swift build --show-bin-path)
+          xctest=$(find "$bin" -maxdepth 1 -name '*.xctest' | head -1)
+          name=$(basename "$xctest" .xctest)
+          xcrun llvm-cov export -format=lcov "$xctest/Contents/MacOS/$name" \
+            -instr-profile "$bin/codecov/default.profdata" \
+            -ignore-filename-regex='(Tests|\.build)' > coverage.lcov
+          if [ $? -ne 0 ] || [ ! -s coverage.lcov ]; then
+            echo "::warning::coverage export skipped (llvm-cov/profdata version mismatch on runner)"
+            rm -f coverage.lcov
+          else
+            echo "Wrote coverage.lcov ($(wc -l < coverage.lcov) lines)"
+          fi
+      - name: Upload coverage to Codecov
+        if: hashFiles('coverage.lcov') != ''
+        continue-on-error: true
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.lcov
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SwiftLint
+        run: brew install swiftlint
+      - name: SwiftLint
+        # Runs without --strict: warnings annotate the PR, only errors fail CI.
+        run: swiftlint lint --reporter github-actions-logging
+      # NOTE: a `swiftformat Sources Tests --lint` gate belongs here too, but only
+      # after the one-time `make format` reformat lands as its own commit.

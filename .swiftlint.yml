@@ -1,0 +1,60 @@
+# SwiftLint configuration for Scrawl.
+#
+# CI runs `swiftlint lint` WITHOUT `--strict`, so warnings surface as PR
+# annotations but only error-level violations fail the build. Thresholds below
+# are tuned so the current tree has zero errors; the size warnings still flag
+# known debt (e.g. the large ScrawlApplication.swift) for future cleanup.
+# Tighten these over time as files are split.
+
+excluded:
+  - .build
+  - .worktrees
+  - .swiftpm
+
+disabled_rules:
+  # Comma placement is owned by SwiftFormat (trailingCommas); don't tug-of-war.
+  - trailing_comma
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - first_where
+  - last_where
+  - contains_over_first_not_nil
+  - toggle_bool
+  - redundant_nil_coalescing
+  - closure_spacing
+  - operator_usage_whitespace
+
+identifier_name:
+  min_length:
+    error: 1
+  # Idiomatic short names used in geometry, loops, and pointer contexts.
+  excluded: [x, y, z, h, w, i, j, k, n, m, p, q, r, v, a, b, g, id, dx, dy, ok, to]
+
+large_tuple:
+  warning: 3
+  error: 4
+
+force_try:
+  # Acceptable in test fixtures; still surfaced as a warning.
+  severity: warning
+
+function_body_length:
+  warning: 60
+  error: 140
+
+type_body_length:
+  warning: 350
+  error: 2000
+
+file_length:
+  warning: 500
+  error: 2100
+  ignore_comment_only_lines: true
+
+line_length:
+  warning: 160
+  error: 220
+  ignores_urls: true
+  ignores_comments: true

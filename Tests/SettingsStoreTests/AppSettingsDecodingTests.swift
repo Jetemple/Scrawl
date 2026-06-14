@@ -74,6 +74,22 @@ final class AppSettingsDecodingTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: "scrawl.settings.transcriptHistoryEnabled"))
     }
 
+    func testKeepTranscriptsInClipboardHistoryDefaultsToFalse() {
+        XCTAssertFalse(AppSettings().keepTranscriptsInClipboardHistory)
+    }
+
+    func testKeepTranscriptsInClipboardHistoryRoundTrips() throws {
+        let data = try JSONEncoder().encode(AppSettings(keepTranscriptsInClipboardHistory: true))
+        XCTAssertTrue(try JSONDecoder().decode(AppSettings.self, from: data).keepTranscriptsInClipboardHistory)
+    }
+
+    func testLegacyJSONWithoutClipboardHistoryKeyDecodesToFalse() throws {
+        let data = try XCTUnwrap("""
+        {"defaultModelID":"tiny.en","selectedModelID":"tiny.en","language":"en"}
+        """.data(using: .utf8))
+        XCTAssertFalse(try JSONDecoder().decode(AppSettings.self, from: data).keepTranscriptsInClipboardHistory)
+    }
+
     func testDecodesLegacyHotkeyDescription() throws {
         let json = """
         {

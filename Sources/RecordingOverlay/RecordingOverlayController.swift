@@ -17,6 +17,11 @@ public final class RecordingOverlayController: @unchecked Sendable {
     private var titleLabel: NSTextField?
     private var spinner: NSProgressIndicator?
     private var transientDismissWorkItem: DispatchWorkItem?
+    /// Incremented every time the panel is shown or faded in.
+    /// Fade-out completion handlers capture the value at the time they are
+    /// scheduled and skip `orderOut` / teardown if the generation has advanced
+    /// (meaning a new show/fade-in arrived before the animation finished).
+    private var fadeGeneration = 0
 
     public init() {}
 
@@ -58,6 +63,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             symbolView.isHidden = true
             spinner.stopAnimation(nil)
             spinner.isHidden = true
+            fadeGeneration += 1
             fadeOut(panel)
 
         case .hotkeyCapture:
@@ -76,6 +82,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             startSymbolPulse()
             layoutSubviews()
             positionPanel(panel)
+            fadeGeneration += 1
             fadeIn(panel, wasHidden: previous == .idle)
 
         case .recording:
@@ -88,6 +95,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             startDotPulse()
             layoutSubviews()
             positionPanel(panel)
+            fadeGeneration += 1
             fadeIn(panel, wasHidden: previous == .idle)
 
         case .transcribing:
@@ -100,11 +108,15 @@ public final class RecordingOverlayController: @unchecked Sendable {
             spinner.startAnimation(nil)
             layoutSubviews()
             positionPanel(panel)
+            fadeGeneration += 1
             fadeIn(panel, wasHidden: previous == .idle)
         }
     }
 
     private func applyTransientMessage(_ text: String, duration: TimeInterval) {
+        transientDismissWorkItem?.cancel()
+        transientDismissWorkItem = nil
+
         ensurePanel()
         guard let panel, let dotView, let symbolView, let titleLabel, let spinner else {
             return
@@ -119,6 +131,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         titleLabel.textColor = .secondaryLabelColor
         layoutSubviews()
         positionPanel(panel)
+        fadeGeneration += 1
         fadeIn(panel, wasHidden: panel.alphaValue == 0)
 
         let workItem = DispatchWorkItem { [weak self] in
@@ -127,9 +140,63 @@ public final class RecordingOverlayController: @unchecked Sendable {
                 self.fadeOut(panel)
             }
         }
-        transientDismissWorkItem?.cancel()
         transientDismissWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0.2), execute: workItem)
+    }
+
+    // MARK: - Pill width computation
+
+    /// Returns the required panel width for the given label text, clamped to [minPillWidth, maxPillWidth].
+    ///
+    /// - Parameters:
+    ///   - text: The string that will be displayed in the title label.
+    ///   - font: The label font.
+    ///   - leadingAccessoryWidth: The width consumed by any leading accessory (dot, symbol, spinner)
+    ///     plus the gap between it and the label. Pass 0 when there is no accessory.
+    /// - Returns: A clamped pill width.
+    static func pillWidth(forText text: String, font: NSFont, leadingAccessoryWidth: CGFloat) -> CGFloat {
+        let padding: CGFloat = 14
+        let measuredText = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        let required = padding + leadingAccessoryWidth + measuredText + labelTextInset + padding
+        return min(max(required, minPillWidth), maxPillWidth)
+    }
+
+    static let minPillWidth: CGFloat = 148
+    static let maxPillWidth: CGFloat = 420
+    /// Height of a single-line pill. A wrapped pill adds `pillLineHeight` per extra line.
+    static let basePillHeight: CGFloat = 34
+    /// Vertical space one line of label text occupies inside the pill.
+    static let pillLineHeight: CGFloat = 16
+    /// Long messages wrap up to this many lines before the last line ellipsizes.
+    static let maxPillLines = 2
+    /// Slack reserved for the NSTextField cell's internal inset, which makes the cell
+    /// need slightly more width than `NSString.size` reports. Without it the cell wraps
+    /// a "one line" message and clips the hidden second line.
+    static let labelTextInset: CGFloat = 8
+    static let shadowMargin: CGFloat = 12
+
+    /// Returns the pill height needed to render `text`. Text that fits on one line at the
+    /// width `pillWidth(forText:)` chose keeps `basePillHeight`; longer text wraps up to
+    /// `maxPillLines`, growing the pill taller. Both functions share the same width and
+    /// inset accounting so the height never under-allocates lines the cell will render.
+    static func pillHeight(forText text: String, font: NSFont, leadingAccessoryWidth: CGFloat) -> CGFloat {
+        let padding: CGFloat = 14
+        let measured = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        let chosenWidth = pillWidth(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
+        // Usable text width inside the label, leaving the cell's internal inset as slack.
+        let usable = chosenWidth - padding - leadingAccessoryWidth - padding - labelTextInset
+        guard measured > usable else {
+            return basePillHeight
+        }
+
+        let bounding = (text as NSString).boundingRect(
+            with: CGSize(width: max(usable, 1), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+        let neededLines = max(1, Int(ceil(bounding.height / pillLineHeight)))
+        let cappedLines = min(neededLines, maxPillLines)
+        return basePillHeight + CGFloat(cappedLines - 1) * pillLineHeight
     }
 
     // MARK: - Panel setup
@@ -139,8 +206,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
             return
         }
 
-        let pillWidth: CGFloat = 148
-        let pillHeight: CGFloat = 34
+        let pillWidth = Self.minPillWidth
+        let pillHeight = Self.basePillHeight
         let frame = NSRect(x: 0, y: 0, width: pillWidth, height: pillHeight)
 
         let panel = NSPanel(
@@ -158,7 +225,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         panel.alphaValue = 0
 
         // Shadow host — draws a rounded shadow without clipping
-        let shadowMargin: CGFloat = 12
+        let shadowMargin = Self.shadowMargin
         let shadowFrame = NSRect(
             x: -shadowMargin,
             y: -shadowMargin,
@@ -173,12 +240,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         shadowHost.layer?.shadowOpacity = 0.2
         shadowHost.layer?.shadowRadius = 8
         shadowHost.layer?.shadowOffset = CGSize(width: 0, height: -2)
-        shadowHost.layer?.shadowPath = CGPath(
-            roundedRect: CGRect(x: shadowMargin, y: shadowMargin, width: pillWidth, height: pillHeight),
-            cornerWidth: pillHeight / 2,
-            cornerHeight: pillHeight / 2,
-            transform: nil
-        )
+        shadowHost.layer?.shadowPath = Self.makeShadowPath(pillWidth: pillWidth, pillHeight: pillHeight, shadowMargin: shadowMargin)
 
         let visual = NSVisualEffectView(frame: frame)
         visual.autoresizingMask = [.width, .height]
@@ -203,7 +265,11 @@ public final class RecordingOverlayController: @unchecked Sendable {
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         label.textColor = .labelColor
+        // Wrap long messages onto a second line (then ellipsize) instead of clipping words.
         label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = Self.maxPillLines
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
 
         let spinner = NSProgressIndicator()
         spinner.style = .spinning
@@ -230,9 +296,66 @@ public final class RecordingOverlayController: @unchecked Sendable {
         self.spinner = spinner
     }
 
+    /// Generates the CGPath used for the shadow host's shadowPath.
+    private static func makeShadowPath(pillWidth: CGFloat, pillHeight: CGFloat, shadowMargin: CGFloat) -> CGPath {
+        // Fixed corner radius (single-line capsule radius) so a taller, wrapped pill
+        // reads as a rounded rectangle instead of an over-rounded stadium.
+        let cornerRadius = basePillHeight / 2
+        return CGPath(
+            roundedRect: CGRect(x: shadowMargin, y: shadowMargin, width: pillWidth, height: pillHeight),
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+    }
+
+    /// Resizes the panel to fit the current label text, then regenerates the shadow path.
+    /// Must be called BEFORE `layoutSubviews()` positions child frames.
+    private func resizePanel() {
+        guard let panel, let titleLabel, let dotView, let symbolView, let spinner else { return }
+
+        let font = titleLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .medium)
+        let text = titleLabel.stringValue
+
+        // Determine leading accessory width + gap (matches layoutSubviews constants).
+        let leadingAccessoryWidth: CGFloat
+        if !dotView.isHidden {
+            leadingAccessoryWidth = 8 + 8   // dotSize(8) + gap(8)
+        } else if !symbolView.isHidden {
+            leadingAccessoryWidth = 15 + 8  // symbolSize(15) + gap(8)
+        } else if !spinner.isHidden {
+            leadingAccessoryWidth = 16 + 8  // spinnerSize(16) + gap(8)
+        } else {
+            leadingAccessoryWidth = 0
+        }
+
+        let newWidth = Self.pillWidth(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
+        let newHeight = Self.pillHeight(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
+        let shadowMargin = Self.shadowMargin
+
+        // Resize panel (autoresizingMask on container/visual/shadowHost propagates the change).
+        panel.setFrame(
+            NSRect(origin: panel.frame.origin, size: NSSize(width: newWidth, height: newHeight)),
+            display: false
+        )
+
+        // Regenerate shadow path to match the new width and height.
+        if let shadowHost = panel.contentView?.subviews.first {
+            shadowHost.layer?.shadowPath = Self.makeShadowPath(
+                pillWidth: newWidth,
+                pillHeight: newHeight,
+                shadowMargin: shadowMargin
+            )
+        }
+    }
+
     // MARK: - Layout
 
     private func layoutSubviews() {
+        // Resize the panel to fit the current text FIRST, so child frame
+        // calculations below use the updated panel width.
+        resizePanel()
+
         guard let panel, let dotView, let symbolView, let titleLabel, let spinner else {
             return
         }
@@ -290,11 +413,14 @@ public final class RecordingOverlayController: @unchecked Sendable {
                 height: 16
             )
         } else {
+            // No accessory: this is where long transient messages live, so let the label
+            // fill the pill's (possibly multi-line) height instead of a fixed 16pt line.
+            let labelInset = (Self.basePillHeight - Self.pillLineHeight) / 2
             titleLabel.frame = NSRect(
                 x: padding,
-                y: (h - 16) / 2,
+                y: labelInset,
                 width: panel.frame.width - padding * 2,
-                height: 16
+                height: h - labelInset * 2
             )
         }
     }
@@ -388,10 +514,12 @@ public final class RecordingOverlayController: @unchecked Sendable {
             panel.orderOut(nil)
             return
         }
+        let generation = fadeGeneration
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             panel.animator().alphaValue = 0.0
-        } completionHandler: {
+        } completionHandler: { [weak self] in
+            guard let self, self.fadeGeneration == generation else { return }
             panel.orderOut(nil)
         }
     }
