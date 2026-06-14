@@ -2,11 +2,12 @@ import AppKit
 import DictionaryStore
 
 final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
-    enum State: Equatable { case empty, noSearchResults, entries }
+    enum State: Equatable { case unavailable, empty, noSearchResults, entries }
 
     struct Actions {
         let save: (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void
         let delete: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
+        let recover: (@escaping (Result<Void, Error>) -> Void) -> Void
     }
 
     private let actions: Actions
@@ -18,11 +19,13 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private var workspaceGroup: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
+    private let resetButton = NSButton(title: "Reset Vocabulary", target: nil, action: nil)
     private let editButton = NSButton(title: "Edit", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
     private var terms: [VocabularyTerm] = []
     private var visibleTerms: [VocabularyTerm] = []
     private var selectedValues: Set<String> = []
+    private var loadErrorDescription: String?
     private weak var editorWindow: NSWindow?
     private var editorOriginal: String?
     private var editorField: NSTextField?
@@ -36,14 +39,15 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         self.actions = actions
         super.init(frame: .zero)
         buildView()
-        update(entries: [])
+        update(entries: [], loadErrorDescription: nil)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(entries: [DictionaryEntry]) {
+    func update(entries: [DictionaryEntry], loadErrorDescription: String?) {
         terms = entries.map { VocabularyTerm(value: $0.correct) }
+        self.loadErrorDescription = loadErrorDescription
         applyFilter()
     }
 
@@ -112,7 +116,10 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         stateTitle.font = .systemFont(ofSize: 15, weight: .medium)
         stateDetail.textColor = .secondaryLabelColor
         stateDetail.alignment = .center
-        let stateStack = NSStackView(views: [stateTitle, stateDetail])
+        PreferencesPageSupport.configureSecondaryButton(resetButton)
+        resetButton.target = self
+        resetButton.action = #selector(recoverDictionary(_:))
+        let stateStack = NSStackView(views: [stateTitle, stateDetail, resetButton])
         stateStack.orientation = .vertical
         stateStack.alignment = .centerX
         stateStack.spacing = 5
@@ -170,7 +177,11 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     }
 
     private func updateState() {
-        if terms.isEmpty {
+        if loadErrorDescription != nil {
+            state = .unavailable
+            stateTitle.stringValue = "Vocabulary unavailable"
+            stateDetail.stringValue = "Scrawl could not read the saved vocabulary file."
+        } else if terms.isEmpty {
             state = .empty
             stateTitle.stringValue = "No preferred terms yet"
             stateDetail.stringValue = "Add names and phrases you want Whisper to recognize."
@@ -181,13 +192,27 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         } else {
             state = .entries
         }
+        resetButton.isHidden = state != .unavailable
         stateView.isHidden = state == .entries
         tableView.enclosingScrollView?.isHidden = state != .entries
+        termField.isEnabled = state != .unavailable
+        addButton.isEnabled = state != .unavailable
+        searchField.isEnabled = state != .unavailable
     }
 
     private func updateActionAvailability() {
-        editButton.isEnabled = selectedValues.count == 1
-        deleteButton.isEnabled = !selectedValues.isEmpty
+        editButton.isEnabled = state != .unavailable && selectedValues.count == 1
+        deleteButton.isEnabled = state != .unavailable && !selectedValues.isEmpty
+    }
+
+    @objc private func recoverDictionary(_ sender: NSButton) {
+        sender.isEnabled = false
+        actions.recover { result in
+            sender.isEnabled = true
+            if case let .failure(error) = result {
+                NSAlert(error: error).runModal()
+            }
+        }
     }
 
     @objc private func editSelected(_ sender: Any?) { showEditorForSelection() }

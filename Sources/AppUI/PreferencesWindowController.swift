@@ -21,6 +21,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let deleteTranscripts: (Set<UUID>) -> Void
         let saveDictionaryEntry: (String?, String, String, @escaping (Result<Void, Error>) -> Void) -> Void
         let deleteDictionaryEntries: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
+        let recoverDictionary: (@escaping (Result<Void, Error>) -> Void) -> Void
         let openProjectPage: () -> Void
     }
 
@@ -37,6 +38,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let transcriptHistory: [TranscriptRecord]
         let transcriptHistoryLoadErrorDescription: String?
         let dictionaryEntries: [DictionaryEntry]
+        let dictionaryLoadErrorDescription: String?
     }
 
     enum Section: Int, CaseIterable {
@@ -152,7 +154,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         ))
         dictionaryView = PreferencesDictionaryView(actions: .init(
             save: actions.saveDictionaryEntry,
-            delete: actions.deleteDictionaryEntries
+            delete: actions.deleteDictionaryEntries,
+            recover: actions.recoverDictionary
         ))
         aboutView = PreferencesAboutView(openProjectPage: actions.openProjectPage)
 
@@ -205,7 +208,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             isEnabled: snapshot.settings.isTranscriptHistoryEnabled,
             loadErrorDescription: snapshot.transcriptHistoryLoadErrorDescription
         )
-        dictionaryView.update(entries: snapshot.dictionaryEntries)
+        dictionaryView.update(
+            entries: snapshot.dictionaryEntries,
+            loadErrorDescription: snapshot.dictionaryLoadErrorDescription
+        )
     }
 
     func selectGeneralModelOffloadPolicy(_ policy: ModelOffloadPolicy) {

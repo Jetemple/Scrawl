@@ -12,9 +12,38 @@ public enum AudioLevelAnalyzer {
         return rootMeanSquare(samples: samples) < minimumRMS
     }
 
-    /// Returns the total number of seconds during which audio energy exceeds `activeRMS`.
-    /// The signal is divided into non-overlapping windows of `windowSeconds`; each window whose
-    /// RMS exceeds `activeRMS` contributes its duration to the total.
+    /// Returns the longest consecutive duration during which audio energy exceeds `activeRMS`.
+    /// The signal is divided into non-overlapping windows of `windowSeconds`; inactive windows
+    /// reset the current run.
+    public static func longestActiveAudioSeconds(
+        samples: [Int16],
+        sampleRate: Double,
+        windowSeconds: Double = 0.03,
+        activeRMS: Double = 0.0075
+    ) -> Double {
+        guard !samples.isEmpty, sampleRate > 0, windowSeconds > 0 else { return 0 }
+
+        let windowSize = max(1, Int(sampleRate * windowSeconds))
+        var currentActiveSeconds = 0.0
+        var longestActiveSeconds = 0.0
+        var offset = 0
+
+        while offset < samples.count {
+            let end = min(offset + windowSize, samples.count)
+            let window = Array(samples[offset..<end])
+            if rootMeanSquare(samples: window) >= activeRMS {
+                currentActiveSeconds += Double(window.count) / sampleRate
+                longestActiveSeconds = max(longestActiveSeconds, currentActiveSeconds)
+            } else {
+                currentActiveSeconds = 0
+            }
+            offset += windowSize
+        }
+
+        return longestActiveSeconds
+    }
+
+    /// Returns the total duration of active windows, including separated runs.
     public static func activeAudioSeconds(
         samples: [Int16],
         sampleRate: Double,
@@ -26,7 +55,6 @@ public enum AudioLevelAnalyzer {
         let windowSize = max(1, Int(sampleRate * windowSeconds))
         var activeSeconds = 0.0
         var offset = 0
-
         while offset < samples.count {
             let end = min(offset + windowSize, samples.count)
             let window = Array(samples[offset..<end])
@@ -35,12 +63,27 @@ public enum AudioLevelAnalyzer {
             }
             offset += windowSize
         }
-
         return activeSeconds
     }
 
-    /// File-based variant of `activeAudioSeconds`. Reads the file once and delegates to the
+    /// File-based variant of `longestActiveAudioSeconds`. Reads the file once and delegates to the
     /// sample-array implementation, sharing the same extraction helper used by `isLikelySilent(fileURL:)`.
+    public static func longestActiveAudioSeconds(
+        fileURL: URL,
+        sampleRate: Double,
+        windowSeconds: Double = 0.03,
+        activeRMS: Double = 0.0075
+    ) throws -> Double {
+        let samples = try readInt16Samples(fileURL: fileURL)
+        return longestActiveAudioSeconds(
+            samples: samples,
+            sampleRate: sampleRate,
+            windowSeconds: windowSeconds,
+            activeRMS: activeRMS
+        )
+    }
+
+    /// File-based variant of `activeAudioSeconds`.
     public static func activeAudioSeconds(
         fileURL: URL,
         sampleRate: Double,
@@ -116,6 +159,4 @@ public enum AudioLevelAnalyzer {
         }
         return sqrt(sumOfSquares / Double(samples.count))
     }
-
 }
-

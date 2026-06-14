@@ -10,11 +10,11 @@ final class AudioLevelAnalyzerTests: XCTestCase {
         XCTAssertFalse(AudioLevelAnalyzer.isLikelySilent(samples: [0, 800, -800, 0], minimumRMS: 0.001))
     }
 
-    // MARK: - activeAudioSeconds(samples:sampleRate:windowSeconds:activeRMS:)
+    // MARK: - longestActiveAudioSeconds(samples:sampleRate:windowSeconds:activeRMS:)
 
     func testAllZeroSamplesYieldZeroActiveSeconds() {
         let samples = [Int16](repeating: 0, count: 16000)
-        let active = AudioLevelAnalyzer.activeAudioSeconds(samples: samples, sampleRate: 16_000)
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: 16_000)
         XCTAssertEqual(active, 0.0)
     }
 
@@ -28,7 +28,7 @@ final class AudioLevelAnalyzerTests: XCTestCase {
             let amplitude = Int16(Int64(bitPattern: state) % 100)
             samples.append(amplitude)
         }
-        let active = AudioLevelAnalyzer.activeAudioSeconds(samples: samples, sampleRate: 16_000)
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: 16_000)
         XCTAssertEqual(active, 0.0, "Room-tone-level noise should register 0 active seconds")
     }
 
@@ -45,10 +45,65 @@ final class AudioLevelAnalyzerTests: XCTestCase {
             samples[i] = (i % 2 == 0) ? amplitude : -amplitude
         }
 
-        let active = AudioLevelAnalyzer.activeAudioSeconds(samples: samples, sampleRate: sampleRate)
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: sampleRate)
         // 50ms burst should produce roughly 0.03–0.06s of active windows (one or two 30ms windows)
         XCTAssertGreaterThan(active, 0.0, "A 50ms burst above threshold must register some active time")
         XCTAssertLessThan(active, 0.15, "A 50ms burst must fall below the speech minimum of 0.15s")
+    }
+
+    func testSeparatedActiveWindowsDoNotCountAsSustainedSpeech() {
+        let sampleRate: Double = 1_000
+        let windowSamples = 30
+        let amplitude = Int16(Int16.max / 3)
+        var samples = [Int16]()
+
+        for _ in 0..<5 {
+            samples.append(contentsOf: [Int16](repeating: amplitude, count: windowSamples))
+            samples.append(contentsOf: [Int16](repeating: 0, count: windowSamples))
+        }
+
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(
+            samples: samples,
+            sampleRate: sampleRate,
+            windowSeconds: 0.03
+        )
+
+        XCTAssertEqual(active, 0.03, accuracy: 0.000_001)
+        XCTAssertLessThan(active, 0.15, "Separated bursts must not satisfy the sustained-speech minimum")
+    }
+
+    func testActiveAudioSecondsRetainsTotalDurationSemantics() {
+        let sampleRate: Double = 1_000
+        let windowSamples = 30
+        let amplitude = Int16(Int16.max / 3)
+        var samples = [Int16]()
+
+        for _ in 0..<5 {
+            samples.append(contentsOf: [Int16](repeating: amplitude, count: windowSamples))
+            samples.append(contentsOf: [Int16](repeating: 0, count: windowSamples))
+        }
+
+        let active = AudioLevelAnalyzer.activeAudioSeconds(
+            samples: samples,
+            sampleRate: sampleRate,
+            windowSeconds: 0.03
+        )
+
+        XCTAssertEqual(active, 0.15, accuracy: 0.000_001)
+    }
+
+    func testConsecutiveActiveWindowsCountAsSustainedSpeech() {
+        let sampleRate: Double = 1_000
+        let amplitude = Int16(Int16.max / 3)
+        let samples = [Int16](repeating: amplitude, count: 150)
+
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(
+            samples: samples,
+            sampleRate: sampleRate,
+            windowSeconds: 0.03
+        )
+
+        XCTAssertEqual(active, 0.15, accuracy: 0.000_001)
     }
 
     func testOneSpeechLikeSineYieldsNearlyFullActiveSeconds() {
@@ -61,7 +116,7 @@ final class AudioLevelAnalyzerTests: XCTestCase {
             samples.append(i % 2 == 0 ? amplitude : -amplitude)
         }
 
-        let active = AudioLevelAnalyzer.activeAudioSeconds(samples: samples, sampleRate: sampleRate)
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: sampleRate)
         XCTAssertGreaterThanOrEqual(active, 0.9, "1s of speech-like signal must yield ≥0.9s active")
     }
 }

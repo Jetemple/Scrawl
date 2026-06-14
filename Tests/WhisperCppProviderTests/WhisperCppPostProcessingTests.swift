@@ -136,11 +136,10 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("—"))
     }
 
-    func testBareTheArticleHallucinationIsTreatedAsNoSpeech() {
-        // "The" is whisper's classic short-clip hallucination on ambient noise
-        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("The"))
-        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript("the."))
-        XCTAssertTrue(WhisperCppProvider.isNoSpeechTranscript(" The "))
+    func testBareTheArticleIsRetainedAsLegitimateSpeech() {
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("The"))
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript("the."))
+        XCTAssertFalse(WhisperCppProvider.isNoSpeechTranscript(" The "))
     }
 
     func testSentenceStartingWithTheIsNotFilteredAsNoSpeech() {

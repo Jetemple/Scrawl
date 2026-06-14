@@ -6,21 +6,38 @@ public struct AudioCaptureConfig: Sendable {
     public var channels: Int
     public var minimumDurationSeconds: Double
     public var silenceThresholdRMS: Double
-    /// Minimum total active-window duration (in seconds) required before sending audio to the
-    /// transcriber. Windows are `activeWindowSeconds` wide; a window is "active" when its RMS
+    /// Minimum consecutive active-window duration (in seconds) required before sending audio to
+    /// the transcriber. Windows are `activeWindowSeconds` wide; a window is "active" when its RMS
     /// exceeds `activeWindowRMS`. Raising this value reduces hallucinations on ambient noise at
     /// the cost of clipping very quiet or whispery speech — tune `activeWindowRMS` downward if
     /// that tradeoff is unacceptable for your use-case.
-    public var minimumActiveSeconds: Double
+    public var minimumSustainedActiveSeconds: Double {
+        get { activeDurationThreshold }
+        set {
+            activeDurationThreshold = newValue
+            usesSustainedActiveDuration = true
+        }
+    }
     public var activeWindowSeconds: Double
     public var activeWindowRMS: Double
+    fileprivate var usesSustainedActiveDuration: Bool
+    private var activeDurationThreshold: Double
+
+    /// Minimum total active-window duration used by configurations created with the legacy API.
+    public var minimumActiveSeconds: Double {
+        get { activeDurationThreshold }
+        set {
+            activeDurationThreshold = newValue
+            usesSustainedActiveDuration = false
+        }
+    }
 
     public init(
         sampleRate: Double = 16_000,
         channels: Int = 1,
         minimumDurationSeconds: Double = 0.18,
         silenceThresholdRMS: Double = 0.001,
-        minimumActiveSeconds: Double = 0.15,
+        minimumSustainedActiveSeconds: Double = 0.15,
         activeWindowSeconds: Double = 0.03,
         activeWindowRMS: Double = 0.0075
     ) {
@@ -28,9 +45,31 @@ public struct AudioCaptureConfig: Sendable {
         self.channels = channels
         self.minimumDurationSeconds = minimumDurationSeconds
         self.silenceThresholdRMS = silenceThresholdRMS
-        self.minimumActiveSeconds = minimumActiveSeconds
         self.activeWindowSeconds = activeWindowSeconds
         self.activeWindowRMS = activeWindowRMS
+        self.usesSustainedActiveDuration = true
+        self.activeDurationThreshold = minimumSustainedActiveSeconds
+    }
+
+    public init(
+        sampleRate: Double = 16_000,
+        channels: Int = 1,
+        minimumDurationSeconds: Double = 0.18,
+        silenceThresholdRMS: Double = 0.001,
+        minimumActiveSeconds: Double,
+        activeWindowSeconds: Double = 0.03,
+        activeWindowRMS: Double = 0.0075
+    ) {
+        self.init(
+            sampleRate: sampleRate,
+            channels: channels,
+            minimumDurationSeconds: minimumDurationSeconds,
+            silenceThresholdRMS: silenceThresholdRMS,
+            minimumSustainedActiveSeconds: minimumActiveSeconds,
+            activeWindowSeconds: activeWindowSeconds,
+            activeWindowRMS: activeWindowRMS
+        )
+        self.minimumActiveSeconds = minimumActiveSeconds
     }
 }
 
@@ -147,13 +186,26 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.audioLevelTooLow
         }
 
-        let activeSeconds = (try? AudioLevelAnalyzer.activeAudioSeconds(
-            fileURL: outputURL,
-            sampleRate: config.sampleRate,
-            windowSeconds: config.activeWindowSeconds,
-            activeRMS: config.activeWindowRMS
-        )) ?? config.minimumActiveSeconds
-        if activeSeconds < config.minimumActiveSeconds {
+        let activeSeconds: Double
+        if config.usesSustainedActiveDuration {
+            activeSeconds = (try? AudioLevelAnalyzer.longestActiveAudioSeconds(
+                fileURL: outputURL,
+                sampleRate: config.sampleRate,
+                windowSeconds: config.activeWindowSeconds,
+                activeRMS: config.activeWindowRMS
+            )) ?? config.minimumSustainedActiveSeconds
+        } else {
+            activeSeconds = (try? AudioLevelAnalyzer.activeAudioSeconds(
+                fileURL: outputURL,
+                sampleRate: config.sampleRate,
+                windowSeconds: config.activeWindowSeconds,
+                activeRMS: config.activeWindowRMS
+            )) ?? config.minimumActiveSeconds
+        }
+        let requiredActiveSeconds = config.usesSustainedActiveDuration
+            ? config.minimumSustainedActiveSeconds
+            : config.minimumActiveSeconds
+        if activeSeconds < requiredActiveSeconds {
             try? FileManager.default.removeItem(at: outputURL)
             throw AudioCaptureError.audioLevelTooLow
         }

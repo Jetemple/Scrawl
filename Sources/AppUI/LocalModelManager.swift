@@ -13,6 +13,7 @@ private enum ModelDownloadError: LocalizedError {
     case badStatusCode(statusCode: Int, url: URL)
     case likelyErrorDocument(URL)
     case allSourcesFailed(modelID: String, failures: [String])
+    case downloadAlreadyInProgress
 
     var errorDescription: String? {
         switch self {
@@ -25,6 +26,83 @@ private enum ModelDownloadError: LocalizedError {
         case let .allSourcesFailed(modelID, failures):
             let details = failures.joined(separator: " | ")
             return "Could not download \(modelID). \(details)"
+        case .downloadAlreadyInProgress:
+            return "Another model download is already in progress."
+        }
+    }
+}
+
+struct ModelDownloadOperationState {
+    private(set) var activeOperationID: UUID?
+    private(set) var activeModelID: String?
+
+    mutating func begin(modelID: String) throws -> UUID {
+        guard activeOperationID == nil else {
+            throw ModelDownloadError.downloadAlreadyInProgress
+        }
+        let operationID = UUID()
+        activeOperationID = operationID
+        activeModelID = modelID
+        return operationID
+    }
+
+    @discardableResult
+    mutating func cancel() -> Bool {
+        guard activeOperationID != nil else { return false }
+        activeOperationID = nil
+        activeModelID = nil
+        return true
+    }
+
+    mutating func finish(_ operationID: UUID) {
+        guard owns(operationID) else { return }
+        cancel()
+    }
+
+    func owns(_ operationID: UUID) -> Bool {
+        activeOperationID == operationID
+    }
+}
+
+private final class DownloadCallbackState: @unchecked Sendable {
+    private let lock = NSLock()
+    private weak var task: URLSessionDownloadTask?
+    private var observation: NSKeyValueObservation?
+    private var didComplete = false
+
+    func setTask(_ task: URLSessionDownloadTask) {
+        lock.withLock {
+            self.task = task
+        }
+    }
+
+    func setObservation(_ observation: NSKeyValueObservation) {
+        lock.withLock {
+            if didComplete {
+                observation.invalidate()
+            } else {
+                self.observation = observation
+            }
+        }
+    }
+
+    func beginCompletion() -> Bool {
+        lock.withLock {
+            guard !didComplete else { return false }
+            didComplete = true
+            observation?.invalidate()
+            observation = nil
+            return true
+        }
+    }
+
+    func byteCounts() -> (received: Int64, expected: Int64?) {
+        lock.withLock {
+            let expected = task?.countOfBytesExpectedToReceive ?? -1
+            return (
+                task?.countOfBytesReceived ?? 0,
+                expected > 0 ? expected : nil
+            )
         }
     }
 }
@@ -38,9 +116,11 @@ final class LocalModelManager: @unchecked Sendable {
     /// Resume data keyed by source URL string — resume data is URL-specific and
     /// cannot be replayed against a different mirror URL.
     private(set) var pendingResumeDataBySourceURL: [String: Data] = [:]
-    private var activeDownloadModelID: String? = nil
+    private var operationState = ModelDownloadOperationState()
     private var activeDownloadTask: URLSessionDownloadTask? = nil
     private var activeDownloadSession: URLSession? = nil
+    private var activeDownloadOperationID: UUID? = nil
+    private var latestDownloadOperationID: UUID? = nil
 
     init(modelsDirectoryURL: URL) {
         self.modelsDirectoryURL = modelsDirectoryURL
@@ -100,44 +180,70 @@ final class LocalModelManager: @unchecked Sendable {
         try FileManager.default.removeItem(at: url)
     }
 
-    func cancelDownload() {
-        lock.lock()
-        let task = activeDownloadTask
-        // Capture the URL before cancelling so resume data can be stored under
-        // the exact URL the task was running against (resume data is URL-specific).
-        let taskURL = task?.currentRequest?.url ?? task?.originalRequest?.url
-        activeDownloadTask = nil
-        activeDownloadModelID = nil
-        isDownloadInProgress = false
-        lock.unlock()
+    @discardableResult
+    func cancelDownload() -> Bool {
+        let cancellation: (didCancel: Bool, task: URLSessionDownloadTask?, taskURL: URL?, operationID: UUID?) = lock.withLock {
+            guard let cancelledOperationID = operationState.activeOperationID else {
+                return (false, nil, nil, nil)
+            }
+            let task = activeDownloadTask
+            // Capture the URL before cancelling so resume data can be stored under
+            // the exact URL the task was running against (resume data is URL-specific).
+            let taskURL = task?.currentRequest?.url ?? task?.originalRequest?.url
+            operationState.cancel()
+            activeDownloadTask = nil
+            activeDownloadSession = nil
+            activeDownloadOperationID = nil
+            isDownloadInProgress = false
+            return (true, task, taskURL, cancelledOperationID)
+        }
+        let (didCancel, task, taskURL, cancelledOperationID) = cancellation
 
-        guard let task else { return }
-        task.cancel(byProducingResumeData: { [weak self] data in
-            guard let self, let data, let urlKey = taskURL?.absoluteString else { return }
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            self.pendingResumeDataBySourceURL[urlKey] = data
+        guard let task else { return didCancel }
+        task.cancel(byProducingResumeData: { [weak self] (data: Data?) in
+            guard let self, let data, let urlKey = taskURL?.absoluteString, let cancelledOperationID else { return }
+            self.lock.withLock {
+                // A restarted operation owns its own URLSession/resume state. A delayed
+                // callback from the cancelled task must not overwrite it.
+                guard self.latestDownloadOperationID == cancelledOperationID else { return }
+                self.pendingResumeDataBySourceURL[urlKey] = data
+            }
         })
+        return didCancel
     }
 
     func download(model: DownloadableModel, onProgress: ProgressHandler? = nil) async throws -> URL {
+        let operationID = try beginDownloadOperation(modelID: model.id)
+        defer { finishDownloadOperation(operationID) }
+
         try ensureDirectory()
         var failures: [String] = []
 
         for sourceURL in model.candidateDownloadURLs {
+            try requireActiveDownloadOperation(operationID)
             var temporaryURL: URL?
             do {
-                let downloadedURL = try await downloadFromURL(sourceURL, modelID: model.id, onProgress: onProgress)
+                let downloadedURL = try await downloadFromURL(
+                    sourceURL,
+                    operationID: operationID,
+                    onProgress: onProgress
+                )
                 temporaryURL = downloadedURL
+                try requireActiveDownloadOperation(operationID)
                 try ModelDownloadValidator.verifySHA256(of: downloadedURL, expected: model.sha256)
-                return try installDownloadedModel(from: downloadedURL, fileName: model.fileName)
+                try requireActiveDownloadOperation(operationID)
+                return try installDownloadedModel(
+                    from: downloadedURL,
+                    fileName: model.fileName,
+                    operationID: operationID
+                )
             } catch {
                 if let temp = temporaryURL {
                     try? FileManager.default.removeItem(at: temp)
                 }
-                // User-initiated cancel: stop immediately without trying other mirrors.
-                if (error as? URLError)?.code == .cancelled {
-                    throw error
+                // User-initiated cancel: stop the entire mirror/retry/install operation.
+                if isCancellation(error) || !ownsDownloadOperation(operationID) {
+                    throw URLError(.cancelled)
                 }
                 if error is ModelDownloadValidator.HashMismatchError {
                     failures.append("\(sourceURL.absoluteString): SHA-256 mismatch")
@@ -154,11 +260,23 @@ final class LocalModelManager: @unchecked Sendable {
         PreferencesModelState.canonicalFamily(raw)
     }
 
-    private func downloadFromURL(_ sourceURL: URL, modelID: String, onProgress: ProgressHandler?) async throws -> URL {
+    private func downloadFromURL(
+        _ sourceURL: URL,
+        operationID: UUID,
+        onProgress: ProgressHandler?
+    ) async throws -> URL {
         var lastError: Error?
         for attempt in 1 ... 2 {
+            try requireActiveDownloadOperation(operationID)
+            var downloadedURL: URL?
             do {
-                let (temporaryURL, response) = try await performDownload(from: sourceURL, modelID: modelID, onProgress: onProgress)
+                let (temporaryURL, response) = try await performDownload(
+                    from: sourceURL,
+                    operationID: operationID,
+                    onProgress: onProgress
+                )
+                downloadedURL = temporaryURL
+                try requireActiveDownloadOperation(operationID)
                 guard let http = response as? HTTPURLResponse else {
                     throw ModelDownloadError.invalidHTTPResponse(sourceURL)
                 }
@@ -168,55 +286,62 @@ final class LocalModelManager: @unchecked Sendable {
                 try validateDownloadedContent(at: temporaryURL, response: response, sourceURL: sourceURL)
                 return temporaryURL
             } catch {
+                if let downloadedURL {
+                    try? FileManager.default.removeItem(at: downloadedURL)
+                }
                 lastError = error
+                if isCancellation(error) || !ownsDownloadOperation(operationID) {
+                    throw URLError(.cancelled)
+                }
                 guard attempt < 2, isTransientNetworkError(error) else {
                     throw error
                 }
                 // Stash any resume data from the system for the next attempt of this same URL.
                 if let resumeDataFromError = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-                    lock.lock()
-                    defer { lock.unlock() }
-                    pendingResumeDataBySourceURL[sourceURL.absoluteString] = resumeDataFromError
+                    lock.withLock {
+                        guard operationState.owns(operationID) else { return }
+                        pendingResumeDataBySourceURL[sourceURL.absoluteString] = resumeDataFromError
+                    }
                 }
                 try await Task.sleep(nanoseconds: 600_000_000)
+                try requireActiveDownloadOperation(operationID)
             }
         }
 
         throw lastError ?? ModelDownloadError.invalidHTTPResponse(sourceURL)
     }
 
-    private func performDownload(from sourceURL: URL, modelID: String, onProgress: ProgressHandler?) async throws -> (URL, URLResponse) {
+    private func performDownload(
+        from sourceURL: URL,
+        operationID: UUID,
+        onProgress: ProgressHandler?
+    ) async throws -> (URL, URLResponse) {
         let session = makeDownloadSession()
 
-        lock.lock()
-        activeDownloadSession = session
-        activeDownloadModelID = modelID
-        isDownloadInProgress = true
-        let resumeData = pendingResumeDataBySourceURL.removeValue(forKey: sourceURL.absoluteString)
-        lock.unlock()
+        let resumeData = try lock.withLock {
+            guard operationState.owns(operationID) else {
+                throw URLError(.cancelled)
+            }
+            activeDownloadSession = session
+            activeDownloadOperationID = operationID
+            return pendingResumeDataBySourceURL.removeValue(forKey: sourceURL.absoluteString)
+        }
 
         defer {
-            lock.lock()
-            defer { lock.unlock() }
-            if activeDownloadSession === session {
-                activeDownloadSession = nil
-                activeDownloadModelID = nil
-                isDownloadInProgress = false
+            lock.withLock {
+                if activeDownloadSession === session, activeDownloadOperationID == operationID {
+                    activeDownloadTask = nil
+                    activeDownloadSession = nil
+                    activeDownloadOperationID = nil
+                }
             }
         }
 
         return try await withCheckedThrowingContinuation { continuation in
-            var observation: NSKeyValueObservation?
-            // Weak box so the completion handler can report final bytes without
-            // creating a retain cycle through the URLSessionDownloadTask.
-            final class WeakTaskBox: @unchecked Sendable {
-                weak var task: URLSessionDownloadTask?
-                init(_ task: URLSessionDownloadTask) { self.task = task }
-            }
-            var taskBox: WeakTaskBox?
+            let callbackState = DownloadCallbackState()
 
             let completionHandler: @Sendable (URL?, URLResponse?, Error?) -> Void = { temporaryURL, response, error in
-                observation?.invalidate()
+                guard callbackState.beginCompletion() else { return }
                 session.finishTasksAndInvalidate()
 
                 if let error {
@@ -239,10 +364,8 @@ final class LocalModelManager: @unchecked Sendable {
                 }
 
                 // Final progress callback so callers see 100 % on success.
-                let expected = taskBox?.task?.countOfBytesExpectedToReceive ?? -1
-                let totalBytes = expected > 0 ? expected : nil
-                let receivedBytes = taskBox?.task?.countOfBytesReceived ?? 0
-                onProgress?(receivedBytes, totalBytes)
+                let counts = callbackState.byteCounts()
+                onProgress?(counts.received, counts.expected)
 
                 continuation.resume(returning: (safeCopy, response))
             }
@@ -253,34 +376,53 @@ final class LocalModelManager: @unchecked Sendable {
             } else {
                 task = session.downloadTask(with: sourceURL, completionHandler: completionHandler)
             }
-            taskBox = WeakTaskBox(task)
+            callbackState.setTask(task)
 
             // Register task under lock BEFORE resume() to eliminate the window
             // where cancelDownload() could see activeDownloadTask == nil.
-            lock.lock()
-            activeDownloadTask = task
-            lock.unlock()
+            do {
+                try lock.withLock {
+                    guard operationState.owns(operationID) else {
+                        throw URLError(.cancelled)
+                    }
+                    activeDownloadTask = task
+                }
+            } catch {
+                session.invalidateAndCancel()
+                if callbackState.beginCompletion() {
+                    continuation.resume(throwing: error)
+                }
+                return
+            }
 
             if let onProgress {
-                observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak task] _, _ in
+                let observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak task] _, _ in
                     let expected = task?.countOfBytesExpectedToReceive ?? -1
                     let totalBytes = expected > 0 ? expected : nil
                     let receivedBytes = task?.countOfBytesReceived ?? 0
                     onProgress(receivedBytes, totalBytes)
                 }
+                callbackState.setObservation(observation)
             }
 
             task.resume()
         }
     }
 
-    private func installDownloadedModel(from temporaryURL: URL, fileName: String) throws -> URL {
-        let destination = modelsDirectoryURL.appendingPathComponent(fileName)
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
+    private func installDownloadedModel(from temporaryURL: URL, fileName: String, operationID: UUID) throws -> URL {
+        try lock.withLock {
+            guard operationState.owns(operationID) else {
+                throw URLError(.cancelled)
+            }
+            let destination = modelsDirectoryURL.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.moveItem(at: temporaryURL, to: destination)
+            operationState.finish(operationID)
+            isDownloadInProgress = false
+            return destination
         }
-        try FileManager.default.moveItem(at: temporaryURL, to: destination)
-        return destination
     }
 
     private func makeDownloadSession() -> URLSession {
@@ -316,11 +458,57 @@ final class LocalModelManager: @unchecked Sendable {
         }
     }
 
+    private func beginDownloadOperation(modelID: String) throws -> UUID {
+        try lock.withLock {
+            let operationID = try operationState.begin(modelID: modelID)
+            latestDownloadOperationID = operationID
+            isDownloadInProgress = true
+            return operationID
+        }
+    }
+
+    private func finishDownloadOperation(_ operationID: UUID) {
+        lock.withLock {
+            guard operationState.owns(operationID) else { return }
+            operationState.finish(operationID)
+            isDownloadInProgress = false
+        }
+    }
+
+    private func ownsDownloadOperation(_ operationID: UUID) -> Bool {
+        lock.withLock {
+            operationState.owns(operationID)
+        }
+    }
+
+    private func requireActiveDownloadOperation(_ operationID: UUID) throws {
+        do {
+            try Task.checkCancellation()
+        } catch {
+            throw URLError(.cancelled)
+        }
+        guard ownsDownloadOperation(operationID) else {
+            throw URLError(.cancelled)
+        }
+    }
+
+    private func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+
     private func describe(_ error: Error) -> String {
         if let error = error as? LocalizedError, let description = error.errorDescription {
             return description
         }
         return String(describing: error)
+    }
+}
+
+private extension NSLock {
+    func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
+        lock()
+        defer { unlock() }
+        return try body()
     }
 }
 

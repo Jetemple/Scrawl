@@ -156,7 +156,10 @@ final class PreferencesModelsView: NSView {
         statusLabel.textColor = row.isSelected ? .systemBlue : .secondaryLabelColor
         statusLabel.alignment = .right
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.widthAnchor.constraint(equalToConstant: 72).isActive = true
+        // Size to the status text so longer strings like "Download cancelled" render in
+        // full; the name label (low compression resistance) yields space instead.
+        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let actionArea: NSView
         if row.isSelected {

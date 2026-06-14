@@ -157,14 +157,47 @@ public final class RecordingOverlayController: @unchecked Sendable {
     static func pillWidth(forText text: String, font: NSFont, leadingAccessoryWidth: CGFloat) -> CGFloat {
         let padding: CGFloat = 14
         let measuredText = ceil((text as NSString).size(withAttributes: [.font: font]).width)
-        let required = padding + leadingAccessoryWidth + measuredText + padding
+        let required = padding + leadingAccessoryWidth + measuredText + labelTextInset + padding
         return min(max(required, minPillWidth), maxPillWidth)
     }
 
     static let minPillWidth: CGFloat = 148
     static let maxPillWidth: CGFloat = 420
-    static let pillHeight: CGFloat = 34
+    /// Height of a single-line pill. A wrapped pill adds `pillLineHeight` per extra line.
+    static let basePillHeight: CGFloat = 34
+    /// Vertical space one line of label text occupies inside the pill.
+    static let pillLineHeight: CGFloat = 16
+    /// Long messages wrap up to this many lines before the last line ellipsizes.
+    static let maxPillLines = 2
+    /// Slack reserved for the NSTextField cell's internal inset, which makes the cell
+    /// need slightly more width than `NSString.size` reports. Without it the cell wraps
+    /// a "one line" message and clips the hidden second line.
+    static let labelTextInset: CGFloat = 8
     static let shadowMargin: CGFloat = 12
+
+    /// Returns the pill height needed to render `text`. Text that fits on one line at the
+    /// width `pillWidth(forText:)` chose keeps `basePillHeight`; longer text wraps up to
+    /// `maxPillLines`, growing the pill taller. Both functions share the same width and
+    /// inset accounting so the height never under-allocates lines the cell will render.
+    static func pillHeight(forText text: String, font: NSFont, leadingAccessoryWidth: CGFloat) -> CGFloat {
+        let padding: CGFloat = 14
+        let measured = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        let chosenWidth = pillWidth(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
+        // Usable text width inside the label, leaving the cell's internal inset as slack.
+        let usable = chosenWidth - padding - leadingAccessoryWidth - padding - labelTextInset
+        guard measured > usable else {
+            return basePillHeight
+        }
+
+        let bounding = (text as NSString).boundingRect(
+            with: CGSize(width: max(usable, 1), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+        let neededLines = max(1, Int(ceil(bounding.height / pillLineHeight)))
+        let cappedLines = min(neededLines, maxPillLines)
+        return basePillHeight + CGFloat(cappedLines - 1) * pillLineHeight
+    }
 
     // MARK: - Panel setup
 
@@ -174,7 +207,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         }
 
         let pillWidth = Self.minPillWidth
-        let pillHeight = Self.pillHeight
+        let pillHeight = Self.basePillHeight
         let frame = NSRect(x: 0, y: 0, width: pillWidth, height: pillHeight)
 
         let panel = NSPanel(
@@ -232,7 +265,11 @@ public final class RecordingOverlayController: @unchecked Sendable {
         let label = NSTextField(labelWithString: "")
         label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         label.textColor = .labelColor
+        // Wrap long messages onto a second line (then ellipsize) instead of clipping words.
         label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = Self.maxPillLines
+        label.cell?.wraps = true
+        label.cell?.isScrollable = false
 
         let spinner = NSProgressIndicator()
         spinner.style = .spinning
@@ -261,10 +298,13 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
     /// Generates the CGPath used for the shadow host's shadowPath.
     private static func makeShadowPath(pillWidth: CGFloat, pillHeight: CGFloat, shadowMargin: CGFloat) -> CGPath {
-        CGPath(
+        // Fixed corner radius (single-line capsule radius) so a taller, wrapped pill
+        // reads as a rounded rectangle instead of an over-rounded stadium.
+        let cornerRadius = basePillHeight / 2
+        return CGPath(
             roundedRect: CGRect(x: shadowMargin, y: shadowMargin, width: pillWidth, height: pillHeight),
-            cornerWidth: pillHeight / 2,
-            cornerHeight: pillHeight / 2,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
             transform: nil
         )
     }
@@ -290,20 +330,20 @@ public final class RecordingOverlayController: @unchecked Sendable {
         }
 
         let newWidth = Self.pillWidth(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
-        let pillHeight = Self.pillHeight
+        let newHeight = Self.pillHeight(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
         let shadowMargin = Self.shadowMargin
 
         // Resize panel (autoresizingMask on container/visual/shadowHost propagates the change).
         panel.setFrame(
-            NSRect(origin: panel.frame.origin, size: NSSize(width: newWidth, height: pillHeight)),
+            NSRect(origin: panel.frame.origin, size: NSSize(width: newWidth, height: newHeight)),
             display: false
         )
 
-        // Regenerate shadow path to match new width.
+        // Regenerate shadow path to match the new width and height.
         if let shadowHost = panel.contentView?.subviews.first {
             shadowHost.layer?.shadowPath = Self.makeShadowPath(
                 pillWidth: newWidth,
-                pillHeight: pillHeight,
+                pillHeight: newHeight,
                 shadowMargin: shadowMargin
             )
         }
@@ -373,11 +413,14 @@ public final class RecordingOverlayController: @unchecked Sendable {
                 height: 16
             )
         } else {
+            // No accessory: this is where long transient messages live, so let the label
+            // fill the pill's (possibly multi-line) height instead of a fixed 16pt line.
+            let labelInset = (Self.basePillHeight - Self.pillLineHeight) / 2
             titleLabel.frame = NSRect(
                 x: padding,
-                y: (h - 16) / 2,
+                y: labelInset,
                 width: panel.frame.width - padding * 2,
-                height: 16
+                height: h - labelInset * 2
             )
         }
     }

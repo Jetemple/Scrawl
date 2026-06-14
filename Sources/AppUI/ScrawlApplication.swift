@@ -8,6 +8,25 @@ import TextOutput
 import TranscriptHistoryStore
 import TranscriptionCore
 
+/// Pure decision for how to guide the user toward granting Accessibility, given the
+/// current authorization state and whether the macOS system prompt has already been
+/// shown this session. Side-effect-free so it is unit-testable.
+///
+/// The macOS prompt (shown by `AXIsProcessTrustedWithOptions(prompt:)`) already includes
+/// an "Open System Settings" button and only appears once per TCC record, so the first
+/// request must show the prompt *only* — opening Settings as well pops the notification
+/// AND the Settings page at once. Settings is the fallback for a later, still-denied retry.
+enum AccessibilityPromptDecision: Equatable {
+    case alreadyAuthorized
+    case showSystemPrompt
+    case openSettings
+
+    static func decide(isAuthorized: Bool, hasShownSystemPrompt: Bool) -> AccessibilityPromptDecision {
+        if isAuthorized { return .alreadyAuthorized }
+        return hasShownSystemPrompt ? .openSettings : .showSystemPrompt
+    }
+}
+
 public final class ScrawlApplication {
     public init() {}
 
@@ -106,6 +125,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var downloadingModelID: String?
     private var cancelledModelID: String?
     private var currentDownloadProgressText: String?
+    private var modelDownloadGeneration: UUID?
+    private var modelDownloadTask: Task<Void, Never>?
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
     private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
@@ -184,7 +205,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     @objc private func requestAccessibilityPermission(_ sender: Any?) {
-        promptForAccessibilityPermission(force: true)
+        promptForAccessibilityPermission()
     }
 
     @objc private func toggleHotkeyCapture(_ sender: Any?) {
@@ -257,6 +278,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 deleteDictionaryEntries: { [weak self] wrongValues, completion in
                     self?.deleteDictionaryEntries(wrongValues: wrongValues, completion: completion)
                 },
+                recoverDictionary: { [weak self] completion in
+                    self?.recoverDictionary(completion: completion)
+                },
                 openProjectPage: {
                     guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
                     NSWorkspace.shared.open(url)
@@ -296,7 +320,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 transcriptHistoryLoadErrorDescription: runtime.transcriptHistoryStore.loadErrorDescription,
                 dictionaryEntries: runtime.dictionaryStore.terms().map {
                     DictionaryEntry(wrong: $0.value, correct: $0.value)
-                }
+                },
+                dictionaryLoadErrorDescription: runtime.dictionaryStore.loadErrorDescription
             )
         )
     }
@@ -412,6 +437,30 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let store = runtime.dictionaryStore
         dictionaryActionQueue.async { [weak self] in
             let result = Result { try store.deleteTerms(wrongValues) }
+            DispatchQueue.main.async {
+                if case .success = result {
+                    self?.refreshPreferencesWindow()
+                }
+                completion(result)
+            }
+        }
+    }
+
+    private func recoverDictionary(completion: @escaping (Result<Void, Error>) -> Void) {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Reset Vocabulary?"
+        alert.informativeText = "The unreadable vocabulary file will be preserved as a backup before Scrawl creates an empty vocabulary."
+        alert.addButton(withTitle: "Reset Vocabulary")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            completion(.success(()))
+            return
+        }
+
+        let store = runtime.dictionaryStore
+        dictionaryActionQueue.async { [weak self] in
+            let result = Result { try store.clear() }
             DispatchQueue.main.async {
                 if case .success = result {
                     self?.refreshPreferencesWindow()
@@ -655,8 +704,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func cancelModelDownload() {
+        // `isModelDownloadInProgress` is the UI's source of truth: it flips true
+        // synchronously when the user starts a download — before the async Task registers
+        // the operation inside LocalModelManager. Tearing down on this flag (rather than on
+        // the manager's return value) guarantees a cancel during that window, or as the
+        // download finishes, still resets the UI instead of leaving it stuck on "Downloading".
+        guard isModelDownloadInProgress else { return }
+        _ = modelManager.cancelDownload()
         let cancelledID = downloadingModelID
-        modelManager.cancelDownload()
+        modelDownloadGeneration = nil
+        modelDownloadTask?.cancel()
+        modelDownloadTask = nil
         isModelDownloadInProgress = false
         downloadingModelID = nil
         cancelledModelID = cancelledID
@@ -679,22 +737,28 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         downloadingModelID = model.id
         cancelledModelID = nil
         currentDownloadProgressText = nil
+        let downloadGeneration = UUID()
+        modelDownloadGeneration = downloadGeneration
         refreshModelMenu()
         refreshPreferencesWindow()
         setStatus("Downloading \(model.displayName)...")
 
-        Task { [weak self] in
+        modelDownloadTask = Task { [weak self] in
             guard let self else { return }
             do {
                 _ = try await self.modelManager.download(model: model) { [weak self] receivedBytes, totalBytes in
                     guard let self else { return }
-                    let newText = self.downloadProgressText(for: model, receivedBytes: receivedBytes, totalBytes: totalBytes)
-                    self.setStatus(newText)
-                    // Only rebuild the Models page when the rendered progress string
-                    // changes — the callback fires on every URLSession data chunk,
-                    // which is far more often than the text visually changes.
                     Task { @MainActor [weak self] in
-                        guard let self else { return }
+                        guard let self, self.modelDownloadGeneration == downloadGeneration else { return }
+                        let newText = self.downloadProgressText(
+                            for: model,
+                            receivedBytes: receivedBytes,
+                            totalBytes: totalBytes
+                        )
+                        self.setStatus(newText)
+                        // Only rebuild the Models page when the rendered progress string
+                        // changes — the callback fires on every URLSession data chunk,
+                        // which is far more often than the text visually changes.
                         let progressLabel = self.formatProgressLabel(receivedBytes: receivedBytes, totalBytes: totalBytes)
                         guard progressLabel != self.currentDownloadProgressText else { return }
                         self.currentDownloadProgressText = progressLabel
@@ -702,6 +766,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     }
                 }
                 await MainActor.run {
+                    guard self.modelDownloadGeneration == downloadGeneration else { return }
                     self.mutateSettings {
                         $0.selectedModelID = model.id
                         if $0.defaultModelID.isEmpty {
@@ -712,9 +777,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 }
             } catch {
                 await MainActor.run {
+                    guard self.modelDownloadGeneration == downloadGeneration else { return }
                     // User-initiated cancel: the quiet "Download cancelled" status
                     // set by cancelModelDownload() is the only user-visible surface.
-                    if (error as? URLError)?.code == .cancelled { return }
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
                     let details = self.describe(error)
                     self.setStatus("Download failed")
                     _ = self.presentAlert(
@@ -728,10 +794,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 }
             }
             await MainActor.run {
-                // Only reset state if this Task still owns the download slot.
-                // A cancel + immediate restart of a new download would otherwise
-                // let the old Task's cleanup clobber the new download's UI state.
-                guard self.downloadingModelID == model.id else { return }
+                guard self.modelDownloadGeneration == downloadGeneration else { return }
+                self.modelDownloadGeneration = nil
+                self.modelDownloadTask = nil
                 self.isModelDownloadInProgress = false
                 self.downloadingModelID = nil
                 self.currentDownloadProgressText = nil
@@ -846,36 +911,40 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         )
     }
 
-    private func promptForAccessibilityPermission(force: Bool) {
-        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
-        if cachedAccessibilityAuthorized {
+    private func promptForAccessibilityPermission() {
+        let isAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        cachedAccessibilityAuthorized = isAuthorized
+
+        switch AccessibilityPromptDecision.decide(
+            isAuthorized: isAuthorized,
+            hasShownSystemPrompt: hasPromptedAccessibilityForHotkeyAttempt
+        ) {
+        case .alreadyAuthorized:
             hasPromptedAccessibilityForHotkeyAttempt = false
             updatePermissionRows()
             teardownHotkeyHandling()
             setupHotkeyHandling()
             setStatus("Hotkey ready")
-            return
-        }
 
-        if hasPromptedAccessibilityForHotkeyAttempt && !force {
-            openAccessibilitySettings()
-            runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
-            setStatus("Enable Accessibility in System Settings")
-            return
-        }
+        case .showSystemPrompt:
+            hasPromptedAccessibilityForHotkeyAttempt = true
+            // The macOS prompt already includes an "Open System Settings" button, so we
+            // must NOT also open Settings — doing both pops the notification AND the
+            // Settings page at once. Settings is reserved for a later still-denied retry.
+            _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
+            cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+            updatePermissionRows()
+            if cachedAccessibilityAuthorized {
+                hasPromptedAccessibilityForHotkeyAttempt = false
+                teardownHotkeyHandling()
+                setupHotkeyHandling()
+                setStatus("Hotkey ready")
+            } else {
+                runtime.overlayController.showTransientMessage("Allow Accessibility for Scrawl, then try again")
+                setStatus("Waiting for Accessibility permission")
+            }
 
-        hasPromptedAccessibilityForHotkeyAttempt = true
-
-        _ = runtime.permissionManager.requestAccessibilityAccess(prompt: true)
-        cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
-        updatePermissionRows()
-
-        if cachedAccessibilityAuthorized {
-            hasPromptedAccessibilityForHotkeyAttempt = false
-            teardownHotkeyHandling()
-            setupHotkeyHandling()
-            setStatus("Hotkey ready")
-        } else {
+        case .openSettings:
             openAccessibilitySettings()
             runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
             setStatus("Enable Accessibility in System Settings")
@@ -1246,7 +1315,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         if runtime.permissionManager.accessibilityStatus() != .authorized {
-            promptForAccessibilityPermission(force: false)
+            promptForAccessibilityPermission()
             return
         }
 

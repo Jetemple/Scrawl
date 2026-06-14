@@ -133,6 +133,7 @@ actor WarmWhisperServer {
 
         // Server already running and ready
         if serverKey == key, let process, process.isRunning, let baseURL {
+            scheduleOffload()
             return baseURL
         }
 

@@ -87,6 +87,27 @@ final class JSONDictionaryStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: bakURL), garbageData, "backup must contain original corrupt data")
     }
 
+    func testClearOnCorruptFileSucceedsWhenDefaultBackupAlreadyExists() throws {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appending(path: "dictionary.json")
+        let bakURL = directory.appending(path: "dictionary.json.bak")
+        let previousBackup = Data("previous corrupt contents".utf8)
+        let currentGarbage = Data("new corrupt contents".utf8)
+        try previousBackup.write(to: bakURL)
+        try currentGarbage.write(to: fileURL)
+
+        let store = JSONDictionaryStore(fileURL: fileURL)
+        try store.clear()
+
+        XCTAssertEqual(try Data(contentsOf: bakURL), previousBackup)
+        let backups = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("dictionary.json.bak") }
+        XCTAssertEqual(backups.count, 2)
+        XCTAssertTrue(backups.contains { (try? Data(contentsOf: $0)) == currentGarbage })
+    }
+
     func testClearOnCorruptFileRecoversSoFutureMutationsSucceed() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

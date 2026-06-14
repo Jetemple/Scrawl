@@ -245,6 +245,87 @@ final class WarmWhisperServerTests: XCTestCase {
         await server.shutdown()
     }
 
+    func testReusingRunningServerRefreshesIdleOffloadDeadline() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+        let stubURL = tmpDir.appendingPathComponent("stub-http-server-\(UUID().uuidString)")
+        let counterURL = tmpDir.appendingPathComponent("stub-launch-count-\(UUID().uuidString).txt")
+        let pyScriptURL = tmpDir.appendingPathComponent("stub-server-\(UUID().uuidString).py")
+        defer {
+            try? FileManager.default.removeItem(at: stubURL)
+            try? FileManager.default.removeItem(at: counterURL)
+            try? FileManager.default.removeItem(at: pyScriptURL)
+        }
+
+        let pyScript = """
+        import sys, socket, threading
+        port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(('127.0.0.1', port))
+        s.listen(10)
+        body = b'<title>Whisper.cpp Server</title>'
+        resp = (b'HTTP/1.1 200 OK\\r\\nContent-Type: text/html\\r\\n'
+                b'Content-Length: ' + str(len(body)).encode() + b'\\r\\n'
+                b'Connection: close\\r\\n\\r\\n' + body)
+        while True:
+            try:
+                conn, _ = s.accept()
+                def handle(c):
+                    try: c.recv(4096); c.sendall(resp)
+                    finally: c.close()
+                threading.Thread(target=handle, args=(conn,), daemon=True).start()
+            except Exception:
+                break
+        """
+        try pyScript.write(to: pyScriptURL, atomically: true, encoding: .utf8)
+
+        let stubScript = """
+        #!/bin/sh
+        port=""
+        while [ $# -gt 0 ]; do
+          case "$1" in --port) port="$2"; shift 2;; *) shift;; esac
+        done
+        printf '1\\n' >> "\(counterURL.path)"
+        exec python3 "\(pyScriptURL.path)" "$port"
+        """
+        try stubScript.write(to: stubURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stubURL.path)
+
+        let config = WhisperCppConfig(
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/whisper-cli"),
+            serverExecutableURL: stubURL,
+            modelsDirectoryURL: FileManager.default.temporaryDirectory,
+            idleOffloadSeconds: 1.0
+        )
+        let server = WarmWhisperServer(config: config)
+        let key = WarmWhisperServer.ServerKey(modelID: "test", language: "en", forceNoGPU: false)
+        let modelPath = URL(fileURLWithPath: "/tmp/fake-model.bin")
+
+        func launchCount() -> Int {
+            let text = (try? String(contentsOf: counterURL, encoding: .utf8)) ?? ""
+            return text.components(separatedBy: "\n").filter { $0 == "1" }.count
+        }
+
+        _ = try await server.ensureRunning(key: key, modelPath: modelPath)
+        try await Task.sleep(nanoseconds: 650_000_000)
+
+        // Reusing the running server should move its idle deadline forward.
+        _ = try await server.ensureRunning(key: key, modelPath: modelPath)
+        try await Task.sleep(nanoseconds: 650_000_000)
+
+        // This is past the original deadline, but before the refreshed deadline.
+        _ = try await server.ensureRunning(key: key, modelPath: modelPath)
+        XCTAssertEqual(launchCount(), 1, "Expected reuse to keep the original server alive")
+
+        // The preceding reuse refreshed the deadline again; after it expires, the
+        // next ensureRunning call should launch a replacement.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        _ = try await server.ensureRunning(key: key, modelPath: modelPath)
+        XCTAssertEqual(launchCount(), 2, "Expected server to offload after the refreshed deadline")
+
+        await server.shutdown()
+    }
+
     // MARK: - Fix 2: retry on early server exit
 
     /// Verifies that when whisper-server exits during startup (simulated by a stub

@@ -130,6 +130,51 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(rows[0].isDownloading)
     }
 
+    // Regression: a cancel that lands as the download finishes can leave the model both
+    // installed AND flagged by cancelledModelID. An installed model is installed — it must
+    // never render as "Download cancelled" (which produced a "Use" button next to a
+    // "Download cancelled" status in the row).
+    func testInstalledModelIsNeverMarkedCancelledEvenWhenCancelledIDMatches() {
+        let rows = PreferencesModelState.rows(
+            downloadableModels: [
+                DownloadableModel(
+                    id: "ggml-medium",
+                    fileName: "ggml-medium.bin",
+                    displayName: "medium - multilingual, 1.5 GB",
+                    url: URL(string: "https://example.com/medium.bin")!,
+                    sha256: "dummy-sha256-for-tests"
+                )
+            ],
+            installedModelIDs: ["ggml-medium"],
+            selectedModelID: "",
+            downloadingModelID: nil,
+            cancelledModelID: "ggml-medium"
+        )
+        let row = try! XCTUnwrap(rows.first { $0.id == "ggml-medium" })
+        XCTAssertTrue(row.isInstalled)
+        XCTAssertFalse(row.isCancelled, "An installed model must not also be flagged cancelled")
+        XCTAssertEqual(row.statusText, "Installed")
+        XCTAssertEqual(row.actionTitle, "Use")
+    }
+
+    // Defense in depth: even if a row is constructed as both installed and cancelled,
+    // statusText must prefer the installed/selected truth over the stale cancelled flag.
+    func testStatusTextPrefersInstalledAndSelectedOverCancelled() {
+        let installed = PreferencesModelRow(
+            id: "ggml-medium", displayName: "medium",
+            isInstalled: true, isSelected: false, isDownloading: false,
+            isCancelled: true, downloadProgressText: nil
+        )
+        XCTAssertEqual(installed.statusText, "Installed")
+
+        let selected = PreferencesModelRow(
+            id: "ggml-medium", displayName: "medium",
+            isInstalled: true, isSelected: true, isDownloading: false,
+            isCancelled: true, downloadProgressText: nil
+        )
+        XCTAssertEqual(selected.statusText, "Selected")
+    }
+
     // Regression: installed ggml-medium.en must NOT suppress the downloadable ggml-medium.
     func testInstalledEnglishVariantDoesNotSatisfyMultilingualDownloadable() {
         let rows = PreferencesModelState.rows(

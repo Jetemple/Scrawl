@@ -379,6 +379,25 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testDictionaryPageShowsUnavailableStateAndDispatchesRecovery() throws {
+        var didRecover = false
+        let controller = PreferencesWindowController(actions: makeActions(
+            recoverDictionary: { completion in
+                didRecover = true
+                completion(.success(()))
+            }
+        ))
+
+        controller.update(snapshot: makeSnapshot(dictionaryLoadErrorDescription: "corrupt"))
+        controller.selectSection(.dictionary)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        XCTAssertEqual(controller.dictionaryState, .unavailable)
+        try XCTUnwrap(contentView.button(titled: "Reset Vocabulary")).performClick(nil)
+        XCTAssertTrue(didRecover)
+    }
+
+    @MainActor
     func testDictionarySelectionUsesUpdatedVisibleKeyAfterCaseOnlyEdit() {
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot(dictionaryEntries: [
@@ -496,6 +515,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         historyLoadErrorDescription: String? = nil,
         records: [TranscriptRecord] = [],
         dictionaryEntries: [DictionaryEntry] = [],
+        dictionaryLoadErrorDescription: String? = nil,
         modelRows: [PreferencesModelRow] = [],
         downloadProgressText: String? = nil,
         keepTranscriptsInClipboardHistory: Bool = false
@@ -515,7 +535,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
             downloadProgressText: downloadProgressText,
             transcriptHistory: records,
             transcriptHistoryLoadErrorDescription: historyLoadErrorDescription,
-            dictionaryEntries: dictionaryEntries
+            dictionaryEntries: dictionaryEntries,
+            dictionaryLoadErrorDescription: dictionaryLoadErrorDescription
         )
     }
 
@@ -536,6 +557,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
         },
         deleteDictionaryEntries: @escaping (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void = {
             _, completion in completion(.success(()))
+        },
+        recoverDictionary: @escaping (@escaping (Result<Void, Error>) -> Void) -> Void = {
+            completion in completion(.success(()))
         }
     ) -> PreferencesWindowController.Actions {
         PreferencesWindowController.Actions(
@@ -554,6 +578,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             deleteTranscripts: deleteTranscripts,
             saveDictionaryEntry: saveDictionaryEntry,
             deleteDictionaryEntries: deleteDictionaryEntries,
+            recoverDictionary: recoverDictionary,
             openProjectPage: openProjectPage
         )
     }

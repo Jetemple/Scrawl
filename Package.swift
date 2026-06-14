@@ -25,6 +25,18 @@ let package = Package(
             name: "ScrawlApp",
             dependencies: [
                 "AppUI"
+            ],
+            linkerSettings: [
+                // Embed the app Info.plist into the executable so `Bundle.main` reports the
+                // real version even when launched as a bare binary via `swift run`/`make run`
+                // (no .app bundle). Installed bundles still read their own Contents/Info.plist,
+                // which takes precedence. Single source of truth: Config/ScrawlApp-Info.plist.
+                .unsafeFlags([
+                    "-Xlinker", "-sectcreate",
+                    "-Xlinker", "__TEXT",
+                    "-Xlinker", "__info_plist",
+                    "-Xlinker", "Config/ScrawlApp-Info.plist"
+                ])
             ]
         ),
         .target(

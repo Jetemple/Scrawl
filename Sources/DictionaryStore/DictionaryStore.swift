@@ -327,8 +327,11 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
             }
 
             if allowLoadErrorRecovery, loadError != nil {
-                let bakURL = URL(fileURLWithPath: fileURL.path + ".bak")
                 if FileManager.default.fileExists(atPath: fileURL.path) {
+                    let defaultBackupURL = URL(fileURLWithPath: fileURL.path + ".bak")
+                    let bakURL = FileManager.default.fileExists(atPath: defaultBackupURL.path)
+                        ? URL(fileURLWithPath: fileURL.path + ".bak-\(UUID().uuidString)")
+                        : defaultBackupURL
                     try FileManager.default.copyItem(at: fileURL, to: bakURL)
                     try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: bakURL.path)
                 }

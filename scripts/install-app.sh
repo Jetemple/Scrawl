@@ -23,8 +23,11 @@ KEEP_ACCESSIBILITY_GRANT=0
 SIGNED_APP=0
 SKIP_LAUNCH="${SCRAWL_SKIP_LAUNCH:-0}"
 
-BUILD_OUTPUT_DIR="$REPO_ROOT/.build/$BUILD_CONFIGURATION"
-BUILT_EXECUTABLE="$BUILD_OUTPUT_DIR/$EXECUTABLE_TARGET"
+BUILD_ARGS=(-c "$BUILD_CONFIGURATION")
+for arch in $BUILD_ARCHS; do
+    BUILD_ARGS+=(--arch "$arch")
+done
+BUILD_ARGS+=(--product "$EXECUTABLE_TARGET")
 
 STAGING_DIR="$REPO_ROOT/.build/install"
 STAGED_APP_PATH="$STAGING_DIR/$APP_BUNDLE_NAME"
@@ -73,7 +76,10 @@ capitalized_build_configuration() {
 resolve_built_executable() {
     local capitalized_configuration
     capitalized_configuration="$(capitalized_build_configuration)"
+    local swiftpm_bin_path
+    swiftpm_bin_path="$(cd "$REPO_ROOT" && swift build "${BUILD_ARGS[@]}" --show-bin-path)"
     local candidates=(
+        "$swiftpm_bin_path/$EXECUTABLE_TARGET"
         "$REPO_ROOT/.build/apple/Products/$capitalized_configuration/$EXECUTABLE_TARGET"
         "$REPO_ROOT/.build/$BUILD_CONFIGURATION/$EXECUTABLE_TARGET"
     )
@@ -107,12 +113,7 @@ verify_signed_app() {
 
 if [[ "${SCRAWL_SKIP_BUILD:-0}" != "1" ]]; then
     echo "Building $EXECUTABLE_TARGET ($BUILD_CONFIGURATION)..."
-    BUILD_ARGS=(-c "$BUILD_CONFIGURATION")
-    for arch in $BUILD_ARCHS; do
-        BUILD_ARGS+=(--arch "$arch")
-    done
-    BUILD_ARGS+=(--product "$EXECUTABLE_TARGET")
-    swift build "${BUILD_ARGS[@]}"
+    (cd "$REPO_ROOT" && swift build "${BUILD_ARGS[@]}")
 fi
 
 BUILT_EXECUTABLE="$(resolve_built_executable)"

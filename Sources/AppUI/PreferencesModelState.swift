@@ -20,9 +20,11 @@ struct PreferencesModelRow: Equatable, Sendable {
 
     var statusText: String {
         if isDownloading { return "Downloading" }
-        if isCancelled { return "Download cancelled" }
+        // Installed/selected truth wins over a stale cancelled flag: a model that is
+        // actually on disk is never "cancelled", even if a cancel raced its install.
         if isSelected { return "Selected" }
         if isInstalled { return "Installed" }
+        if isCancelled { return "Download cancelled" }
         return "Available"
     }
 
@@ -59,7 +61,9 @@ enum PreferencesModelState {
             let installedModelID = installedIDs.contains(model.id) ? model.id : installedIDByFamily[canonicalFamily(model.id)]
             let rowModelID = installedModelID ?? model.id
             let isInstalled = installedModelID != nil
-            let isCancelled = (rowModelID == cancelledModelID || model.id == cancelledModelID)
+            // An installed model is never "cancelled" — a cancel that races a finishing
+            // download must not leave the row showing "Download cancelled" next to "Use".
+            let isCancelled = !isInstalled && (rowModelID == cancelledModelID || model.id == cancelledModelID)
             let isDownloading = rowModelID == downloadingModelID || model.id == downloadingModelID
             return PreferencesModelRow(
                 id: rowModelID,
