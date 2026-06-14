@@ -1,5 +1,7 @@
 .build/
 .swiftpm/
+coverage.lcov
+*.lcov
 DerivedData/
 .DS_Store
 benchmarks/
