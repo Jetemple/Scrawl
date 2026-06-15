@@ -12,7 +12,6 @@
 
 <p align="center">
   <a href="https://github.com/Jetemple/Scrawl/actions/workflows/ci.yml"><img src="https://github.com/Jetemple/Scrawl/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://codecov.io/gh/Jetemple/Scrawl"><img src="https://codecov.io/gh/Jetemple/Scrawl/branch/master/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/Jetemple/Scrawl/releases/latest"><img src="https://img.shields.io/github/v/release/Jetemple/Scrawl?sort=semver" alt="Latest release"></a>
   <a href="https://github.com/Jetemple/Scrawl/releases"><img src="https://img.shields.io/github/downloads/Jetemple/Scrawl/total" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+">
@@ -75,8 +74,8 @@ open /Applications/Scrawl.app
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
 
 Download a model from the Models menu:
-- `medium` is the default recommendation on GPU-enabled Macs.
-- `small.en` is the default recommendation when running CPU-only.
+- `small.en` is the recommended default — fast, accurate for English, and what Scrawl pre-selects on first launch.
+- Pick `medium` for multilingual transcription, or `large-v3-turbo` for the highest accuracy.
 
 ### Verify install in 30 seconds
 

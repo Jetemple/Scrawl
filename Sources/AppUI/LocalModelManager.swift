@@ -107,6 +107,39 @@ private final class DownloadCallbackState: @unchecked Sendable {
     }
 }
 
+/// Coalesces the high-frequency `Progress.fractionCompleted` KVO firings that drive
+/// download progress. URLSession posts an update per buffer write — many per second during
+/// a multi-hundred-MB model download — and each one previously hopped to the MainActor,
+/// starving in-flight transcription's main-thread completion. Forwarding only when the
+/// fraction advances by at least `minimumStep` (plus the terminal 1.0) caps the work at
+/// roughly `1/minimumStep` updates for the entire download, independent of file size/speed.
+final class DownloadProgressThrottle: @unchecked Sendable {
+    private let minimumStep: Double
+    private let lock = NSLock()
+    private var lastForwarded = -1.0
+
+    init(minimumStep: Double = 0.005) {
+        self.minimumStep = minimumStep
+    }
+
+    /// Returns `true` at most ~`1/minimumStep + 1` times across a 0→1 progression: once each
+    /// time the fraction first crosses a step boundary, and once when it reaches 1.0.
+    /// Non-finite fractions are dropped. Thread-safe — KVO fires on an arbitrary queue.
+    func shouldForward(fraction: Double) -> Bool {
+        guard fraction.isFinite else { return false }
+        return lock.withLock {
+            if fraction >= 1.0 {
+                guard lastForwarded < 1.0 else { return false }
+                lastForwarded = 1.0
+                return true
+            }
+            guard fraction - lastForwarded >= minimumStep else { return false }
+            lastForwarded = fraction
+            return true
+        }
+    }
+}
+
 final class LocalModelManager: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (_ receivedBytes: Int64, _ totalBytes: Int64?) -> Void
 
@@ -396,7 +429,9 @@ final class LocalModelManager: @unchecked Sendable {
             }
 
             if let onProgress {
-                let observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak task] _, _ in
+                let throttle = DownloadProgressThrottle()
+                let observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak task] progress, _ in
+                    guard throttle.shouldForward(fraction: progress.fractionCompleted) else { return }
                     let expected = task?.countOfBytesExpectedToReceive ?? -1
                     let totalBytes = expected > 0 ? expected : nil
                     let receivedBytes = task?.countOfBytesReceived ?? 0

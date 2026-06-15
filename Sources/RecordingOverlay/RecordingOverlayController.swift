@@ -111,6 +111,28 @@ public final class RecordingOverlayController: @unchecked Sendable {
             fadeGeneration += 1
             fadeIn(panel, wasHidden: previous == .idle)
         }
+
+        // The pill is a borderless, non-key, mouse-transparent panel, so it never enters the
+        // accessibility tree. Without an explicit announcement a VoiceOver user gets no
+        // feedback that recording started/stopped. Announce each non-idle state transition.
+        titleLabel.setAccessibilityLabel(titleLabel.stringValue)
+        if state != previous, state != .idle {
+            announce(titleLabel.stringValue)
+        }
+    }
+
+    /// Posts a high-priority VoiceOver announcement. No-op when VoiceOver is off, so there is
+    /// no effect for sighted users.
+    private func announce(_ message: String) {
+        guard !message.isEmpty else { return }
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue
+            ]
+        )
     }
 
     private func applyTransientMessage(_ text: String, duration: TimeInterval) {
@@ -129,10 +151,12 @@ public final class RecordingOverlayController: @unchecked Sendable {
         spinner.isHidden = true
         titleLabel.stringValue = text
         titleLabel.textColor = .secondaryLabelColor
+        titleLabel.setAccessibilityLabel(text)
         layoutSubviews()
         positionPanel(panel)
         fadeGeneration += 1
         fadeIn(panel, wasHidden: panel.alphaValue == 0)
+        announce(text)
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -362,6 +386,11 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
         let h = panel.frame.height
         let padding: CGFloat = 14
+        // Vertical inset that lets the label occupy the pill's full (possibly multi-line)
+        // height. For a single-line pill (h == basePillHeight) this collapses to the old
+        // centered 16pt line; when the pill grows to a second line the label can use it
+        // instead of clipping. Shared by every branch so an accessory never caps the label.
+        let labelInset = (Self.basePillHeight - Self.pillLineHeight) / 2
 
         if !dotView.isHidden {
             let dotSize: CGFloat = 8
@@ -376,9 +405,9 @@ public final class RecordingOverlayController: @unchecked Sendable {
             let labelX = padding + dotSize + 8
             titleLabel.frame = NSRect(
                 x: labelX,
-                y: (h - 16) / 2,
+                y: labelInset,
                 width: panel.frame.width - labelX - padding,
-                height: 16
+                height: h - labelInset * 2
             )
         } else if !symbolView.isHidden {
             let symbolSize: CGFloat = 15
@@ -392,9 +421,9 @@ public final class RecordingOverlayController: @unchecked Sendable {
             let labelX = padding + symbolSize + 8
             titleLabel.frame = NSRect(
                 x: labelX,
-                y: (h - 16) / 2,
+                y: labelInset,
                 width: panel.frame.width - labelX - padding,
-                height: 16
+                height: h - labelInset * 2
             )
         } else if !spinner.isHidden {
             let spinnerSize: CGFloat = 16
@@ -408,14 +437,12 @@ public final class RecordingOverlayController: @unchecked Sendable {
             let labelX = padding + spinnerSize + 8
             titleLabel.frame = NSRect(
                 x: labelX,
-                y: (h - 16) / 2,
+                y: labelInset,
                 width: panel.frame.width - labelX - padding,
-                height: 16
+                height: h - labelInset * 2
             )
         } else {
-            // No accessory: this is where long transient messages live, so let the label
-            // fill the pill's (possibly multi-line) height instead of a fixed 16pt line.
-            let labelInset = (Self.basePillHeight - Self.pillLineHeight) / 2
+            // No accessory: this is where long transient messages live.
             titleLabel.frame = NSRect(
                 x: padding,
                 y: labelInset,
@@ -432,6 +459,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
             return
         }
         stopIndicatorAnimations()
+        // Respect Reduce Motion: leave a fully-visible static dot instead of a looping pulse.
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
 
         let pulse = CABasicAnimation(keyPath: "opacity")
         pulse.fromValue = 0.3
@@ -448,6 +477,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
             return
         }
         stopIndicatorAnimations()
+        // Respect Reduce Motion: leave a fully-visible static symbol instead of a looping pulse.
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
 
         let opacity = CABasicAnimation(keyPath: "opacity")
         opacity.fromValue = 0.45
@@ -527,7 +558,11 @@ public final class RecordingOverlayController: @unchecked Sendable {
     // MARK: - Position
 
     private func positionPanel(_ panel: NSPanel) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+        // This is an LSUIElement accessory app that owns no key window, so `NSScreen.main`
+        // can point at a display the user isn't typing on. Prefer the screen under the
+        // mouse — where the user is actually working — so the live indicator lands there.
+        let mouseScreen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
+        guard let screen = mouseScreen ?? NSScreen.main ?? NSScreen.screens.first else {
             return
         }
 

@@ -221,6 +221,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         if preferencesWindowController == nil {
             preferencesWindowController = makePreferencesWindowController()
         }
+        // A "Download cancelled" badge from an earlier session is stale by the time Settings
+        // is reopened; clear it so a freshly-opened window doesn't show an alarming leftover.
+        cancelledModelID = nil
         refreshPreferencesWindow()
         preferencesWindowController?.showWindow(sender)
     }
@@ -627,6 +630,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func selectModel(id modelID: String) {
+        cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
         mutateSettings {
             $0.selectedModelID = modelID
             if $0.defaultModelID.isEmpty {

@@ -70,7 +70,10 @@ final class PreferencesGeneralView: NSView {
                     PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel),
                     PreferencesPageSupport.makeSettingRow(
                         title: "Offload model",
-                        detail: NSTextField(labelWithString: "After inactivity"),
+                        // The popup value (Immediately / 1 minute / … / Never) already states
+                        // the timing, so no static detail — a fixed "After inactivity" label
+                        // contradicted the "Immediately" and "Never" choices.
+                        detail: NSTextField(labelWithString: ""),
                         action: offloadPopup
                     )
                 ]),

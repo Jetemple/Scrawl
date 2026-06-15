@@ -228,6 +228,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         let cancel = NSButton(title: "Cancel", target: nil, action: nil)
         let save = NSButton(title: "Save", target: nil, action: nil)
         save.keyEquivalent = "\r"
+        cancel.keyEquivalent = "\u{1b}" // Escape dismisses, matching macOS sheet convention.
         let root = NSStackView(views: [NSTextField(labelWithString: "Preferred term"), field, NSStackView(views: [NSView(), cancel, save])])
         root.orientation = .vertical
         root.alignment = .width

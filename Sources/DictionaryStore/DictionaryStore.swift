@@ -363,7 +363,15 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
 
     private func persist(_ entries: [DictionaryEntry]) throws {
         let directory = fileURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Owner-only data directory: the atomic write briefly leaves the JSON at the umask
+        // default (0644) before the chmod below, so keep the enclosing directory 0700 to deny
+        // cross-user traversal during that window (defense in depth).
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         let data = try JSONEncoder().encode(entries)
         try data.write(to: fileURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
