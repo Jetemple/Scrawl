@@ -150,10 +150,10 @@ final class LocalModelManager: @unchecked Sendable {
     /// cannot be replayed against a different mirror URL.
     private(set) var pendingResumeDataBySourceURL: [String: Data] = [:]
     private var operationState = ModelDownloadOperationState()
-    private var activeDownloadTask: URLSessionDownloadTask? = nil
-    private var activeDownloadSession: URLSession? = nil
-    private var activeDownloadOperationID: UUID? = nil
-    private var latestDownloadOperationID: UUID? = nil
+    private var activeDownloadTask: URLSessionDownloadTask?
+    private var activeDownloadSession: URLSession?
+    private var activeDownloadOperationID: UUID?
+    private var latestDownloadOperationID: UUID?
 
     init(modelsDirectoryURL: URL) {
         self.modelsDirectoryURL = modelsDirectoryURL
@@ -194,7 +194,7 @@ final class LocalModelManager: @unchecked Sendable {
 
         let targetFamilies: Set<String> = [
             canonicalFamily(from: downloadableModel.id),
-            canonicalFamily(from: downloadableModel.fileName)
+            canonicalFamily(from: downloadableModel.fileName),
         ]
 
         let installedFamilies = Set(installedModelIDs().map(canonicalFamily(from:)))
@@ -235,7 +235,7 @@ final class LocalModelManager: @unchecked Sendable {
         guard let task else { return didCancel }
         task.cancel(byProducingResumeData: { [weak self] (data: Data?) in
             guard let self, let data, let urlKey = taskURL?.absoluteString, let cancelledOperationID else { return }
-            self.lock.withLock {
+            lock.withLock {
                 // A restarted operation owns its own URLSession/resume state. A delayed
                 // callback from the cancelled task must not overwrite it.
                 guard self.latestDownloadOperationID == cancelledOperationID else { return }
@@ -299,7 +299,7 @@ final class LocalModelManager: @unchecked Sendable {
         onProgress: ProgressHandler?
     ) async throws -> URL {
         var lastError: Error?
-        for attempt in 1 ... 2 {
+        for attempt in 1...2 {
             try requireActiveDownloadOperation(operationID)
             var downloadedURL: URL?
             do {
@@ -313,7 +313,7 @@ final class LocalModelManager: @unchecked Sendable {
                 guard let http = response as? HTTPURLResponse else {
                     throw ModelDownloadError.invalidHTTPResponse(sourceURL)
                 }
-                guard (200 ... 299).contains(http.statusCode) else {
+                guard (200...299).contains(http.statusCode) else {
                     throw ModelDownloadError.badStatusCode(statusCode: http.statusCode, url: sourceURL)
                 }
                 try validateDownloadedContent(at: temporaryURL, response: response, sourceURL: sourceURL)
@@ -403,11 +403,10 @@ final class LocalModelManager: @unchecked Sendable {
                 continuation.resume(returning: (safeCopy, response))
             }
 
-            let task: URLSessionDownloadTask
-            if let resumeData {
-                task = session.downloadTask(withResumeData: resumeData, completionHandler: completionHandler)
+            let task: URLSessionDownloadTask = if let resumeData {
+                session.downloadTask(withResumeData: resumeData, completionHandler: completionHandler)
             } else {
-                task = session.downloadTask(with: sourceURL, completionHandler: completionHandler)
+                session.downloadTask(with: sourceURL, completionHandler: completionHandler)
             }
             callbackState.setTask(task)
 
@@ -576,7 +575,7 @@ extension LocalModelManager {
             displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!,
             sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
-        )
+        ),
     ]
 }
 

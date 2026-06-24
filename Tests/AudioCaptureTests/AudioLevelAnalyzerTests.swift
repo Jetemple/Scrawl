@@ -14,7 +14,7 @@ final class AudioLevelAnalyzerTests: XCTestCase {
 
     func testAllZeroSamplesYieldZeroActiveSeconds() {
         let samples = [Int16](repeating: 0, count: 16000)
-        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: 16_000)
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: 16000)
         XCTAssertEqual(active, 0.0)
     }
 
@@ -24,21 +24,21 @@ final class AudioLevelAnalyzerTests: XCTestCase {
         samples.reserveCapacity(16000)
         var state: UInt64 = 12345
         for _ in 0..<16000 {
-            state = state &* 6364136223846793005 &+ 1442695040888963407
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
             let amplitude = Int16(Int64(bitPattern: state) % 100)
             samples.append(amplitude)
         }
-        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: 16_000)
+        let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: 16000)
         XCTAssertEqual(active, 0.0, "Room-tone-level noise should register 0 active seconds")
     }
 
     func testShortBurstIsDetectedButBelowSpeechDuration() {
         // 50ms burst of amplitude 0.3 embedded in 1s of silence
-        let sampleRate: Double = 16_000
-        let totalSamples = Int(sampleRate)           // 1 second
-        let burstSamples = Int(sampleRate * 0.05)    // 50 ms
-        let burstOffset = Int(sampleRate * 0.2)      // start at 200ms
-        let amplitude = Int16(Int16.max / 3)         // ≈ 0.333 normalized
+        let sampleRate: Double = 16000
+        let totalSamples = Int(sampleRate) // 1 second
+        let burstSamples = Int(sampleRate * 0.05) // 50 ms
+        let burstOffset = Int(sampleRate * 0.2) // start at 200ms
+        let amplitude = Int16(Int16.max / 3) // ≈ 0.333 normalized
 
         var samples = [Int16](repeating: 0, count: totalSamples)
         for i in burstOffset..<(burstOffset + burstSamples) {
@@ -52,7 +52,7 @@ final class AudioLevelAnalyzerTests: XCTestCase {
     }
 
     func testSeparatedActiveWindowsDoNotCountAsSustainedSpeech() {
-        let sampleRate: Double = 1_000
+        let sampleRate: Double = 1000
         let windowSamples = 30
         let amplitude = Int16(Int16.max / 3)
         var samples = [Int16]()
@@ -73,7 +73,7 @@ final class AudioLevelAnalyzerTests: XCTestCase {
     }
 
     func testActiveAudioSecondsRetainsTotalDurationSemantics() {
-        let sampleRate: Double = 1_000
+        let sampleRate: Double = 1000
         let windowSamples = 30
         let amplitude = Int16(Int16.max / 3)
         var samples = [Int16]()
@@ -93,7 +93,7 @@ final class AudioLevelAnalyzerTests: XCTestCase {
     }
 
     func testConsecutiveActiveWindowsCountAsSustainedSpeech() {
-        let sampleRate: Double = 1_000
+        let sampleRate: Double = 1000
         let amplitude = Int16(Int16.max / 3)
         let samples = [Int16](repeating: amplitude, count: 150)
 
@@ -108,8 +108,8 @@ final class AudioLevelAnalyzerTests: XCTestCase {
 
     func testOneSpeechLikeSineYieldsNearlyFullActiveSeconds() {
         // 1s of sine-like alternating samples at amplitude 0.1 — clearly above threshold
-        let sampleRate: Double = 16_000
-        let amplitude = Int16(Int16.max / 10)  // ≈ 0.1 normalized
+        let sampleRate: Double = 16000
+        let amplitude = Int16(Int16.max / 10) // ≈ 0.1 normalized
         var samples = [Int16]()
         samples.reserveCapacity(Int(sampleRate))
         for i in 0..<Int(sampleRate) {

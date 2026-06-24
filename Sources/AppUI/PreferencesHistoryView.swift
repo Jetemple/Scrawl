@@ -33,12 +33,30 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private var transcriptTextIsLeftAligned = true
 
     private(set) var state = State.empty
-    var visibleRecordIDs: [UUID] { visibleRecords.map(\.id) }
-    var selectedRecordID: UUID? { selectedID }
-    var usesGroupedWorkspace: Bool { workspaceGroup is PreferencesBackgroundView }
-    var visibleRowsAreTranscriptFirst: Bool { rowsAreTranscriptFirst }
-    var visibleTranscriptTextIsLeftAligned: Bool { transcriptTextIsLeftAligned }
-    var visibleMetrics: [String] { visibleRecords.map(PreferencesContentState.historyMetrics(for:)) }
+    var visibleRecordIDs: [UUID] {
+        visibleRecords.map(\.id)
+    }
+
+    var selectedRecordID: UUID? {
+        selectedID
+    }
+
+    var usesGroupedWorkspace: Bool {
+        workspaceGroup is PreferencesBackgroundView
+    }
+
+    var visibleRowsAreTranscriptFirst: Bool {
+        rowsAreTranscriptFirst
+    }
+
+    var visibleTranscriptTextIsLeftAligned: Bool {
+        transcriptTextIsLeftAligned
+    }
+
+    var visibleMetrics: [String] {
+        visibleRecords.map(PreferencesContentState.historyMetrics(for:))
+    }
+
     var areActionControlsWithinBounds: Bool {
         [copyButton, repasteButton, deleteButton].allSatisfy { bounds.contains(convert($0.bounds, from: $0)) }
     }
@@ -51,7 +69,9 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     func update(records: [TranscriptRecord], isEnabled: Bool, loadErrorDescription: String?) {
         self.records = records
@@ -66,8 +86,13 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         applyFilter()
     }
 
-    func controlTextDidChange(_ obj: Notification) { applyFilter() }
-    func numberOfRows(in tableView: NSTableView) -> Int { visibleRecords.count }
+    func controlTextDidChange(_: Notification) {
+        applyFilter()
+    }
+
+    func numberOfRows(in _: NSTableView) -> Int {
+        visibleRecords.count
+    }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
         guard visibleRecords.indices.contains(row) else { return 72 }
@@ -81,7 +106,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         return max(76, ceil(textHeight) + 50)
     }
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+    func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard visibleRecords.indices.contains(row) else { return nil }
         let record = visibleRecords[row]
         let cell = NSTableCellView()
@@ -115,14 +140,14 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             metadata.leadingAnchor.constraint(equalTo: text.leadingAnchor),
             metadata.trailingAnchor.constraint(equalTo: text.trailingAnchor),
             metadata.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 8),
-            metadata.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -9)
+            metadata.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -9),
         ])
         rowsAreTranscriptFirst = true
         transcriptTextIsLeftAligned = text.alignment == .left
         return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
+    func tableViewSelectionDidChange(_: Notification) {
         selectedID = visibleRecords.indices.contains(tableView.selectedRow) ? visibleRecords[tableView.selectedRow].id : nil
         updateActionAvailability()
     }
@@ -169,7 +194,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         stateView.addSubview(stateStack)
         NSLayoutConstraint.activate([
             stateStack.centerXAnchor.constraint(equalTo: stateView.centerXAnchor),
-            stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor)
+            stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
         ])
 
         let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
@@ -181,7 +206,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
                 toggle,
                 searchField,
                 workspace,
-                PreferencesPageSupport.makeActionRow(buttons: [copyButton, repasteButton, deleteButton])
+                PreferencesPageSupport.makeActionRow(buttons: [copyButton, repasteButton, deleteButton]),
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
@@ -237,11 +262,20 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         action(selectedID)
     }
 
-    @objc private func copySelected(_ sender: NSButton) { performOnSelected(actions.copy) }
-    @objc private func repasteSelected(_ sender: NSButton) { performOnSelected(actions.repaste) }
-    @objc private func deleteSelected(_ sender: NSButton) {
+    @objc private func copySelected(_: NSButton) {
+        performOnSelected(actions.copy)
+    }
+
+    @objc private func repasteSelected(_: NSButton) {
+        performOnSelected(actions.repaste)
+    }
+
+    @objc private func deleteSelected(_: NSButton) {
         guard let selectedID else { return }
         actions.delete([selectedID])
     }
-    @objc private func toggleChanged(_ sender: NSButton) { actions.setEnabled(sender.state == .on) }
+
+    @objc private func toggleChanged(_ sender: NSButton) {
+        actions.setEnabled(sender.state == .on)
+    }
 }

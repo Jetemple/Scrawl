@@ -31,7 +31,9 @@ public protocol TranscriptHistoryStoring: Sendable {
 }
 
 public extension TranscriptHistoryStoring {
-    var loadErrorDescription: String? { nil }
+    var loadErrorDescription: String? {
+        nil
+    }
 }
 
 public final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @unchecked Sendable {
@@ -44,7 +46,9 @@ public final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @un
         cachedRecords = Self.normalize(records, limit: self.limit)
     }
 
-    public var loadErrorDescription: String? { nil }
+    public var loadErrorDescription: String? {
+        nil
+    }
 
     public func records() -> [TranscriptRecord] {
         lock.withLock {

@@ -3,11 +3,10 @@ import SettingsStore
 import XCTest
 
 final class SettingsStoreMutateTests: XCTestCase {
-
     // MARK: - Basic persistence
 
     func testMutatePersistsChange() throws {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         let store = SettingsStore(defaults: defaults)
 
         try store.mutate { $0.selectedModelID = "ggml-tiny.en" }
@@ -16,7 +15,7 @@ final class SettingsStoreMutateTests: XCTestCase {
     }
 
     func testMutateReloadSeesChange() throws {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         let store = SettingsStore(defaults: defaults)
 
         try store.mutate { $0.isTranscriptHistoryEnabled = false }
@@ -28,7 +27,7 @@ final class SettingsStoreMutateTests: XCTestCase {
     // MARK: - Concurrency: no update lost
 
     func testConcurrentMutatesBothFieldsReachFinalValues() throws {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         let store = SettingsStore(defaults: defaults)
 
         let iterations = 200
@@ -73,7 +72,7 @@ final class SettingsStoreMutateTests: XCTestCase {
         // mutate holds the store lock for the entire read-modify-write, no increment
         // can be lost.  Without the lock, concurrent load/save interleaving would
         // silently drop updates and the final value would be less than N.
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         let store = SettingsStore(defaults: defaults)
         try store.save(AppSettings(selectedModelID: "0"))
 

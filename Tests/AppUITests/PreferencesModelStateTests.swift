@@ -2,23 +2,23 @@
 import XCTest
 
 final class PreferencesModelStateTests: XCTestCase {
-    func testRowsMarkSelectedInstalledAndDownloadingModels() {
-        let rows = PreferencesModelState.rows(
+    func testRowsMarkSelectedInstalledAndDownloadingModels() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/small.bin")),
                     sha256: "dummy-sha256-for-tests"
                 ),
                 DownloadableModel(
                     id: "ggml-medium",
                     fileName: "ggml-medium.bin",
                     displayName: "medium - multilingual, 1.5 GB",
-                    url: URL(string: "https://example.com/medium.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/medium.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["ggml-small.en"],
             selectedModelID: "ggml-small.en",
@@ -42,16 +42,16 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(rows[1].canSelect)
     }
 
-    func testRowsIncludeInstalledCustomModelsAfterKnownDownloads() {
-        let rows = PreferencesModelState.rows(
+    func testRowsIncludeInstalledCustomModelsAfterKnownDownloads() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/small.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["ggml-custom-model", "ggml-small.en"],
             selectedModelID: "ggml-custom-model",
@@ -68,18 +68,18 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(rows[1].canDownload)
     }
 
-    // The ggml- prefix is normalised away so an installed "small.en" file (without the
-    // ggml- prefix) still satisfies the downloadable entry whose id is "ggml-small.en".
-    func testRowsUseInstalledIDWhenGgmlPrefixAbsentButFamilyMatches() {
-        let rows = PreferencesModelState.rows(
+    /// The ggml- prefix is normalised away so an installed "small.en" file (without the
+    /// ggml- prefix) still satisfies the downloadable entry whose id is "ggml-small.en".
+    func testRowsUseInstalledIDWhenGgmlPrefixAbsentButFamilyMatches() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/small.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["small.en"],
             selectedModelID: "small.en",
@@ -107,16 +107,16 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertEqual(row.actionTitle, "Download")
     }
 
-    func testCancelledModelShowsCancelledStatusAndCanBeReDownloaded() {
-        let rows = PreferencesModelState.rows(
+    func testCancelledModelShowsCancelledStatusAndCanBeReDownloaded() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-medium",
                     fileName: "ggml-medium.bin",
                     displayName: "medium - multilingual, 1.5 GB",
-                    url: URL(string: "https://example.com/medium.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/medium.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: [],
             selectedModelID: "",
@@ -134,31 +134,31 @@ final class PreferencesModelStateTests: XCTestCase {
     // installed AND flagged by cancelledModelID. An installed model is installed — it must
     // never render as "Download cancelled" (which produced a "Use" button next to a
     // "Download cancelled" status in the row).
-    func testInstalledModelIsNeverMarkedCancelledEvenWhenCancelledIDMatches() {
-        let rows = PreferencesModelState.rows(
+    func testInstalledModelIsNeverMarkedCancelledEvenWhenCancelledIDMatches() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-medium",
                     fileName: "ggml-medium.bin",
                     displayName: "medium - multilingual, 1.5 GB",
-                    url: URL(string: "https://example.com/medium.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/medium.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["ggml-medium"],
             selectedModelID: "",
             downloadingModelID: nil,
             cancelledModelID: "ggml-medium"
         )
-        let row = try! XCTUnwrap(rows.first { $0.id == "ggml-medium" })
+        let row = try XCTUnwrap(rows.first { $0.id == "ggml-medium" })
         XCTAssertTrue(row.isInstalled)
         XCTAssertFalse(row.isCancelled, "An installed model must not also be flagged cancelled")
         XCTAssertEqual(row.statusText, "Installed")
         XCTAssertEqual(row.actionTitle, "Use")
     }
 
-    // Defense in depth: even if a row is constructed as both installed and cancelled,
-    // statusText must prefer the installed/selected truth over the stale cancelled flag.
+    /// Defense in depth: even if a row is constructed as both installed and cancelled,
+    /// statusText must prefer the installed/selected truth over the stale cancelled flag.
     func testStatusTextPrefersInstalledAndSelectedOverCancelled() {
         let installed = PreferencesModelRow(
             id: "ggml-medium", displayName: "medium",
@@ -176,16 +176,16 @@ final class PreferencesModelStateTests: XCTestCase {
     }
 
     // Regression: installed ggml-medium.en must NOT suppress the downloadable ggml-medium.
-    func testInstalledEnglishVariantDoesNotSatisfyMultilingualDownloadable() {
-        let rows = PreferencesModelState.rows(
+    func testInstalledEnglishVariantDoesNotSatisfyMultilingualDownloadable() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-medium",
                     fileName: "ggml-medium.bin",
                     displayName: "medium - multilingual, 1.5 GB",
-                    url: URL(string: "https://example.com/medium.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/medium.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["ggml-medium.en"],
             selectedModelID: "ggml-medium.en",
@@ -195,27 +195,27 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertEqual(rows.count, 2)
         let mediumRow = rows.first { $0.id == "ggml-medium" }
         XCTAssertNotNil(mediumRow, "ggml-medium row must be present")
-        XCTAssertFalse(mediumRow!.isInstalled, "ggml-medium must not be considered installed when only ggml-medium.en is present")
-        XCTAssertTrue(mediumRow!.canDownload, "ggml-medium must remain downloadable")
+        XCTAssertFalse(try XCTUnwrap(mediumRow?.isInstalled), "ggml-medium must not be considered installed when only ggml-medium.en is present")
+        XCTAssertTrue(try XCTUnwrap(mediumRow?.canDownload), "ggml-medium must remain downloadable")
     }
 
-    func testDownloadProgressTextAppearsOnlyOnDownloadingRow() {
-        let rows = PreferencesModelState.rows(
+    func testDownloadProgressTextAppearsOnlyOnDownloadingRow() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/small.bin")),
                     sha256: "dummy-sha256-for-tests"
                 ),
                 DownloadableModel(
                     id: "ggml-medium",
                     fileName: "ggml-medium.bin",
                     displayName: "medium - multilingual, 1.5 GB",
-                    url: URL(string: "https://example.com/medium.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/medium.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["ggml-small.en"],
             selectedModelID: "ggml-small.en",
@@ -229,16 +229,16 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertEqual(rows[1].downloadProgressText, "38% (576/1500 MB)")
     }
 
-    func testDownloadProgressTextIsNilWhenNoDownloadIsActive() {
-        let rows = PreferencesModelState.rows(
+    func testDownloadProgressTextIsNilWhenNoDownloadIsActive() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-small.en",
                     fileName: "ggml-small.en.bin",
                     displayName: "small.en - recommended, 466 MB",
-                    url: URL(string: "https://example.com/small.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/small.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["ggml-small.en"],
             selectedModelID: "ggml-small.en",
@@ -250,16 +250,16 @@ final class PreferencesModelStateTests: XCTestCase {
     }
 
     // Regression: installed ggml-medium must NOT satisfy the downloadable ggml-medium.en.
-    func testInstalledMultilingualDoesNotSatisfyEnglishVariantDownloadable() {
-        let rows = PreferencesModelState.rows(
+    func testInstalledMultilingualDoesNotSatisfyEnglishVariantDownloadable() throws {
+        let rows = try PreferencesModelState.rows(
             downloadableModels: [
                 DownloadableModel(
                     id: "ggml-medium.en",
                     fileName: "ggml-medium.en.bin",
                     displayName: "medium.en - English only, 1.5 GB",
-                    url: URL(string: "https://example.com/medium.en.bin")!,
+                    url: XCTUnwrap(URL(string: "https://example.com/medium.en.bin")),
                     sha256: "dummy-sha256-for-tests"
-                )
+                ),
             ],
             installedModelIDs: ["ggml-medium"],
             selectedModelID: "ggml-medium",
@@ -269,7 +269,7 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertEqual(rows.count, 2)
         let mediumEnRow = rows.first { $0.id == "ggml-medium.en" }
         XCTAssertNotNil(mediumEnRow, "ggml-medium.en row must be present")
-        XCTAssertFalse(mediumEnRow!.isInstalled, "ggml-medium.en must not be considered installed when only ggml-medium is present")
-        XCTAssertTrue(mediumEnRow!.canDownload, "ggml-medium.en must remain downloadable")
+        XCTAssertFalse(try XCTUnwrap(mediumEnRow?.isInstalled), "ggml-medium.en must not be considered installed when only ggml-medium is present")
+        XCTAssertTrue(try XCTUnwrap(mediumEnRow?.canDownload), "ggml-medium.en must remain downloadable")
     }
 }

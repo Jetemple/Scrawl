@@ -25,18 +25,20 @@ final class PreferencesAboutView: NSView {
             content: [
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Application", detail: versionLabel),
-                    PreferencesPageSupport.makeSettingRow(title: "Privacy", detail: privacyLabel)
+                    PreferencesPageSupport.makeSettingRow(title: "Privacy", detail: privacyLabel),
                 ]),
-                PreferencesPageSupport.makeButtonRow(projectButton)
+                PreferencesPageSupport.makeButtonRow(projectButton),
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    @objc private func openProjectPageAction(_ sender: NSButton) { openProjectPage() }
+    @objc private func openProjectPageAction(_: NSButton) {
+        openProjectPage()
+    }
 }

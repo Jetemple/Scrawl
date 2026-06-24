@@ -17,7 +17,10 @@ final class PreferencesGeneralView: NSView {
     private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
     private let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
 
-    var modelOffloadChoices: [String] { offloadPopup.itemTitles }
+    var modelOffloadChoices: [String] {
+        offloadPopup.itemTitles
+    }
+
     var selectedModelOffloadPolicy: ModelOffloadPolicy? {
         guard offloadPopup.indexOfSelectedItem >= 0 else { return nil }
         return ModelOffloadPolicy.allCases[offloadPopup.indexOfSelectedItem]
@@ -75,20 +78,20 @@ final class PreferencesGeneralView: NSView {
                         // contradicted the "Immediately" and "Never" choices.
                         detail: NSTextField(labelWithString: ""),
                         action: offloadPopup
-                    )
+                    ),
                 ]),
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
-                    PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton)
+                    PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton),
                 ]),
-                clipboardGroup
+                clipboardGroup,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -136,8 +139,14 @@ final class PreferencesGeneralView: NSView {
         clipboardHistoryCheckbox.state == .on
     }
 
-    @objc private func requestMicrophoneAccess(_ sender: NSButton) { requestMicrophone() }
-    @objc private func requestAccessibilityAccess(_ sender: NSButton) { requestAccessibility() }
+    @objc private func requestMicrophoneAccess(_: NSButton) {
+        requestMicrophone()
+    }
+
+    @objc private func requestAccessibilityAccess(_: NSButton) {
+        requestAccessibility()
+    }
+
     @objc private func modelOffloadChanged(_ sender: NSPopUpButton) {
         guard sender.indexOfSelectedItem >= 0 else { return }
         setModelOffloadPolicy(ModelOffloadPolicy.allCases[sender.indexOfSelectedItem])

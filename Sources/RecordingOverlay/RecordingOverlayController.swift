@@ -130,7 +130,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             notification: .announcementRequested,
             userInfo: [
                 .announcement: message,
-                .priority: NSAccessibilityPriorityLevel.high.rawValue
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ]
         )
     }
@@ -160,8 +160,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            if self.state == .idle {
-                self.fadeOut(panel)
+            if state == .idle {
+                fadeOut(panel)
             }
         }
         transientDismissWorkItem = workItem
@@ -314,9 +314,9 @@ public final class RecordingOverlayController: @unchecked Sendable {
         panel.contentView = container
 
         self.panel = panel
-        self.dotView = dot
+        dotView = dot
         self.symbolView = symbolView
-        self.titleLabel = label
+        titleLabel = label
         self.spinner = spinner
     }
 
@@ -342,15 +342,14 @@ public final class RecordingOverlayController: @unchecked Sendable {
         let text = titleLabel.stringValue
 
         // Determine leading accessory width + gap (matches layoutSubviews constants).
-        let leadingAccessoryWidth: CGFloat
-        if !dotView.isHidden {
-            leadingAccessoryWidth = 8 + 8   // dotSize(8) + gap(8)
+        let leadingAccessoryWidth: CGFloat = if !dotView.isHidden {
+            8 + 8 // dotSize(8) + gap(8)
         } else if !symbolView.isHidden {
-            leadingAccessoryWidth = 15 + 8  // symbolSize(15) + gap(8)
+            15 + 8 // symbolSize(15) + gap(8)
         } else if !spinner.isHidden {
-            leadingAccessoryWidth = 16 + 8  // spinnerSize(16) + gap(8)
+            16 + 8 // spinnerSize(16) + gap(8)
         } else {
-            leadingAccessoryWidth = 0
+            0
         }
 
         let newWidth = Self.pillWidth(forText: text, font: font, leadingAccessoryWidth: leadingAccessoryWidth)
@@ -550,7 +549,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
             context.duration = 0.15
             panel.animator().alphaValue = 0.0
         } completionHandler: { [weak self] in
-            guard let self, self.fadeGeneration == generation else { return }
+            guard let self, fadeGeneration == generation else { return }
             panel.orderOut(nil)
         }
     }

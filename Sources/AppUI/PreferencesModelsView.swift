@@ -1,7 +1,9 @@
 import AppKit
 
 private final class FlippedModelsDocumentView: NSView {
-    override var isFlipped: Bool { true }
+    override var isFlipped: Bool {
+        true
+    }
 }
 
 final class PreferencesModelsView: NSView {
@@ -23,8 +25,13 @@ final class PreferencesModelsView: NSView {
         modelsStack.superview?.isFlipped == true
     }
 
-    var visibleTwoLineRowCount: Int { twoLineRowCount }
-    var visibleSelectedRowHasAction: Bool { selectedRowHasAction }
+    var visibleTwoLineRowCount: Int {
+        twoLineRowCount
+    }
+
+    var visibleSelectedRowHasAction: Bool {
+        selectedRowHasAction
+    }
 
     var isCriticalContentWithinBounds: Bool {
         [listView, deleteButton].allSatisfy {
@@ -73,7 +80,7 @@ final class PreferencesModelsView: NSView {
             modelsStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
             modelsStack.topAnchor.constraint(equalTo: documentView.topAnchor),
             modelsStack.bottomAnchor.constraint(lessThanOrEqualTo: documentView.bottomAnchor),
-            modelsStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
+            modelsStack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
         ])
 
         PreferencesPageSupport.configureSecondaryButton(deleteButton)
@@ -98,7 +105,7 @@ final class PreferencesModelsView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -111,9 +118,9 @@ final class PreferencesModelsView: NSView {
         selectedRowHasAction = false
         listHeightConstraint?.constant = min(300, max(140, CGFloat(rows.count) * 64))
 
-        modelsStack.arrangedSubviews.forEach {
-            modelsStack.removeArrangedSubview($0)
-            $0.removeFromSuperview()
+        for arrangedSubview in modelsStack.arrangedSubviews {
+            modelsStack.removeArrangedSubview(arrangedSubview)
+            arrangedSubview.removeFromSuperview()
         }
 
         guard !rows.isEmpty else {
@@ -213,11 +220,11 @@ final class PreferencesModelsView: NSView {
         downloadModel(model)
     }
 
-    @objc private func deleteSelected(_ sender: NSButton) {
+    @objc private func deleteSelected(_: NSButton) {
         deleteSelectedModel()
     }
 
-    @objc private func cancelDownloadAction(_ sender: NSButton) {
+    @objc private func cancelDownloadAction(_: NSButton) {
         cancelDownload()
     }
 }

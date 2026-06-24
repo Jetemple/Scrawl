@@ -1,7 +1,7 @@
-import XCTest
-@testable import WhisperCppProvider
 import Foundation
 import TranscriptionCore
+@testable import WhisperCppProvider
+import XCTest
 
 final class WhisperCppPostProcessingTests: XCTestCase {
     func testMissingWarmServerFallsBackToCLI() async throws {
@@ -51,7 +51,8 @@ final class WhisperCppPostProcessingTests: XCTestCase {
         let cli = URL(filePath: "/opt/homebrew/bin/whisper-cli")
         guard FileManager.default.fileExists(atPath: model.path),
               FileManager.default.fileExists(atPath: audio.path),
-              FileManager.default.isExecutableFile(atPath: cli.path) else {
+              FileManager.default.isExecutableFile(atPath: cli.path)
+        else {
             throw XCTSkip("Local whisper.cpp performance fixtures are unavailable")
         }
 
@@ -70,7 +71,7 @@ final class WhisperCppPostProcessingTests: XCTestCase {
 
         XCTAssertTrue(first.text.contains("fellow Americans"))
         XCTAssertTrue(second.text.contains("fellow Americans"))
-        XCTAssertLessThan(second.latencyMS, 1_000)
+        XCTAssertLessThan(second.latencyMS, 1000)
     }
 
     func testServerExecutableResolvesBesideCLI() {

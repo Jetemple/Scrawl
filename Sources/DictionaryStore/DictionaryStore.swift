@@ -34,7 +34,9 @@ public protocol DictionaryStoring: Sendable {
 }
 
 public extension DictionaryStoring {
-    var loadErrorDescription: String? { nil }
+    var loadErrorDescription: String? {
+        nil
+    }
 }
 
 private enum VocabularyTermsMutation {
@@ -126,14 +128,16 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
     private var storedEntries: [DictionaryEntry]
 
     public init(entries: [DictionaryEntry] = []) {
-        self.storedEntries = entries
+        storedEntries = entries
     }
 
     public convenience init(terms: [VocabularyTerm]) {
         self.init(entries: VocabularyTermsMutation.entries(from: VocabularyTermsMutation.normalized(terms.map(\.value))))
     }
 
-    public var loadErrorDescription: String? { nil }
+    public var loadErrorDescription: String? {
+        nil
+    }
 
     public func entries() -> [DictionaryEntry] {
         lock.lock()
@@ -406,7 +410,8 @@ public enum DictionaryReplacer {
         var working = text
         var searchStart = working.startIndex
         while searchStart < working.endIndex,
-              let range = working.range(of: source, options: [.caseInsensitive], range: searchStart..<working.endIndex) {
+              let range = working.range(of: source, options: [.caseInsensitive], range: searchStart..<working.endIndex)
+        {
             let original = String(working[range])
             let replacementWithCase = applyCaseStyle(from: original, to: replacement)
             working.replaceSubrange(range, with: replacementWithCase)
@@ -423,7 +428,8 @@ public enum DictionaryReplacer {
             return replacement.lowercased()
         }
         if original.prefix(1) == original.prefix(1).uppercased(),
-           original.dropFirst() == original.dropFirst().lowercased() {
+           original.dropFirst() == original.dropFirst().lowercased()
+        {
             return replacement.prefix(1).uppercased() + replacement.dropFirst().lowercased()
         }
         return replacement

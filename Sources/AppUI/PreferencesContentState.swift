@@ -101,10 +101,10 @@ enum PreferencesContentState {
     }
 
     private static func formattedDuration(_ milliseconds: Int) -> String {
-        if milliseconds < 1_000 {
+        if milliseconds < 1000 {
             return "\(milliseconds)ms"
         }
-        let seconds = Double(milliseconds) / 1_000
+        let seconds = Double(milliseconds) / 1000
         return seconds.rounded() == seconds
             ? "\(Int(seconds))s"
             : String(format: "%.1fs", seconds)
