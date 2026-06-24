@@ -13,12 +13,14 @@ final class PreferencesModelsView: NSView {
     private let cancelDownload: () -> Void
     private let addModel: () -> Void
     private let revealModelsFolder: () -> Void
+    private let openModelSource: () -> Void
     private var downloadableModelsByID: [String: DownloadableModel] = [:]
 
     private let modelsStack = NSStackView()
     private let listView = PreferencesPageSupport.makeRoundedBackground()
     private let addButton = NSButton(title: "Add Model…", target: nil, action: nil)
     private let revealButton = NSButton(title: "Reveal Models Folder", target: nil, action: nil)
+    private let findModelsButton = NSButton(title: "Find Models…", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel Download", target: nil, action: nil)
     private var listHeightConstraint: NSLayoutConstraint?
@@ -49,7 +51,8 @@ final class PreferencesModelsView: NSView {
         deleteSelectedModel: @escaping () -> Void,
         cancelDownload: @escaping () -> Void,
         addModel: @escaping () -> Void,
-        revealModelsFolder: @escaping () -> Void
+        revealModelsFolder: @escaping () -> Void,
+        openModelSource: @escaping () -> Void
     ) {
         self.selectModel = selectModel
         self.downloadModel = downloadModel
@@ -57,6 +60,7 @@ final class PreferencesModelsView: NSView {
         self.cancelDownload = cancelDownload
         self.addModel = addModel
         self.revealModelsFolder = revealModelsFolder
+        self.openModelSource = openModelSource
         super.init(frame: .zero)
 
         modelsStack.orientation = .vertical
@@ -110,13 +114,30 @@ final class PreferencesModelsView: NSView {
         cancelButton.action = #selector(cancelDownloadAction(_:))
         cancelButton.isHidden = true
 
+        PreferencesPageSupport.configureSecondaryButton(findModelsButton)
+        findModelsButton.target = self
+        findModelsButton.action = #selector(openModelSourceAction(_:))
+        findModelsButton.toolTip = "Open the whisper.cpp model repository in your browser."
+
         let buttonRow = NSStackView(views: [addButton, revealButton, NSView(), deleteButton, cancelButton])
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
+
+        let helpLabel = NSTextField(labelWithString: "Accepts any whisper.cpp ggml model (a .bin file) — official, quantized, or distil-whisper.")
+        helpLabel.font = .systemFont(ofSize: 11)
+        helpLabel.textColor = .secondaryLabelColor
+        helpLabel.lineBreakMode = .byWordWrapping
+        helpLabel.maximumNumberOfLines = 2
+        helpLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let helpRow = NSStackView(views: [helpLabel, NSView(), findModelsButton])
+        helpRow.orientation = .horizontal
+        helpRow.alignment = .centerY
+        helpRow.spacing = 8
+
         let page = PreferencesPageSupport.makePage(
             title: "Models",
             description: "Select an installed model, download another, or add your own.",
-            content: [listView, buttonRow]
+            content: [listView, buttonRow, helpRow]
         )
         PreferencesPageSupport.fill(self, with: page)
         update(rows: [], downloadableModels: [], isDownloadInProgress: false)
@@ -252,5 +273,9 @@ final class PreferencesModelsView: NSView {
 
     @objc private func revealModelsFolderAction(_: NSButton) {
         revealModelsFolder()
+    }
+
+    @objc private func openModelSourceAction(_: NSButton) {
+        openModelSource()
     }
 }

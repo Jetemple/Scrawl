@@ -305,21 +305,25 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testModelsAddAndRevealButtonsDispatchActions() throws {
+    func testModelsAddRevealAndFindButtonsDispatchActions() throws {
         var addedModel = false
         var revealedFolder = false
+        var openedModelSource = false
         let controller = PreferencesWindowController(actions: makeActions(
             addModel: { addedModel = true },
-            revealModelsFolder: { revealedFolder = true }
+            revealModelsFolder: { revealedFolder = true },
+            openModelSource: { openedModelSource = true }
         ))
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
         controller.selectSection(.models)
         try XCTUnwrap(contentView.button(titled: "Add Model…")).performClick(nil)
         try XCTUnwrap(contentView.button(titled: "Reveal Models Folder")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Find Models…")).performClick(nil)
 
         XCTAssertTrue(addedModel)
         XCTAssertTrue(revealedFolder)
+        XCTAssertTrue(openedModelSource)
     }
 
     @MainActor
@@ -565,6 +569,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         requestAccessibility: @escaping () -> Void = {},
         addModel: @escaping () -> Void = {},
         revealModelsFolder: @escaping () -> Void = {},
+        openModelSource: @escaping () -> Void = {},
         openProjectPage: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
@@ -589,6 +594,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             cancelDownload: {},
             addModel: addModel,
             revealModelsFolder: revealModelsFolder,
+            openModelSource: openModelSource,
             setHotkey: setHotkey,
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,

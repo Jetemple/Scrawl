@@ -12,6 +12,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let cancelDownload: () -> Void
         let addModel: () -> Void
         let revealModelsFolder: () -> Void
+        let openModelSource: () -> Void
         let setHotkey: () -> Void
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
@@ -197,7 +198,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             deleteSelectedModel: actions.deleteSelectedModel,
             cancelDownload: actions.cancelDownload,
             addModel: actions.addModel,
-            revealModelsFolder: actions.revealModelsFolder
+            revealModelsFolder: actions.revealModelsFolder,
+            openModelSource: actions.openModelSource
         )
         keyboardView = PreferencesKeyboardView(setHotkey: actions.setHotkey)
         historyView = PreferencesHistoryView(actions: .init(

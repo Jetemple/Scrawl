@@ -21,7 +21,8 @@ enum CustomModelImport {
         var errorDescription: String? {
             switch self {
             case .notAModelFile:
-                "This doesn't look like a Whisper model. Scrawl expects a whisper.cpp ggml .bin file."
+                "This doesn't look like a Whisper model. Scrawl expects a whisper.cpp ggml .bin "
+                    + "file — find compatible models at huggingface.co/ggerganov/whisper.cpp."
             case .unreadableName:
                 "That file doesn't have a usable name. Rename it to something like my-model.bin and try again."
             case let .alreadyInstalled(modelID):

@@ -249,6 +249,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 revealModelsFolder: { [weak self] in
                     self?.revealModelsFolder()
                 },
+                openModelSource: {
+                    guard let url = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/tree/main") else { return }
+                    NSWorkspace.shared.open(url)
+                },
                 setHotkey: { [weak self] in
                     self?.toggleHotkeyCapture(nil)
                 },
@@ -344,7 +348,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a whisper.cpp ggml model file (usually named ggml-*.bin)."
+        panel.message = "Choose a whisper.cpp ggml model file (usually named ggml-*.bin). "
+            + "Find compatible models at huggingface.co/ggerganov/whisper.cpp."
         panel.prompt = "Add Model"
         guard panel.runModal() == .OK, let sourceURL = panel.url else {
             return
