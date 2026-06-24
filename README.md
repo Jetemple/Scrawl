@@ -7,7 +7,7 @@
 <p align="center">
   <strong>Local-first voice-to-text for macOS.</strong><br>
   Press a key, talk, and your words appear at the cursor — everything runs on-device via
-  <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a>. Nothing leaves your machine.
+  <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>. Nothing leaves your machine.
 </p>
 
 <p align="center">
@@ -123,7 +123,7 @@ Transcript history is stored only on this Mac, enabled by default, and limited t
 
 ## Bring your own model
 
-Scrawl isn't limited to the models in the list. Anything that runs on [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), or your own fine-tunes — works, as long as it's a ggml-format `.bin`.
+Scrawl isn't limited to the models in the list. Anything that runs on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), or your own fine-tunes — works, as long as it's a ggml-format `.bin`.
 
 Two ways to add one, both in **Settings → Models**:
 
