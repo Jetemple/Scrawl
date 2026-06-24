@@ -305,6 +305,24 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testModelsAddAndRevealButtonsDispatchActions() throws {
+        var addedModel = false
+        var revealedFolder = false
+        let controller = PreferencesWindowController(actions: makeActions(
+            addModel: { addedModel = true },
+            revealModelsFolder: { revealedFolder = true }
+        ))
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        controller.selectSection(.models)
+        try XCTUnwrap(contentView.button(titled: "Add Model…")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Reveal Models Folder")).performClick(nil)
+
+        XCTAssertTrue(addedModel)
+        XCTAssertTrue(revealedFolder)
+    }
+
+    @MainActor
     func testGeneralClipboardHistoryCheckboxReflectsSettingAndDispatchesAction() {
         var capturedValue: Bool?
         let controller = PreferencesWindowController(actions: makeActions(
@@ -545,6 +563,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
         setHotkey: @escaping () -> Void = {},
         requestMicrophone: @escaping () -> Void = {},
         requestAccessibility: @escaping () -> Void = {},
+        addModel: @escaping () -> Void = {},
+        revealModelsFolder: @escaping () -> Void = {},
         openProjectPage: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
@@ -567,6 +587,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
             downloadModel: { _ in },
             deleteSelectedModel: {},
             cancelDownload: {},
+            addModel: addModel,
+            revealModelsFolder: revealModelsFolder,
             setHotkey: setHotkey,
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,

@@ -163,6 +163,45 @@ final class LocalModelManager: @unchecked Sendable {
         try FileManager.default.createDirectory(at: modelsDirectoryURL, withIntermediateDirectories: true)
     }
 
+    /// The folder where models live. Exposed so the app can reveal it in Finder for
+    /// users who prefer to drop in their own `ggml-*.bin` files directly.
+    var modelsFolderURL: URL {
+        modelsDirectoryURL
+    }
+
+    /// Imports a user-supplied ("bring your own") model file into the models directory.
+    /// Validates the ggml magic, derives a safe id (rejecting name collisions), then
+    /// hardlinks the file when it's on the same volume — instant, no extra disk — and
+    /// falls back to a real copy across volumes. Returns the imported model's id.
+    /// Throws `CustomModelImport.ImportError` (or a `FileManager` error) on failure.
+    @discardableResult
+    func importModel(from sourceURL: URL) throws -> String {
+        guard WhisperModelFile.hasGGMLMagic(at: sourceURL) else {
+            throw CustomModelImport.ImportError.notAModelFile
+        }
+
+        let plan: CustomModelImport.Plan
+        switch CustomModelImport.plan(forSourceFileName: sourceURL.lastPathComponent, existingModelIDs: installedModelIDs()) {
+        case let .success(resolved):
+            plan = resolved
+        case let .failure(error):
+            throw error
+        }
+
+        try FileManager.default.createDirectory(at: modelsDirectoryURL, withIntermediateDirectories: true)
+        let destination = modelsDirectoryURL.appendingPathComponent(plan.destinationFileName)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw CustomModelImport.ImportError.alreadyInstalled(modelID: plan.modelID)
+        }
+
+        do {
+            try FileManager.default.linkItem(at: sourceURL, to: destination)
+        } catch {
+            try FileManager.default.copyItem(at: sourceURL, to: destination)
+        }
+        return plan.modelID
+    }
+
     func installedModelIDs() -> [String] {
         lock.lock()
         defer { lock.unlock() }

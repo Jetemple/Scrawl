@@ -243,6 +243,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 cancelDownload: { [weak self] in
                     self?.cancelModelDownload()
                 },
+                addModel: { [weak self] in
+                    self?.importCustomModel()
+                },
+                revealModelsFolder: { [weak self] in
+                    self?.revealModelsFolder()
+                },
                 setHotkey: { [weak self] in
                     self?.toggleHotkeyCapture(nil)
                 },
@@ -327,6 +333,44 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 dictionaryLoadErrorDescription: runtime.dictionaryStore.loadErrorDescription
             )
         )
+    }
+
+    /// "Bring your own model": let the user pick a whisper.cpp ggml `.bin` and import
+    /// it into the models folder. The import (validation + hardlink/copy) runs off the
+    /// main thread so a large cross-volume copy can't freeze the UI; success refreshes
+    /// the list (the model appears as a selectable row), failure shows the reason.
+    private func importCustomModel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a whisper.cpp ggml model file (usually named ggml-*.bin)."
+        panel.prompt = "Add Model"
+        guard panel.runModal() == .OK, let sourceURL = panel.url else {
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                try modelManager.importModel(from: sourceURL)
+                DispatchQueue.main.async {
+                    self.refreshPreferencesWindow()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    NSAlert(error: error).runModal()
+                }
+            }
+        }
+    }
+
+    /// Opens the models folder in Finder so power users can drop in their own
+    /// `ggml-*.bin` files directly; the existing on-disk scan picks them up.
+    private func revealModelsFolder() {
+        let folder = modelManager.modelsFolderURL
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
     }
 
     private func setTranscriptHistoryEnabled(_ enabled: Bool) {

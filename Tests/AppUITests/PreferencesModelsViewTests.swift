@@ -12,7 +12,9 @@ final class PreferencesModelsViewTests: XCTestCase {
             selectModel: { _ in },
             downloadModel: { _ in },
             deleteSelectedModel: {},
-            cancelDownload: {}
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {}
         )
         view.frame = NSRect(x: 0, y: 0, width: 480, height: 320)
 

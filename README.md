@@ -121,6 +121,17 @@ Scrawl lives in your menubar. From there you can:
 
 Transcript history is stored only on this Mac, enabled by default, and limited to the newest 100 transcripts. Turning off **Save transcript history** deletes saved transcripts and stops saving new ones until it is enabled again. Preferred Vocabulary terms are also stored locally and supplied to Whisper as recognition context.
 
+## Bring your own model
+
+Scrawl isn't limited to the models in the list. Anything that runs on [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), or your own fine-tunes — works, as long as it's a ggml-format `.bin`.
+
+Two ways to add one, both in **Settings → Models**:
+
+- **Add Model…** — pick a `.bin` you've already downloaded. Scrawl checks it's a real ggml model, copies it in, and it appears in the list ready to use.
+- **Reveal Models Folder** — opens the models folder in Finder so you can drop `ggml-*.bin` files in directly. They show up automatically.
+
+Good places to find models: the official [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main) repo (every size, plus quantized `q5`/`q8` variants) and distil-whisper ggml conversions. The file must be a whisper.cpp ggml model — other formats or non-Whisper architectures won't load.
+
 ## Development
 
 ```bash
