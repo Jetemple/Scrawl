@@ -6,8 +6,8 @@
 
 <p align="center">
   <strong>Local voice-to-text for macOS.</strong><br>
-  Hold a key, talk, let go — your words land at the cursor. Runs entirely on-device with
-  <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>. No cloud, no account, no telemetry.
+  Hold a key, talk, let go. Your words appear at the cursor.
+  Everything runs on your Mac with <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>: no cloud, no account, no telemetry.
 </p>
 
 <p align="center">
@@ -18,17 +18,15 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<!-- TODO: drop a ~5s demo GIF here (hold Right Option → speak → text pastes) as docs/demo.gif. -->
+<!-- TODO: add a demo GIF at docs/demo.gif -->
 
 ## What it does
 
-Hold your hotkey (default **Right Option**), speak, release. Scrawl transcribes locally and pastes the text into whatever app you're in. Double-tap to keep recording hands-free; tap again to stop.
-
-That's the whole thing — it lives in your menubar.
+Hold your hotkey (Right Option by default), speak, and release. Scrawl transcribes on-device and pastes the result into whatever app you're using. Or double-tap to record hands-free, then tap again to stop.
 
 ## Install
 
-macOS 14+ · Apple Silicon or Intel (Apple Silicon is much faster).
+Requires macOS 14 or later. Runs best on Apple Silicon.
 
 **Homebrew**
 
@@ -38,9 +36,11 @@ brew trust jetemple/tap          # trust the third-party tap (one-time)
 brew install --cask scrawl
 ```
 
-Update later with `brew upgrade --cask scrawl`.
+Upgrade later with `brew upgrade --cask scrawl`.
 
-**From source** — needs macOS 14+ and the Xcode command line tools:
+**From source**
+
+Needs the Xcode command line tools.
 
 ```bash
 brew install whisper-cpp
@@ -49,34 +49,34 @@ cd Scrawl && make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```
 
-On first launch, grant **Microphone** and **Accessibility** when asked. Then open the menubar **Models** menu and download one. `small.en` is the default — fast, English-only, ~470 MB. Pick `medium` (~1.5 GB) for other languages or `large-v3-turbo` (~1.6 GB) for the best accuracy. Focus any text field, hold Right Option, and talk.
+On first launch, grant Microphone and Accessibility. Open the menubar's Models menu and download one: `small.en` (470 MB) is a fast, English-only default; `medium` (1.5 GB) handles other languages; `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option, and talk.
 
 ## Features
 
-- **Fully local** — audio never leaves your Mac.
-- **Lands at the cursor** — inserts into the focused field, or copies to the clipboard if the app blocks paste.
-- **Bring your own model** — ships with tiny/small/medium/large-v3-turbo, or load any whisper.cpp ggml model.
-- **No reload lag** — the model stays in memory between recordings and unloads when idle. GPU by default, CPU fallback.
-- **Custom vocabulary** — teach it names, jargon, and acronyms.
-- **History** — last 100 transcripts, searchable, local-only. One switch wipes them.
+- **Fully local.** Audio never leaves your Mac.
+- **Pastes at the cursor.** Straight into the focused field, or the clipboard if an app blocks it.
+- **Bring your own model.** Ships with tiny/small/medium/large-v3-turbo, or load any whisper.cpp ggml model.
+- **Stays warm.** Keeps the model in memory between recordings, unloads it after idle. GPU by default, CPU fallback.
+- **Custom vocabulary.** Teach it the names, jargon, and acronyms you use.
+- **Local history.** Last 100 transcripts, searchable, on-device. One switch wipes them.
 
 ## Bring your own model
 
-Anything that runs on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) works — quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), or your own fine-tunes — as long as it's a ggml `.bin`.
+If it runs on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and it's a ggml `.bin`, Scrawl loads it: quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), your own fine-tunes.
 
-In **Settings → Models**:
+Add one under **Models** in Settings:
 
-- **Add Model…** — pick a `.bin` you've downloaded; Scrawl verifies it's a real ggml model and imports it.
-- **Reveal Models Folder** — drop `ggml-*.bin` files in directly and they show up automatically.
+- **Add Model…** imports a `.bin` you've downloaded, after checking it's a real ggml model.
+- **Reveal Models Folder** opens the folder so you can drop `ggml-*.bin` files straight in.
 
-Grab models from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main) on Hugging Face — every size, plus `q5`/`q8` quantized variants. Non-Whisper architectures won't load.
+[ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main) on Hugging Face has every size, plus `q5`/`q8` quantized variants. Non-Whisper models won't load.
 
 ## Troubleshooting
 
 <details>
 <summary>Permissions reset after a reinstall or upgrade</summary>
 
-Source builds are unsigned by default, so macOS drops the Accessibility grant on reinstall. Sign with a stable identity to keep it across reinstalls:
+Source builds are unsigned, so macOS drops the Accessibility grant on reinstall. Sign with a stable identity to keep it:
 
 ```bash
 security find-identity -v -p codesigning          # find your identity
@@ -95,7 +95,7 @@ open /Applications/Scrawl.app
 <details>
 <summary>Text goes to the clipboard instead of pasting</summary>
 
-Something has macOS **Secure Keyboard Entry** switched on — usually a terminal or a password manager — which blocks synthesized ⌘V system-wide. Scrawl inserts into native text fields via the Accessibility API where it can, and falls back to the clipboard otherwise. Press ⌘V to paste, or turn off secure input in the app that grabbed it.
+Some app has macOS Secure Keyboard Entry on, often a terminal or password manager, which blocks synthesized ⌘V system-wide. Scrawl writes into native text fields through the Accessibility API where it can, and otherwise leaves the text on the clipboard. Press ⌘V to paste, or turn off secure input in the app that switched it on.
 </details>
 
 ## Development
@@ -110,7 +110,7 @@ make clean
 make uninstall
 ```
 
-Env overrides:
+Environment overrides:
 
 ```bash
 SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli make run   # custom whisper binary
