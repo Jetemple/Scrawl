@@ -5,9 +5,9 @@
 <h1 align="center">Scrawl</h1>
 
 <p align="center">
-  <strong>Local-first voice-to-text for macOS.</strong><br>
-  Press a key, talk, and your words appear at the cursor — everything runs on-device via
-  <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>. Nothing leaves your machine.
+  <strong>Local voice-to-text for macOS.</strong><br>
+  Hold a key, talk, let go — your words land at the cursor. Runs entirely on-device with
+  <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>. No cloud, no account, no telemetry.
 </p>
 
 <p align="center">
@@ -18,167 +18,106 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<!-- TODO: add a demo GIF — the single highest-impact addition for a GUI app.
-     Record ~5s (hold Right Option → speak → text pastes into a focused field),
-     save it as docs/demo.gif, then uncomment the block below. -->
-<!--
-<p align="center">
-  <img src="docs/demo.gif" alt="Scrawl in action" width="640">
-</p>
--->
+<!-- TODO: drop a ~5s demo GIF here (hold Right Option → speak → text pastes) as docs/demo.gif. -->
 
-> Press your hotkey, speak, release — Scrawl transcribes locally and pastes the text into whatever app you're using. No cloud, no account, no telemetry.
+## What it does
 
-## How it works
+Hold your hotkey (default **Right Option**), speak, release. Scrawl transcribes locally and pastes the text into whatever app you're in. Double-tap to keep recording hands-free; tap again to stop.
 
-1. Hold your hotkey (default: `Right Option`)
-2. Speak
-3. Release — transcript is pasted into whatever app you're focused on
-
-Or double-tap the hotkey to toggle recording on, then single-tap to stop.
+That's the whole thing — it lives in your menubar.
 
 ## Install
 
-### Homebrew (recommended)
+macOS 14+ · Apple Silicon or Intel (Apple Silicon is much faster).
+
+**Homebrew**
 
 ```bash
 brew tap jetemple/tap
-brew trust jetemple/tap        # one-time: recent Homebrew requires trusting third-party taps
+brew trust jetemple/tap          # trust the third-party tap (one-time)
 brew install --cask scrawl
 ```
 
-`brew trust` is a one-time, per-machine step that newer Homebrew requires before it will
-load any non-official tap (it's stored in `~/.homebrew/trust.json`). Without it, install
-and upgrades fail with `Refusing to load cask … from untrusted tap`.
+Update later with `brew upgrade --cask scrawl`.
 
-To update later:
-
-```bash
-brew update
-brew upgrade --cask scrawl
-```
-
-### From source
-
-Requires macOS 14+, Xcode command line tools, and `whisper-cli` from whisper.cpp.
+**From source** — needs macOS 14+ and the Xcode command line tools:
 
 ```bash
 brew install whisper-cpp
-
 git clone https://github.com/Jetemple/Scrawl.git
-cd Scrawl
-make install PREFIX=/Applications
+cd Scrawl && make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```
 
-On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
+On first launch, grant **Microphone** and **Accessibility** when asked. Then open the menubar **Models** menu and download one. `small.en` is the default — fast, English-only, ~470 MB. Pick `medium` (~1.5 GB) for other languages or `large-v3-turbo` (~1.6 GB) for the best accuracy. Focus any text field, hold Right Option, and talk.
 
-Download a model from the Models menu:
-- `small.en` is the recommended default — fast, accurate for English, and what Scrawl pre-selects on first launch.
-- Pick `medium` for multilingual transcription, or `large-v3-turbo` for the highest accuracy.
+## Features
 
-### Verify install in 30 seconds
+- **Fully local** — audio never leaves your Mac.
+- **Lands at the cursor** — inserts into the focused field, or copies to the clipboard if the app blocks paste.
+- **Bring your own model** — ships with tiny/small/medium/large-v3-turbo, or load any whisper.cpp ggml model.
+- **No reload lag** — the model stays in memory between recordings and unloads when idle. GPU by default, CPU fallback.
+- **Custom vocabulary** — teach it names, jargon, and acronyms.
+- **History** — last 100 transcripts, searchable, local-only. One switch wipes them.
 
-1. Click the Scrawl menubar icon.
-2. In **Models**, download `small.en`, `medium`, or `large-v3-turbo`.
-3. Focus any text field.
-4. Hold **Right Option**, speak, release.
-5. Transcript should paste at cursor.
+## Bring your own model
 
-### Permissions after reinstalling
+Anything that runs on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) works — quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), or your own fine-tunes — as long as it's a ggml `.bin`.
 
-By default, source installs are unsigned (or ad-hoc signed), so Accessibility permission is reset on reinstall to avoid stale grants.
+In **Settings → Models**:
 
-To avoid this, sign with a stable identity:
+- **Add Model…** — pick a `.bin` you've downloaded; Scrawl verifies it's a real ggml model and imports it.
+- **Reveal Models Folder** — drop `ggml-*.bin` files in directly and they show up automatically.
+
+Grab models from [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main) on Hugging Face — every size, plus `q5`/`q8` quantized variants. Non-Whisper architectures won't load.
+
+## Troubleshooting
+
+<details>
+<summary>Permissions reset after a reinstall or upgrade</summary>
+
+Source builds are unsigned by default, so macOS drops the Accessibility grant on reinstall. Sign with a stable identity to keep it across reinstalls:
 
 ```bash
-# find your identities
-security find-identity -v -p codesigning
-
-# install with a consistent signature
+security find-identity -v -p codesigning          # find your identity
 SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" make install
 ```
 
-With a stable signature, Scrawl keeps its Accessibility grant across reinstalls.
-
-If microphone access seems stuck after a cask upgrade, reset permissions and relaunch:
+If the mic or accessibility gets stuck after an upgrade, reset and relaunch:
 
 ```bash
 tccutil reset Microphone com.jetemple.scrawl
 tccutil reset Accessibility com.jetemple.scrawl
 open /Applications/Scrawl.app
 ```
+</details>
 
-## Configuration
+<details>
+<summary>Text goes to the clipboard instead of pasting</summary>
 
-Scrawl lives in your menubar. From there you can:
-
-- **Open Settings** - Manage permissions, models, the recording shortcut, transcript history, and preferred Vocabulary from a compact sidebar window.
-- **Switch models** - tiny.en (fast), small.en (balanced), medium (multilingual), large-v3-turbo (highest accuracy).
-- **Control model offloading** - Keep the selected model warm for faster repeat transcriptions, then release its memory after a chosen idle period.
-- **Repaste recent transcripts** - Use the Recent Transcripts submenu for quick access or the searchable History page for copy, repaste, and delete actions.
-- **Manage Vocabulary** - Add names, technical terms, and phrases that help Whisper recognize your language.
-
-Transcript history is stored only on this Mac, enabled by default, and limited to the newest 100 transcripts. Turning off **Save transcript history** deletes saved transcripts and stops saving new ones until it is enabled again. Preferred Vocabulary terms are also stored locally and supplied to Whisper as recognition context.
-
-## Bring your own model
-
-Scrawl isn't limited to the models in the list. Anything that runs on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), or your own fine-tunes — works, as long as it's a ggml-format `.bin`.
-
-Two ways to add one, both in **Settings → Models**:
-
-- **Add Model…** — pick a `.bin` you've already downloaded. Scrawl checks it's a real ggml model, copies it in, and it appears in the list ready to use.
-- **Reveal Models Folder** — opens the models folder in Finder so you can drop `ggml-*.bin` files in directly. They show up automatically.
-
-Good places to find models: the official [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main) repo (every size, plus quantized `q5`/`q8` variants) and distil-whisper ggml conversions. The file must be a whisper.cpp ggml model — other formats or non-Whisper architectures won't load.
+Something has macOS **Secure Keyboard Entry** switched on — usually a terminal or a password manager — which blocks synthesized ⌘V system-wide. Scrawl inserts into native text fields via the Accessibility API where it can, and falls back to the clipboard otherwise. Press ⌘V to paste, or turn off secure input in the app that grabbed it.
+</details>
 
 ## Development
 
 ```bash
 make build      # build
-make doctor     # check local toolchain/dependencies
 make test       # run tests
-make run        # stop an installed Scrawl instance and run this source build
-make clean      # clean build artifacts
-make uninstall  # remove app
+make doctor     # check toolchain and dependencies
+make run        # run this source build
+make run-debug  # same, plus manual record/stop controls for diagnostics
+make clean
+make uninstall
 ```
 
-Run directly from source:
+Env overrides:
 
 ```bash
-make run
+SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli make run   # custom whisper binary
+SCRAWL_MODELS_DIR=/path/to/models make run                # custom models directory
+SCRAWL_WHISPER_THREADS=8 make run                         # cap threads (auto-selects up to 8)
+SCRAWL_DISABLE_GPU=1 make run                             # force CPU-only
 ```
-
-Override paths via environment variables:
-
-```bash
-SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli make run
-SCRAWL_MODELS_DIR=/path/to/models make run
-```
-
-Performance tuning:
-
-```bash
-# cap whisper threads (default auto-selects up to 8)
-SCRAWL_WHISPER_THREADS=8 make run
-
-# force CPU-only mode (GPU is enabled by default)
-SCRAWL_DISABLE_GPU=1 make run
-```
-
-Scrawl automatically uses GPU acceleration when available and falls back to CPU mode if GPU execution fails.
-It also preloads the selected model when recording begins and keeps it warm between
-transcriptions. The default idle offload period is five minutes and can be changed
-in General Settings. If the persistent local helper is unavailable, Scrawl
-automatically falls back to one-shot `whisper-cli` transcription.
-
-Debug mode (shows manual record/stop controls and overlay previews):
-
-```bash
-make run-debug
-```
-
-Debug mode adds manual Control-R and Control-S recording actions for diagnostics. They are not Scrawl's normal recording shortcut; normal recording always uses the configured hotkey.
 
 ## License
 
