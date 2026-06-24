@@ -18,6 +18,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let requestAccessibility: () -> Void
         let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
         let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
+        let setLaunchAtLogin: (Bool) -> Void
         let setTranscriptHistoryEnabled: (Bool) -> Void
         let copyTranscript: (UUID) -> Void
         let repasteTranscript: (UUID) -> Void
@@ -42,6 +43,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let transcriptHistoryLoadErrorDescription: String?
         let dictionaryEntries: [DictionaryEntry]
         let dictionaryLoadErrorDescription: String?
+        let launchAtLoginEnabled: Bool
     }
 
     enum Section: Int, CaseIterable {
@@ -185,12 +187,17 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         generalView.isClipboardHistoryEnabled
     }
 
+    var generalLaunchAtLoginEnabled: Bool {
+        generalView.isLaunchAtLoginEnabled
+    }
+
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
             requestMicrophone: actions.requestMicrophone,
             requestAccessibility: actions.requestAccessibility,
             setModelOffloadPolicy: actions.setModelOffloadPolicy,
-            setKeepTranscriptsInClipboardHistory: actions.setKeepTranscriptsInClipboardHistory
+            setKeepTranscriptsInClipboardHistory: actions.setKeepTranscriptsInClipboardHistory,
+            setLaunchAtLogin: actions.setLaunchAtLogin
         )
         modelsView = PreferencesModelsView(
             selectModel: actions.selectModel,
@@ -251,7 +258,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             settings: snapshot.settings,
             microphoneStatus: snapshot.microphoneStatus,
             accessibilityStatus: snapshot.accessibilityStatus,
-            isCapturingHotkey: snapshot.isCapturingHotkey
+            isCapturingHotkey: snapshot.isCapturingHotkey,
+            launchAtLoginEnabled: snapshot.launchAtLoginEnabled
         )
         modelsView.update(
             rows: snapshot.modelRows,

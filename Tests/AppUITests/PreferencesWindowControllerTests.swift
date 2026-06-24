@@ -327,6 +327,29 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneralLaunchAtLoginCheckboxReflectsStateAndDispatchesAction() {
+        var capturedValue: Bool?
+        let controller = PreferencesWindowController(actions: makeActions(
+            setLaunchAtLogin: { capturedValue = $0 }
+        ))
+
+        // Defaults to off.
+        controller.update(snapshot: makeSnapshot())
+        XCTAssertFalse(controller.generalLaunchAtLoginEnabled)
+
+        // Reflects the live login-item state when enabled.
+        controller.update(snapshot: makeSnapshot(launchAtLoginEnabled: true))
+        XCTAssertTrue(controller.generalLaunchAtLoginEnabled)
+
+        // Clicking dispatches the action.
+        let contentView = controller.window?.contentView
+        let checkbox = contentView?.button(titled: "Launch at login")
+        XCTAssertNotNil(checkbox)
+        checkbox?.performClick(nil)
+        XCTAssertNotNil(capturedValue)
+    }
+
+    @MainActor
     func testGeneralClipboardHistoryCheckboxReflectsSettingAndDispatchesAction() {
         var capturedValue: Bool?
         let controller = PreferencesWindowController(actions: makeActions(
@@ -540,7 +563,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
         dictionaryLoadErrorDescription: String? = nil,
         modelRows: [PreferencesModelRow] = [],
         downloadProgressText: String? = nil,
-        keepTranscriptsInClipboardHistory: Bool = false
+        keepTranscriptsInClipboardHistory: Bool = false,
+        launchAtLoginEnabled: Bool = false
     ) -> PreferencesWindowController.Snapshot {
         PreferencesWindowController.Snapshot(
             settings: AppSettings(
@@ -558,7 +582,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
             transcriptHistory: records,
             transcriptHistoryLoadErrorDescription: historyLoadErrorDescription,
             dictionaryEntries: dictionaryEntries,
-            dictionaryLoadErrorDescription: dictionaryLoadErrorDescription
+            dictionaryLoadErrorDescription: dictionaryLoadErrorDescription,
+            launchAtLoginEnabled: launchAtLoginEnabled
         )
     }
 
@@ -574,6 +599,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
         setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
+        setLaunchAtLogin: @escaping (Bool) -> Void = { _ in },
         copyTranscript: @escaping (UUID) -> Void = { _ in },
         repasteTranscript: @escaping (UUID) -> Void = { _ in },
         deleteTranscripts: @escaping (Set<UUID>) -> Void = { _ in },
@@ -600,6 +626,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             requestAccessibility: requestAccessibility,
             setModelOffloadPolicy: setModelOffloadPolicy,
             setKeepTranscriptsInClipboardHistory: setKeepTranscriptsInClipboardHistory,
+            setLaunchAtLogin: setLaunchAtLogin,
             setTranscriptHistoryEnabled: setTranscriptHistoryEnabled,
             copyTranscript: copyTranscript,
             repasteTranscript: repasteTranscript,

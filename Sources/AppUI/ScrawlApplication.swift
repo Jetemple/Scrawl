@@ -3,6 +3,7 @@ import AudioCapture
 import DictionaryStore
 import HotkeyEngine
 import Permissions
+import ServiceManagement
 import SettingsStore
 import TextOutput
 import TranscriptHistoryStore
@@ -82,6 +83,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private let runtime: AppRuntime
     private let modelManager: LocalModelManager
+    private let loginItem: LoginItemControlling = SMAppServiceLoginItem()
     private lazy var transcriptHistoryCoordinator = TranscriptHistoryCoordinator(
         settingsStore: runtime.settingsStore,
         historyStore: runtime.transcriptHistoryStore
@@ -268,6 +270,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 setKeepTranscriptsInClipboardHistory: { [weak self] keep in
                     self?.mutateSettings { $0.keepTranscriptsInClipboardHistory = keep }
                 },
+                setLaunchAtLogin: { [weak self] enabled in
+                    self?.setLaunchAtLogin(enabled)
+                },
                 setTranscriptHistoryEnabled: { [weak self] enabled in
                     self?.setTranscriptHistoryEnabled(enabled)
                 },
@@ -334,7 +339,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 dictionaryEntries: runtime.dictionaryStore.terms().map {
                     DictionaryEntry(wrong: $0.value, correct: $0.value)
                 },
-                dictionaryLoadErrorDescription: runtime.dictionaryStore.loadErrorDescription
+                dictionaryLoadErrorDescription: runtime.dictionaryStore.loadErrorDescription,
+                launchAtLoginEnabled: loginItem.isEnabled
             )
         )
     }
@@ -412,6 +418,38 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func setModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
         mutateSettings { $0.modelOffloadPolicy = policy }
+    }
+
+    /// Toggles the macOS login item, then re-renders the checkbox from the live OS
+    /// state so it can never drift. On failure or when macOS requires approval,
+    /// guides the user to System Settings → General → Login Items.
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try loginItem.setEnabled(enabled)
+            if enabled, !loginItem.isEnabled {
+                presentLoginItemAlert(
+                    message: "Approval needed for launch at login",
+                    informative: "macOS needs you to allow Scrawl under System Settings → General → Login Items."
+                )
+            }
+        } catch {
+            presentLoginItemAlert(
+                message: "Couldn't update launch at login",
+                informative: "Scrawl couldn't change your login item. You can manage it under System Settings → General → Login Items."
+            )
+        }
+        refreshPreferencesWindow()
+    }
+
+    private func presentLoginItemAlert(message: String, informative: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = informative
+        alert.addButton(withTitle: "Open Login Items Settings")
+        alert.addButton(withTitle: "OK")
+        if alert.runModal() == .alertFirstButtonReturn {
+            SMAppService.openSystemSettingsLoginItems()
+        }
     }
 
     private func copyTranscript(id: UUID) {
