@@ -98,6 +98,10 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 
     private func buildView() {
         termField.placeholderString = "Add a preferred term"
+        // A plain NSTextField defaults to a square bezel, whose sharp corners clash
+        // with the rounded search field and list group below it. The rounded bezel
+        // gives the input the same soft corners as everything around it.
+        termField.bezelStyle = .roundedBezel
         PreferencesPageSupport.configureSecondaryButton(addButton)
         addButton.bezelColor = .controlAccentColor
         addButton.target = self
@@ -242,6 +246,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private func showEditor(original: String) {
         guard let window else { return }
         let field = NSTextField(string: original)
+        field.bezelStyle = .roundedBezel // Match the rounded input on the Vocabulary page.
         let cancel = NSButton(title: "Cancel", target: nil, action: nil)
         let save = NSButton(title: "Save", target: nil, action: nil)
         save.keyEquivalent = "\r"
