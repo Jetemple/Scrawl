@@ -16,7 +16,7 @@ final class DictionaryReplacerTests: XCTestCase {
     func testVocabularyTermsCanBeEditedAndDeleted() throws {
         let store = InMemoryDictionaryStore(terms: [
             VocabularyTerm(value: "Anduril"),
-            VocabularyTerm(value: "Postgres")
+            VocabularyTerm(value: "Postgres"),
         ])
 
         try store.replaceTerm(original: "Anduril", with: "Kubernetes")
@@ -32,7 +32,7 @@ final class DictionaryReplacerTests: XCTestCase {
         try JSONEncoder().encode([
             DictionaryEntry(wrong: "andrew", correct: "Anduril"),
             DictionaryEntry(wrong: "post grass", correct: "Postgres"),
-            DictionaryEntry(wrong: "duplicate", correct: "anduril")
+            DictionaryEntry(wrong: "duplicate", correct: "anduril"),
         ]).write(to: fileURL)
 
         let store = JSONDictionaryStore(fileURL: fileURL)
@@ -71,7 +71,7 @@ final class DictionaryReplacerTests: XCTestCase {
 
     func testAddOrReplaceUpsertsCaseInsensitive() throws {
         let store = InMemoryDictionaryStore(entries: [
-            DictionaryEntry(wrong: "wispr", correct: "Whisper")
+            DictionaryEntry(wrong: "wispr", correct: "Whisper"),
         ])
 
         try store.addOrReplace(wrong: "WISPR", correct: "Whisper.cpp")

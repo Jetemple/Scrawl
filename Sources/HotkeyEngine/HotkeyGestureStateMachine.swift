@@ -45,7 +45,7 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
         switch state {
         case .idle:
             state = .pressed(time)
-        case .waitingForSecondTap(let firstRelease):
+        case let .waitingForSecondTap(firstRelease):
             if time.timeIntervalSince(firstRelease) <= config.doubleTapGap {
                 state = .toggleRecording
                 return [.startToggleRecording]
@@ -81,10 +81,10 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
 
     public func nextActionDeadline(at time: Date) -> Date? {
         switch state {
-        case .pressed(let down):
+        case let .pressed(down):
             let deadline = down.addingTimeInterval(config.holdThreshold)
             return deadline > time ? deadline : time
-        case .waitingForSecondTap(let firstTapRelease):
+        case let .waitingForSecondTap(firstTapRelease):
             let deadline = firstTapRelease.addingTimeInterval(config.doubleTapGap)
             return deadline > time ? deadline : time
         default:
@@ -94,14 +94,14 @@ public final class HotkeyGestureStateMachine: @unchecked Sendable {
 
     public func tick(at time: Date) -> [HotkeyGestureAction] {
         switch state {
-        case .pressed(let down):
+        case let .pressed(down):
             if time.timeIntervalSince(down) >= config.holdThreshold {
                 state = .holdRecording
                 return [.startHoldRecording]
             }
             return []
 
-        case .waitingForSecondTap(let firstTapRelease):
+        case let .waitingForSecondTap(firstTapRelease):
             if time.timeIntervalSince(firstTapRelease) > config.doubleTapGap {
                 state = .idle
             }

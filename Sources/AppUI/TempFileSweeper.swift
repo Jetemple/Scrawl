@@ -9,7 +9,7 @@ public enum TempFileSweeper {
         "scrawl-audio-",
         "scrawl-transcript-",
         "scrawl-whisper-",
-        "scrawl-download-"
+        "scrawl-download-",
     ]
 
     /// Remove matching files from `directory`. Never recurses. Never throws.

@@ -1,12 +1,11 @@
 import AppKit
-import XCTest
-
 @testable import RecordingOverlay
+import XCTest
 
 final class PillWidthTests: XCTestCase {
     // The clamp boundaries
-    private let minWidth = RecordingOverlayController.minPillWidth   // 148
-    private let maxWidth = RecordingOverlayController.maxPillWidth   // 420
+    private let minWidth = RecordingOverlayController.minPillWidth // 148
+    private let maxWidth = RecordingOverlayController.maxPillWidth // 420
     private let font = NSFont.systemFont(ofSize: 12, weight: .medium)
 
     // MARK: - Clamp tests using injected measured width
@@ -117,7 +116,7 @@ final class PillWidthTests: XCTestCase {
         let withAccessory = RecordingOverlayController.pillWidth(
             forText: "Recording",
             font: font,
-            leadingAccessoryWidth: 16   // dot(8)+gap(8)
+            leadingAccessoryWidth: 16 // dot(8)+gap(8)
         )
         // With an accessory the required total is larger; both may be at min, or withAccessory > withoutAccessory.
         XCTAssertGreaterThanOrEqual(withAccessory, withoutAccessory)

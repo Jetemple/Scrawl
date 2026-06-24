@@ -10,6 +10,9 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let downloadModel: (DownloadableModel) -> Void
         let deleteSelectedModel: () -> Void
         let cancelDownload: () -> Void
+        let addModel: () -> Void
+        let revealModelsFolder: () -> Void
+        let openModelSource: () -> Void
         let setHotkey: () -> Void
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
@@ -114,23 +117,73 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         window?.contentView?.containsSplitView ?? false
     }
 
-    var historyState: PreferencesHistoryView.State { historyView.state }
-    var historyVisibleRecordIDs: [UUID] { historyView.visibleRecordIDs }
-    var historySelectedRecordID: UUID? { historyView.selectedRecordID }
-    var dictionaryState: PreferencesDictionaryView.State { dictionaryView.state }
-    var dictionaryVisibleWrongValues: [String] { dictionaryView.visibleWrongValues }
-    var dictionarySelectedWrong: String? { dictionaryView.selectedWrong }
-    var historyUsesGroupedWorkspace: Bool { historyView.usesGroupedWorkspace }
-    var historyRowsAreTranscriptFirst: Bool { historyView.visibleRowsAreTranscriptFirst }
-    var historyTranscriptTextIsLeftAligned: Bool { historyView.visibleTranscriptTextIsLeftAligned }
-    var historyVisibleMetrics: [String] { historyView.visibleMetrics }
-    var dictionaryUsesGroupedWorkspace: Bool { dictionaryView.usesGroupedWorkspace }
-    var modelsListIsTopAnchored: Bool { modelsView.listIsTopAnchored }
-    var modelsTwoLineRowCount: Int { modelsView.visibleTwoLineRowCount }
-    var modelsSelectedRowHasAction: Bool { modelsView.visibleSelectedRowHasAction }
-    var generalModelOffloadChoices: [String] { generalView.modelOffloadChoices }
-    var generalSelectedModelOffloadPolicy: ModelOffloadPolicy? { generalView.selectedModelOffloadPolicy }
-    var generalIsClipboardHistoryEnabled: Bool { generalView.isClipboardHistoryEnabled }
+    var historyState: PreferencesHistoryView.State {
+        historyView.state
+    }
+
+    var historyVisibleRecordIDs: [UUID] {
+        historyView.visibleRecordIDs
+    }
+
+    var historySelectedRecordID: UUID? {
+        historyView.selectedRecordID
+    }
+
+    var dictionaryState: PreferencesDictionaryView.State {
+        dictionaryView.state
+    }
+
+    var dictionaryVisibleWrongValues: [String] {
+        dictionaryView.visibleWrongValues
+    }
+
+    var dictionarySelectedWrong: String? {
+        dictionaryView.selectedWrong
+    }
+
+    var historyUsesGroupedWorkspace: Bool {
+        historyView.usesGroupedWorkspace
+    }
+
+    var historyRowsAreTranscriptFirst: Bool {
+        historyView.visibleRowsAreTranscriptFirst
+    }
+
+    var historyTranscriptTextIsLeftAligned: Bool {
+        historyView.visibleTranscriptTextIsLeftAligned
+    }
+
+    var historyVisibleMetrics: [String] {
+        historyView.visibleMetrics
+    }
+
+    var dictionaryUsesGroupedWorkspace: Bool {
+        dictionaryView.usesGroupedWorkspace
+    }
+
+    var modelsListIsTopAnchored: Bool {
+        modelsView.listIsTopAnchored
+    }
+
+    var modelsTwoLineRowCount: Int {
+        modelsView.visibleTwoLineRowCount
+    }
+
+    var modelsSelectedRowHasAction: Bool {
+        modelsView.visibleSelectedRowHasAction
+    }
+
+    var generalModelOffloadChoices: [String] {
+        generalView.modelOffloadChoices
+    }
+
+    var generalSelectedModelOffloadPolicy: ModelOffloadPolicy? {
+        generalView.selectedModelOffloadPolicy
+    }
+
+    var generalIsClipboardHistoryEnabled: Bool {
+        generalView.isClipboardHistoryEnabled
+    }
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
@@ -143,7 +196,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             selectModel: actions.selectModel,
             downloadModel: actions.downloadModel,
             deleteSelectedModel: actions.deleteSelectedModel,
-            cancelDownload: actions.cancelDownload
+            cancelDownload: actions.cancelDownload,
+            addModel: actions.addModel,
+            revealModelsFolder: actions.revealModelsFolder,
+            openModelSource: actions.openModelSource
         )
         keyboardView = PreferencesKeyboardView(setHotkey: actions.setHotkey)
         historyView = PreferencesHistoryView(actions: .init(
@@ -176,7 +232,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -218,11 +274,11 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         generalView.selectModelOffloadPolicy(policy)
     }
 
-    func numberOfRows(in tableView: NSTableView) -> Int {
+    func numberOfRows(in _: NSTableView) -> Int {
         Section.allCases.count
     }
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+    func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard let section = Section(rawValue: row) else { return nil }
         let cell = NSTableCellView()
         let imageView = NSImageView(image: NSImage(systemSymbolName: section.symbolName, accessibilityDescription: nil) ?? NSImage())
@@ -241,12 +297,12 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             imageView.widthAnchor.constraint(equalToConstant: 16),
             stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8),
-            stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
+    func tableViewSelectionDidChange(_: Notification) {
         guard let section = Section(rawValue: sidebarTable.selectedRow) else { return }
         selectedSection = section
         showSelectedSection()
@@ -273,7 +329,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             .keyboard: keyboardView,
             .history: historyView,
             .dictionary: dictionaryView,
-            .about: aboutView
+            .about: aboutView,
         ]
 
         let sidebar = makeSidebar()
@@ -290,7 +346,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
                 view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
                 view.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
                 view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-                view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor)
+                view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
             ])
         }
 
@@ -311,7 +367,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             contentContainer.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             contentContainer.topAnchor.constraint(equalTo: root.topAnchor),
-            contentContainer.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            contentContainer.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         return root
     }
@@ -343,7 +399,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             scrollView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 12),
-            scrollView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
         ])
 
         sidebarTable.selectRowIndexes(IndexSet(integer: selectedSection.rawValue), byExtendingSelection: false)

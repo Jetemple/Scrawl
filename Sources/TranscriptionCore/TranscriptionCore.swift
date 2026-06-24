@@ -62,15 +62,15 @@ extension TranscriptionError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .providerUnavailable:
-            return "whisper-cli is not available."
+            "whisper-cli is not available."
         case let .modelMissing(modelID):
-            return "Whisper model '\(modelID)' is not installed."
+            "Whisper model '\(modelID)' is not installed."
         case .noSpeechDetected:
-            return "No speech was detected. Try again and speak a little longer."
+            "No speech was detected. Try again and speak a little longer."
         case let .executionFailed(message):
-            return message
+            message
         case let .timedOut(seconds):
-            return "Transcription timed out after \(seconds)s. Try a shorter clip or a smaller model."
+            "Transcription timed out after \(seconds)s. Try a shorter clip or a smaller model."
         }
     }
 }

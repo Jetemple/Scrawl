@@ -4,19 +4,19 @@ import XCTest
 final class HotkeyCaptureFilterTests: XCTestCase {
     // MARK: - Accepted keys
 
-    func testFunctionKeyF5IsAccepted() {
+    func testFunctionKeyF5IsAccepted() throws {
         // F5 keyCode = 96; characters = NSF5FunctionKey scalar (0xF708)
-        let f5Chars = String(UnicodeScalar(0xF708)!)
+        let f5Chars = try String(XCTUnwrap(UnicodeScalar(0xF708)))
         XCTAssertTrue(HotkeyCaptureFilter.isAccepted(keyCode: 96, characters: f5Chars))
     }
 
-    func testFunctionKeyF1IsAccepted() {
-        let f1Chars = String(UnicodeScalar(0xF704)!)
+    func testFunctionKeyF1IsAccepted() throws {
+        let f1Chars = try String(XCTUnwrap(UnicodeScalar(0xF704)))
         XCTAssertTrue(HotkeyCaptureFilter.isAccepted(keyCode: 122, characters: f1Chars))
     }
 
-    func testFunctionKeyF12IsAccepted() {
-        let f12Chars = String(UnicodeScalar(0xF70F)!)
+    func testFunctionKeyF12IsAccepted() throws {
+        let f12Chars = try String(XCTUnwrap(UnicodeScalar(0xF70F)))
         XCTAssertTrue(HotkeyCaptureFilter.isAccepted(keyCode: 111, characters: f12Chars))
     }
 
@@ -57,38 +57,38 @@ final class HotkeyCaptureFilterTests: XCTestCase {
 
     // MARK: - Arrow keys (rejected per policy)
 
-    func testUpArrowIsRejected() {
+    func testUpArrowIsRejected() throws {
         // NSUpArrowFunctionKey = 0xF700
-        let upArrowChars = String(UnicodeScalar(0xF700)!)
+        let upArrowChars = try String(XCTUnwrap(UnicodeScalar(0xF700)))
         XCTAssertFalse(HotkeyCaptureFilter.isAccepted(keyCode: 126, characters: upArrowChars))
     }
 
-    func testDownArrowIsRejected() {
-        let downArrowChars = String(UnicodeScalar(0xF701)!)
+    func testDownArrowIsRejected() throws {
+        let downArrowChars = try String(XCTUnwrap(UnicodeScalar(0xF701)))
         XCTAssertFalse(HotkeyCaptureFilter.isAccepted(keyCode: 125, characters: downArrowChars))
     }
 
-    func testLeftArrowIsRejected() {
-        let leftArrowChars = String(UnicodeScalar(0xF702)!)
+    func testLeftArrowIsRejected() throws {
+        let leftArrowChars = try String(XCTUnwrap(UnicodeScalar(0xF702)))
         XCTAssertFalse(HotkeyCaptureFilter.isAccepted(keyCode: 123, characters: leftArrowChars))
     }
 
-    func testRightArrowIsRejected() {
-        let rightArrowChars = String(UnicodeScalar(0xF703)!)
+    func testRightArrowIsRejected() throws {
+        let rightArrowChars = try String(XCTUnwrap(UnicodeScalar(0xF703)))
         XCTAssertFalse(HotkeyCaptureFilter.isAccepted(keyCode: 124, characters: rightArrowChars))
     }
 
     // MARK: - Edge cases
 
-    func testFunctionKeyJustAboveArrowRangeIsAccepted() {
+    func testFunctionKeyJustAboveArrowRangeIsAccepted() throws {
         // 0xF704 = NSF1FunctionKey — just above arrow range, should be accepted
-        let f1Chars = String(UnicodeScalar(0xF704)!)
+        let f1Chars = try String(XCTUnwrap(UnicodeScalar(0xF704)))
         XCTAssertTrue(HotkeyCaptureFilter.isAccepted(keyCode: 122, characters: f1Chars))
     }
 
-    func testDeleteFunctionKeyIsAccepted() {
+    func testDeleteFunctionKeyIsAccepted() throws {
         // NSDeleteFunctionKey = 0xF728
-        let deleteChars = String(UnicodeScalar(0xF728)!)
+        let deleteChars = try String(XCTUnwrap(UnicodeScalar(0xF728)))
         XCTAssertTrue(HotkeyCaptureFilter.isAccepted(keyCode: 117, characters: deleteChars))
     }
 }

@@ -25,8 +25,8 @@ final class AppSettingsDecodingTests: XCTestCase {
         XCTAssertTrue(AppSettings().isTranscriptHistoryEnabled)
     }
 
-    func testNoStoredSettingsDefaultTranscriptHistoryEnabled() {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    func testNoStoredSettingsDefaultTranscriptHistoryEnabled() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
 
         XCTAssertTrue(SettingsStore(defaults: defaults).load().isTranscriptHistoryEnabled)
     }
@@ -40,7 +40,7 @@ final class AppSettingsDecodingTests: XCTestCase {
     }
 
     func testExplicitlyDisabledTranscriptHistoryRoundTrips() throws {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         let store = SettingsStore(defaults: defaults)
 
         try store.save(AppSettings(isTranscriptHistoryEnabled: false))
@@ -49,7 +49,7 @@ final class AppSettingsDecodingTests: XCTestCase {
     }
 
     func testMalformedSettingsRetainSeparatelyPersistedDisabledTranscriptHistory() throws {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         let store = SettingsStore(defaults: defaults)
         try store.save(AppSettings(isTranscriptHistoryEnabled: false))
         defaults.set(Data("malformed".utf8), forKey: "scrawl.settings.v1")
@@ -57,16 +57,16 @@ final class AppSettingsDecodingTests: XCTestCase {
         XCTAssertFalse(store.load().isTranscriptHistoryEnabled)
     }
 
-    func testMalformedSettingsWithoutSeparatePrivacyValueFailClosed() {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    func testMalformedSettingsWithoutSeparatePrivacyValueFailClosed() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
         defaults.set(Data("malformed".utf8), forKey: "scrawl.settings.v1")
 
         XCTAssertFalse(SettingsStore(defaults: defaults).load().isTranscriptHistoryEnabled)
     }
 
     func testStaleLoadDoesNotOverwriteNewerDisabledPrivacyValue() throws {
-        let defaults = UserDefaults(suiteName: UUID().uuidString)!
-        defaults.set(try JSONEncoder().encode(AppSettings(isTranscriptHistoryEnabled: true)), forKey: "scrawl.settings.v1")
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))
+        try defaults.set(JSONEncoder().encode(AppSettings(isTranscriptHistoryEnabled: true)), forKey: "scrawl.settings.v1")
         defaults.set(false, forKey: "scrawl.settings.transcriptHistoryEnabled")
 
         _ = SettingsStore(defaults: defaults).load()

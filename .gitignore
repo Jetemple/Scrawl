@@ -9,6 +9,7 @@ benchmarks/
 .worktrees/
 .superpowers/
 .local/
+.claude/
 docs/PLAN.md
 docs/TODO.md
 docs/SESSION_PROGRESS.md

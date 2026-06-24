@@ -1,6 +1,6 @@
 import AppKit
-import DictionaryStore
 @testable import AppUI
+import DictionaryStore
 import SettingsStore
 import TranscriptHistoryStore
 import XCTest
@@ -75,7 +75,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
                 isDownloading: false,
                 isCancelled: false,
                 downloadProgressText: nil
-            )
+            ),
         ]))
         controller.selectSection(.models)
         controller.window?.contentView?.layoutSubtreeIfNeeded()
@@ -101,7 +101,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     func testPreferencesBackgroundsUpdateForAppearanceChanges() {
         for view in [
             PreferencesPageSupport.makeRoundedBackground(),
-            PreferencesPageSupport.makeContentBackground()
+            PreferencesPageSupport.makeContentBackground(),
         ] {
             let background = view as? PreferencesBackgroundView
             XCTAssertNotNil(background)
@@ -138,7 +138,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testPageHeaderLabelsFillWidthAndAlignLeft() throws {
+    func testPageHeaderLabelsFillWidthAndAlignLeft() {
         let header = PreferencesPageSupport.makePageHeader(
             title: "Models",
             description: "Select an installed model or download another."
@@ -195,7 +195,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
         controller.update(snapshot: makeSnapshot(records: [
-            TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")
+            TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript"),
         ]))
         controller.selectSection(.history)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -210,7 +210,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
         controller.update(snapshot: makeSnapshot(records: [
-            TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")
+            TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript"),
         ]))
         controller.selectSection(.history)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -226,9 +226,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
                 id: UUID(),
                 createdAt: .now,
                 text: "A saved transcript",
-                recordingDurationMS: 2_000,
-                transcriptionLatencyMS: 1_400
-            )
+                recordingDurationMS: 2000,
+                transcriptionLatencyMS: 1400
+            ),
         ]))
         controller.selectSection(.history)
         controller.window?.contentView?.layoutSubtreeIfNeeded()
@@ -302,6 +302,28 @@ final class PreferencesWindowControllerTests: XCTestCase {
         XCTAssertTrue(requestedAccessibility)
         XCTAssertTrue(requestedHotkey)
         XCTAssertTrue(openedProjectPage)
+    }
+
+    @MainActor
+    func testModelsAddRevealAndFindButtonsDispatchActions() throws {
+        var addedModel = false
+        var revealedFolder = false
+        var openedModelSource = false
+        let controller = PreferencesWindowController(actions: makeActions(
+            addModel: { addedModel = true },
+            revealModelsFolder: { revealedFolder = true },
+            openModelSource: { openedModelSource = true }
+        ))
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        controller.selectSection(.models)
+        try XCTUnwrap(contentView.button(titled: "Add Model…")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Reveal Models Folder")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Find models")).performClick(nil)
+
+        XCTAssertTrue(addedModel)
+        XCTAssertTrue(revealedFolder)
+        XCTAssertTrue(openedModelSource)
     }
 
     @MainActor
@@ -401,11 +423,11 @@ final class PreferencesWindowControllerTests: XCTestCase {
     func testDictionarySelectionUsesUpdatedVisibleKeyAfterCaseOnlyEdit() {
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot(dictionaryEntries: [
-            DictionaryEntry(wrong: "kubernetes", correct: "Kubernetes")
+            DictionaryEntry(wrong: "kubernetes", correct: "Kubernetes"),
         ]))
 
         controller.update(snapshot: makeSnapshot(dictionaryEntries: [
-            DictionaryEntry(wrong: "Kubernetes", correct: "Kubernetes")
+            DictionaryEntry(wrong: "Kubernetes", correct: "Kubernetes"),
         ]))
 
         XCTAssertEqual(controller.dictionarySelectedWrong, "Kubernetes")
@@ -417,7 +439,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
         controller.update(snapshot: makeSnapshot(dictionaryEntries: [
-            DictionaryEntry(wrong: "post grass", correct: "Postgres")
+            DictionaryEntry(wrong: "post grass", correct: "Postgres"),
         ]))
         controller.selectSection(.dictionary)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -491,7 +513,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             }
         ))
         controller.update(snapshot: makeSnapshot(dictionaryEntries: [
-            DictionaryEntry(wrong: "Anduril", correct: "Anduril")
+            DictionaryEntry(wrong: "Anduril", correct: "Anduril"),
         ]))
         controller.selectSection(.dictionary)
         let contentView = try XCTUnwrap(controller.window?.contentView)
@@ -545,6 +567,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
         setHotkey: @escaping () -> Void = {},
         requestMicrophone: @escaping () -> Void = {},
         requestAccessibility: @escaping () -> Void = {},
+        addModel: @escaping () -> Void = {},
+        revealModelsFolder: @escaping () -> Void = {},
+        openModelSource: @escaping () -> Void = {},
         openProjectPage: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
@@ -567,6 +592,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
             downloadModel: { _ in },
             deleteSelectedModel: {},
             cancelDownload: {},
+            addModel: addModel,
+            revealModelsFolder: revealModelsFolder,
+            openModelSource: openModelSource,
             setHotkey: setHotkey,
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,

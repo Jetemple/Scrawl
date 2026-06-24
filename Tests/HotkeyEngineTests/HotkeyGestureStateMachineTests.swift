@@ -85,12 +85,12 @@ final class HotkeyGestureStateMachineTests: XCTestCase {
         let machine = HotkeyGestureStateMachine()
         let t0 = Date(timeIntervalSinceReferenceDate: 0)
         _ = machine.keyDown(at: t0)
-        _ = machine.keyUp(at: t0.addingTimeInterval(0.05))            // first tap
+        _ = machine.keyUp(at: t0.addingTimeInterval(0.05)) // first tap
         let actions = machine.keyDown(at: t0.addingTimeInterval(0.25)) // second press within gap
-        XCTAssertEqual(actions, [.startToggleRecording])               // emitted on DOWN, immediately
+        XCTAssertEqual(actions, [.startToggleRecording]) // emitted on DOWN, immediately
         let upActions = machine.keyUp(at: t0.addingTimeInterval(0.40)) // held 150ms — must not matter
         XCTAssertEqual(upActions, [])
-        _ = machine.keyDown(at: t0.addingTimeInterval(2.0))            // later single press
+        _ = machine.keyDown(at: t0.addingTimeInterval(2.0)) // later single press
         let stop = machine.keyUp(at: t0.addingTimeInterval(2.05))
         XCTAssertEqual(stop, [.stopToggleRecording])
     }

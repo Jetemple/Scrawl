@@ -34,7 +34,9 @@ public protocol DictionaryStoring: Sendable {
 }
 
 public extension DictionaryStoring {
-    var loadErrorDescription: String? { nil }
+    var loadErrorDescription: String? {
+        nil
+    }
 }
 
 private enum VocabularyTermsMutation {
@@ -126,14 +128,16 @@ public final class InMemoryDictionaryStore: DictionaryStoring, @unchecked Sendab
     private var storedEntries: [DictionaryEntry]
 
     public init(entries: [DictionaryEntry] = []) {
-        self.storedEntries = entries
+        storedEntries = entries
     }
 
     public convenience init(terms: [VocabularyTerm]) {
         self.init(entries: VocabularyTermsMutation.entries(from: VocabularyTermsMutation.normalized(terms.map(\.value))))
     }
 
-    public var loadErrorDescription: String? { nil }
+    public var loadErrorDescription: String? {
+        nil
+    }
 
     public func entries() -> [DictionaryEntry] {
         lock.lock()
@@ -363,7 +367,15 @@ public final class JSONDictionaryStore: DictionaryStoring, @unchecked Sendable {
 
     private func persist(_ entries: [DictionaryEntry]) throws {
         let directory = fileURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // Owner-only data directory: the atomic write briefly leaves the JSON at the umask
+        // default (0644) before the chmod below, so keep the enclosing directory 0700 to deny
+        // cross-user traversal during that window (defense in depth).
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         let data = try JSONEncoder().encode(entries)
         try data.write(to: fileURL, options: .atomic)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
@@ -398,7 +410,8 @@ public enum DictionaryReplacer {
         var working = text
         var searchStart = working.startIndex
         while searchStart < working.endIndex,
-              let range = working.range(of: source, options: [.caseInsensitive], range: searchStart..<working.endIndex) {
+              let range = working.range(of: source, options: [.caseInsensitive], range: searchStart..<working.endIndex)
+        {
             let original = String(working[range])
             let replacementWithCase = applyCaseStyle(from: original, to: replacement)
             working.replaceSubrange(range, with: replacementWithCase)
@@ -415,7 +428,8 @@ public enum DictionaryReplacer {
             return replacement.lowercased()
         }
         if original.prefix(1) == original.prefix(1).uppercased(),
-           original.dropFirst() == original.dropFirst().lowercased() {
+           original.dropFirst() == original.dropFirst().lowercased()
+        {
             return replacement.prefix(1).uppercased() + replacement.dropFirst().lowercased()
         }
         return replacement

@@ -18,6 +18,7 @@ public struct AudioCaptureConfig: Sendable {
             usesSustainedActiveDuration = true
         }
     }
+
     public var activeWindowSeconds: Double
     public var activeWindowRMS: Double
     fileprivate var usesSustainedActiveDuration: Bool
@@ -33,7 +34,7 @@ public struct AudioCaptureConfig: Sendable {
     }
 
     public init(
-        sampleRate: Double = 16_000,
+        sampleRate: Double = 16000,
         channels: Int = 1,
         minimumDurationSeconds: Double = 0.18,
         silenceThresholdRMS: Double = 0.001,
@@ -47,12 +48,12 @@ public struct AudioCaptureConfig: Sendable {
         self.silenceThresholdRMS = silenceThresholdRMS
         self.activeWindowSeconds = activeWindowSeconds
         self.activeWindowRMS = activeWindowRMS
-        self.usesSustainedActiveDuration = true
-        self.activeDurationThreshold = minimumSustainedActiveSeconds
+        usesSustainedActiveDuration = true
+        activeDurationThreshold = minimumSustainedActiveSeconds
     }
 
     public init(
-        sampleRate: Double = 16_000,
+        sampleRate: Double = 16000,
         channels: Int = 1,
         minimumDurationSeconds: Double = 0.18,
         silenceThresholdRMS: Double = 0.001,
@@ -87,19 +88,19 @@ extension AudioCaptureError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .alreadyCapturing:
-            return "Recording is already in progress."
+            "Recording is already in progress."
         case .notCapturing:
-            return "No active recording to stop."
+            "No active recording to stop."
         case .recorderCreationFailed:
-            return "Could not create audio recorder."
+            "Could not create audio recorder."
         case .recorderStartFailed:
-            return "Could not start recording."
+            "Could not start recording."
         case let .captureTooShort(durationSeconds):
-            return String(format: "Recording was too short (%.2fs).", durationSeconds)
+            String(format: "Recording was too short (%.2fs).", durationSeconds)
         case .outputFileEmpty:
-            return "Recorded audio was empty."
+            "Recorded audio was empty."
         case .audioLevelTooLow:
-            return "No audio was captured. Check your microphone and try again."
+            "No audio was captured. Check your microphone and try again."
         }
     }
 }
@@ -138,7 +139,7 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false,
             AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false
+            AVLinearPCMIsNonInterleaved: false,
         ]
 
         guard let recorder = try? AVAudioRecorder(url: outputURL, settings: settings) else {
@@ -186,16 +187,15 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.audioLevelTooLow
         }
 
-        let activeSeconds: Double
-        if config.usesSustainedActiveDuration {
-            activeSeconds = (try? AudioLevelAnalyzer.longestActiveAudioSeconds(
+        let activeSeconds: Double = if config.usesSustainedActiveDuration {
+            (try? AudioLevelAnalyzer.longestActiveAudioSeconds(
                 fileURL: outputURL,
                 sampleRate: config.sampleRate,
                 windowSeconds: config.activeWindowSeconds,
                 activeRMS: config.activeWindowRMS
             )) ?? config.minimumSustainedActiveSeconds
         } else {
-            activeSeconds = (try? AudioLevelAnalyzer.activeAudioSeconds(
+            (try? AudioLevelAnalyzer.activeAudioSeconds(
                 fileURL: outputURL,
                 sampleRate: config.sampleRate,
                 windowSeconds: config.activeWindowSeconds,

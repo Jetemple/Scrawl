@@ -7,12 +7,11 @@
 <p align="center">
   <strong>Local-first voice-to-text for macOS.</strong><br>
   Press a key, talk, and your words appear at the cursor — everything runs on-device via
-  <a href="https://github.com/ggerganov/whisper.cpp">whisper.cpp</a>. Nothing leaves your machine.
+  <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>. Nothing leaves your machine.
 </p>
 
 <p align="center">
   <a href="https://github.com/Jetemple/Scrawl/actions/workflows/ci.yml"><img src="https://github.com/Jetemple/Scrawl/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://codecov.io/gh/Jetemple/Scrawl"><img src="https://codecov.io/gh/Jetemple/Scrawl/branch/master/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/Jetemple/Scrawl/releases/latest"><img src="https://img.shields.io/github/v/release/Jetemple/Scrawl?sort=semver" alt="Latest release"></a>
   <a href="https://github.com/Jetemple/Scrawl/releases"><img src="https://img.shields.io/github/downloads/Jetemple/Scrawl/total" alt="Downloads"></a>
   <img src="https://img.shields.io/badge/platform-macOS%2014%2B-blue" alt="Platform: macOS 14+">
@@ -75,8 +74,8 @@ open /Applications/Scrawl.app
 On first launch, grant **Microphone** and **Accessibility** permissions when prompted.
 
 Download a model from the Models menu:
-- `medium` is the default recommendation on GPU-enabled Macs.
-- `small.en` is the default recommendation when running CPU-only.
+- `small.en` is the recommended default — fast, accurate for English, and what Scrawl pre-selects on first launch.
+- Pick `medium` for multilingual transcription, or `large-v3-turbo` for the highest accuracy.
 
 ### Verify install in 30 seconds
 
@@ -121,6 +120,17 @@ Scrawl lives in your menubar. From there you can:
 - **Manage Vocabulary** - Add names, technical terms, and phrases that help Whisper recognize your language.
 
 Transcript history is stored only on this Mac, enabled by default, and limited to the newest 100 transcripts. Turning off **Save transcript history** deletes saved transcripts and stops saving new ones until it is enabled again. Preferred Vocabulary terms are also stored locally and supplied to Whisper as recognition context.
+
+## Bring your own model
+
+Scrawl isn't limited to the models in the list. Anything that runs on [whisper.cpp](https://github.com/ggml-org/whisper.cpp) — quantized builds, [distil-whisper](https://huggingface.co/distil-whisper), or your own fine-tunes — works, as long as it's a ggml-format `.bin`.
+
+Two ways to add one, both in **Settings → Models**:
+
+- **Add Model…** — pick a `.bin` you've already downloaded. Scrawl checks it's a real ggml model, copies it in, and it appears in the list ready to use.
+- **Reveal Models Folder** — opens the models folder in Finder so you can drop `ggml-*.bin` files in directly. They show up automatically.
+
+Good places to find models: the official [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main) repo (every size, plus quantized `q5`/`q8` variants) and distil-whisper ggml conversions. The file must be a whisper.cpp ggml model — other formats or non-Whisper architectures won't load.
 
 ## Development
 

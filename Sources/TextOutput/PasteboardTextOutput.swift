@@ -3,13 +3,30 @@ import ApplicationServices
 import Carbon
 import Foundation
 
-public enum TextOutputError: Error {
+public enum TextOutputError: Error, LocalizedError {
     case accessibilityPermissionRequired
     case failedToWritePasteboard
     case failedToCreateEventSource
-    /// A secure input field (e.g. a password field) is focused. The transcript was left on the
-    /// clipboard for the user to paste deliberately rather than auto-pasted into a sensitive field.
+    /// macOS Secure Keyboard Entry is active session-wide, so synthesized ⌘V is blocked. This is
+    /// usually a terminal (e.g. Ghostty/Terminal) or a password manager holding secure input, not
+    /// a focused password field. The transcript is left on the clipboard for the user to paste
+    /// deliberately rather than auto-pasted into what could be a sensitive field.
     case secureInputActive
+
+    public var errorDescription: String? {
+        switch self {
+        case .accessibilityPermissionRequired:
+            "Scrawl needs Accessibility permission to paste for you. Turn it on in "
+                + "System Settings → Privacy & Security → Accessibility, then try again."
+        case .failedToWritePasteboard:
+            "Scrawl couldn't copy the transcript to the clipboard."
+        case .failedToCreateEventSource:
+            "Scrawl couldn't send the paste keystroke (it failed to create an event source)."
+        case .secureInputActive:
+            "Auto-paste paused — macOS Secure Keyboard Entry is on (often your terminal or a "
+                + "password manager). Your text is on the clipboard; press ⌘V to paste."
+        }
+    }
 }
 
 public protocol TextOutputTarget: Sendable {
@@ -29,12 +46,13 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
         }
 
         if IsSecureEventInputEnabled() {
-            // A secure input field (password) is focused. Synthesized Cmd+V is unreliable while secure
-            // input is active, and pasting spoken text into a password field would silently leak it.
-            // Instead, leave the transcript on the clipboard (do NOT restore the previous contents) so
-            // the user can paste it deliberately, and signal the caller to surface a message.
-            // Always mark private in the secure-input path regardless of user preferences —
-            // a password-field context must never feed clipboard managers.
+            // Secure Keyboard Entry is active session-wide (commonly a terminal or password manager,
+            // sometimes a focused password field). Synthesized Cmd+V is blocked while secure input is
+            // active, and pasting spoken text into a password field would silently leak it. Instead,
+            // leave the transcript on the clipboard (do NOT restore the previous contents) so the user
+            // can paste it deliberately, and signal the caller to surface a message. Always mark
+            // private in this path regardless of user preferences — a possible password-field context
+            // must never feed clipboard managers.
             PasteboardTextOutput.writeTranscript(text, to: pasteboard, markPrivate: true)
             throw TextOutputError.secureInputActive
         }

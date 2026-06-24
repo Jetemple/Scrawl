@@ -15,7 +15,7 @@ final class PreferencesBackgroundView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -56,7 +56,7 @@ enum PreferencesPageSupport {
             view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
     }
 
@@ -69,10 +69,10 @@ enum PreferencesPageSupport {
         let header = makePageHeader(title: title, description: description)
         stack.addArrangedSubview(header)
         header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        content.forEach {
-            $0.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            stack.addArrangedSubview($0)
-            $0.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        for item in content {
+            item.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            stack.addArrangedSubview(item)
+            item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 
         let container = NSView()
@@ -81,7 +81,7 @@ enum PreferencesPageSupport {
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: pageHorizontalInset),
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -pageHorizontalInset),
             stack.topAnchor.constraint(equalTo: container.topAnchor, constant: pageVerticalInset),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -pageVerticalInset)
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -pageVerticalInset),
         ])
         return container
     }
@@ -109,7 +109,7 @@ enum PreferencesPageSupport {
             descriptionLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             descriptionLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            descriptionLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            descriptionLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         return container
     }
@@ -134,7 +134,7 @@ enum PreferencesPageSupport {
             stack.leadingAnchor.constraint(equalTo: group.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: group.trailingAnchor),
             stack.topAnchor.constraint(equalTo: group.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: group.bottomAnchor)
+            stack.bottomAnchor.constraint(equalTo: group.bottomAnchor),
         ])
         return group
     }
@@ -202,7 +202,7 @@ enum PreferencesPageSupport {
             stack.leadingAnchor.constraint(equalTo: row.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: row.trailingAnchor),
             stack.topAnchor.constraint(equalTo: row.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: row.bottomAnchor)
+            stack.bottomAnchor.constraint(equalTo: row.bottomAnchor),
         ])
         return row
     }
@@ -224,7 +224,7 @@ enum PreferencesPageSupport {
             stateView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             stateView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             stateView.topAnchor.constraint(equalTo: content.topAnchor),
-            stateView.bottomAnchor.constraint(equalTo: content.bottomAnchor)
+            stateView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
         let group = makeRoundedBackground()
@@ -235,7 +235,7 @@ enum PreferencesPageSupport {
             content.leadingAnchor.constraint(equalTo: group.leadingAnchor, constant: 1),
             content.trailingAnchor.constraint(equalTo: group.trailingAnchor, constant: -1),
             content.topAnchor.constraint(equalTo: group.topAnchor, constant: 1),
-            content.bottomAnchor.constraint(equalTo: group.bottomAnchor, constant: -1)
+            content.bottomAnchor.constraint(equalTo: group.bottomAnchor, constant: -1),
         ])
         return group
     }
@@ -261,7 +261,7 @@ enum PreferencesPageSupport {
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             stack.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 28),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -28)
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -28),
         ])
         return view
     }
