@@ -707,8 +707,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         // Build confirmation alert matching existing NSAlert style in this file.
-        let displayName = LocalModelManager.downloadableModels
-            .first(where: { $0.id == selected })?.displayName
+        let catalogModel = LocalModelManager.downloadableModels.first(where: { $0.id == selected })
+        let isBuiltIn = catalogModel != nil
+        let displayName = catalogModel?.displayName
             ?? selected.replacingOccurrences(of: "ggml-", with: "")
 
         let modelURL = modelManager.modelURL(id: selected)
@@ -723,7 +724,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Delete \"\(displayName)\"?"
-        alert.informativeText = "This removes the model file\(sizeNote) from your Mac. You can re-download it later."
+        alert.informativeText = ModelDeletionPrompt.informativeText(sizeNote: sizeNote, isBuiltIn: isBuiltIn)
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         NSApplication.shared.activate(ignoringOtherApps: true)
