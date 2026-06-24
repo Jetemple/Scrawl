@@ -1913,8 +1913,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             try await runtime.textOutputTarget.output(text, markPrivate: !keepInHistory)
             return .pasted
         } catch TextOutputError.secureInputActive {
-            setStatus("Secure field — transcript copied to clipboard")
-            runtime.overlayController.showTransientMessage("Secure field detected — transcript copied to clipboard")
+            setStatus("Auto-paste paused — secure input is on")
+            runtime.overlayController.showTransientMessage(
+                TextOutputError.secureInputActive.errorDescription
+                    ?? "Secure input is on — transcript copied to clipboard; press ⌘V to paste."
+            )
             return .copiedForSecureInput
         } catch {
             let description = describe(error)
