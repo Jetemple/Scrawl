@@ -21,15 +21,26 @@ final class WhisperModelFileTests: XCTestCase {
         return url
     }
 
-    func testAcceptsFileStartingWithGGMLMagic() throws {
-        // "ggml" magic followed by arbitrary payload.
-        let url = try writeFile("model.bin", bytes: [0x67, 0x67, 0x6D, 0x6C, 0x00, 0x01, 0x02])
+    /// ggml's GGML_FILE_MAGIC (0x67676D6C) is written little-endian, so a real
+    /// whisper.cpp model file begins with the bytes 0x6C 0x6D 0x67 0x67 ("lmgg" on
+    /// disk). These bytes are taken from the actual ggml-tiny.en.bin header.
+    private static let realGGMLHeader: [UInt8] = [0x6C, 0x6D, 0x67, 0x67]
+
+    func testAcceptsFileStartingWithRealGGMLMagic() throws {
+        let url = try writeFile("model.bin", bytes: Self.realGGMLHeader + [0x98, 0xCA, 0x00, 0x00])
         XCTAssertTrue(WhisperModelFile.hasGGMLMagic(at: url))
     }
 
     func testAcceptsFileThatIsExactlyTheMagic() throws {
-        let url = try writeFile("tiny.bin", bytes: [0x67, 0x67, 0x6D, 0x6C])
+        let url = try writeFile("tiny.bin", bytes: Self.realGGMLHeader)
         XCTAssertTrue(WhisperModelFile.hasGGMLMagic(at: url))
+    }
+
+    func testRejectsReversedMagicByteOrder() throws {
+        // Guards the bug where the magic was checked in big-endian order
+        // (0x67 0x67 0x6D 0x6C), which rejected every real model.
+        let url = try writeFile("reversed.bin", bytes: [0x67, 0x67, 0x6D, 0x6C, 0x00, 0x00])
+        XCTAssertFalse(WhisperModelFile.hasGGMLMagic(at: url))
     }
 
     func testRejectsTextFile() throws {
@@ -38,7 +49,7 @@ final class WhisperModelFileTests: XCTestCase {
     }
 
     func testRejectsFileShorterThanMagic() throws {
-        let url = try writeFile("short.bin", bytes: [0x67, 0x67])
+        let url = try writeFile("short.bin", bytes: [0x6C, 0x6D])
         XCTAssertFalse(WhisperModelFile.hasGGMLMagic(at: url))
     }
 

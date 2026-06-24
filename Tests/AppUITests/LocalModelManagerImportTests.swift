@@ -22,7 +22,8 @@ final class LocalModelManagerImportTests: XCTestCase {
 
     private func makeSourceFile(_ name: String, validModel: Bool = true) throws -> URL {
         let url = sourceDir.appendingPathComponent(name)
-        let bytes: [UInt8] = validModel ? [0x67, 0x67, 0x6D, 0x6C, 0xAA, 0xBB] : [0x00, 0x01, 0x02, 0x03]
+        // Real ggml magic is little-endian on disk: 0x6C 0x6D 0x67 0x67.
+        let bytes: [UInt8] = validModel ? [0x6C, 0x6D, 0x67, 0x67, 0xAA, 0xBB] : [0x00, 0x01, 0x02, 0x03]
         try Data(bytes).write(to: url)
         return url
     }
