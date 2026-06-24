@@ -61,6 +61,7 @@ On first launch, grant Microphone and Accessibility. Open the menubar's Models m
 - **Stays warm.** Keeps the model in memory between recordings, unloads it after idle. GPU by default, CPU fallback.
 - **Custom vocabulary.** Teach it the names, jargon, and acronyms you use.
 - **Local history.** Last 100 transcripts, searchable, on-device. One switch wipes them.
+- **Launch at login.** Start Scrawl in the menu bar when you sign in, from Settings → General.
 
 ## Bring your own model
 
