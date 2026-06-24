@@ -18,7 +18,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<!-- TODO: add a demo GIF at docs/demo.gif -->
+<p align="center">
+  <img src="docs/demo.gif" alt="Scrawl turning speech into text in a note, live" width="480">
+</p>
 
 ## What it does
 
