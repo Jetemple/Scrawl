@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Scrawl turning speech into text in a note, live" width="480">
+  <img src="docs/scrawl-demo.gif" alt="Scrawl turning speech into text in a note, live" width="480">
 </p>
 
 ## What it does
