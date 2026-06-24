@@ -24,7 +24,7 @@
 
 ## What it does
 
-Hold your hotkey (Right Option by default), speak, and release. Scrawl transcribes on-device and pastes the result into whatever app you're using. Or double-tap to record hands-free, then tap again to stop.
+Hold your hotkey (Right Option ⌥ by default), speak, and release. Scrawl transcribes on-device and pastes the result into whatever app you're using. Or double-tap to record hands-free, then tap again to stop.
 
 ## Install
 
@@ -51,7 +51,7 @@ cd Scrawl && make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```
 
-On first launch, grant Microphone and Accessibility. Open the menubar's Models menu and download one: `small.en` (470 MB) is a fast, English-only default; `medium` (1.5 GB) handles other languages; `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option, and talk.
+On first launch, grant Microphone and Accessibility. Open the menubar's Models menu and download one: `small.en` (470 MB) is a fast, English-only default; `medium` (1.5 GB) handles other languages; `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option ⌥, and talk.
 
 ## Features
 
