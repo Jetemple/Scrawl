@@ -20,7 +20,7 @@ final class PreferencesModelsView: NSView {
     private let listView = PreferencesPageSupport.makeRoundedBackground()
     private let addButton = NSButton(title: "Add Model…", target: nil, action: nil)
     private let revealButton = NSButton(title: "Reveal Models Folder", target: nil, action: nil)
-    private let findModelsButton = NSButton(title: "Find models", target: nil, action: nil)
+    private let findModelsButton = NSButton(title: "Find Models", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel Download", target: nil, action: nil)
     private var listHeightConstraint: NSLayoutConstraint?

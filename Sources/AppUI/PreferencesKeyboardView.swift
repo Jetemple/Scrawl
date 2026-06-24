@@ -3,7 +3,7 @@ import SettingsStore
 
 final class PreferencesKeyboardView: NSView {
     private let hotkeyLabel = NSTextField(labelWithString: "")
-    private let captureButton = NSButton(title: "Set Hotkey...", target: nil, action: nil)
+    private let captureButton = NSButton(title: "Set Hotkey…", target: nil, action: nil)
     private let setHotkey: () -> Void
 
     init(setHotkey: @escaping () -> Void) {
@@ -42,7 +42,7 @@ final class PreferencesKeyboardView: NSView {
 
     func update(hotkey: HotkeySetting, isCapturing: Bool) {
         hotkeyLabel.stringValue = isCapturing ? "Waiting for input..." : hotkey.displayName
-        captureButton.title = isCapturing ? "Cancel Capture" : "Set Hotkey..."
+        captureButton.title = isCapturing ? "Cancel Capture" : "Set Hotkey…"
     }
 
     @objc private func setHotkeyAction(_: NSButton) {

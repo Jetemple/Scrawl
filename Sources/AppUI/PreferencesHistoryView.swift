@@ -120,10 +120,10 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             dateStyle: .medium,
             timeStyle: .short
         ))
-        time.font = .systemFont(ofSize: 10, weight: .medium)
+        time.font = .systemFont(ofSize: 11, weight: .medium)
         time.textColor = .secondaryLabelColor
         let metrics = NSTextField(labelWithString: PreferencesContentState.historyMetrics(for: record))
-        metrics.font = .systemFont(ofSize: 10)
+        metrics.font = .systemFont(ofSize: 11)
         metrics.textColor = .tertiaryLabelColor
         metrics.alignment = .right
         let metadata = NSStackView(views: [time, NSView(), metrics])

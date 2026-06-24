@@ -294,7 +294,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         try XCTUnwrap(contentView.button(titled: "Request")).performClick(nil)
         try XCTUnwrap(contentView.button(titled: "Open Prompt")).performClick(nil)
         controller.selectSection(.keyboard)
-        try XCTUnwrap(contentView.button(titled: "Set Hotkey...")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Set Hotkey…")).performClick(nil)
         controller.selectSection(.about)
         try XCTUnwrap(contentView.button(titled: "Open Project Page")).performClick(nil)
 
@@ -319,7 +319,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.selectSection(.models)
         try XCTUnwrap(contentView.button(titled: "Add Model…")).performClick(nil)
         try XCTUnwrap(contentView.button(titled: "Reveal Models Folder")).performClick(nil)
-        try XCTUnwrap(contentView.button(titled: "Find models")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Find Models")).performClick(nil)
 
         XCTAssertTrue(addedModel)
         XCTAssertTrue(revealedFolder)

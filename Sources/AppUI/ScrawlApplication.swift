@@ -1237,7 +1237,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         menu.addItem(.separator())
 
-        let preferencesItem = NSMenuItem(title: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
+        let preferencesItem = NSMenuItem(title: "Preferences…", action: #selector(openPreferences(_:)), keyEquivalent: ",")
         preferencesItem.target = self
         menu.addItem(preferencesItem)
 
@@ -1295,7 +1295,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         menu.addItem(.separator())
 
-        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(toggleHotkeyCapture(_:)), keyEquivalent: "")
+        let setHotkeyItem = NSMenuItem(title: "Set Hotkey…", action: #selector(toggleHotkeyCapture(_:)), keyEquivalent: "")
         setHotkeyItem.target = self
         menu.addItem(setHotkeyItem)
         self.setHotkeyItem = setHotkeyItem
@@ -1664,7 +1664,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             .replacingOccurrences(of: "ggml-", with: "")
         infoLineItem?.title = "Model: \(modelName)"
         hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input..." : "Hotkey: \(settings.hotkey.displayName)"
-        setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey..."
+        setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey…"
         setHotkeyItem?.state = isCapturingHotkey ? .on : .off
         statusItem?.button?.toolTip = isCapturingHotkey ? "Scrawl: waiting for hotkey input" : "Scrawl: Hotkey \(settings.hotkey.displayName)"
         refreshPreferencesWindow()
