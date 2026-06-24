@@ -18,10 +18,10 @@ final class AppRuntimeResolutionTests: XCTestCase {
         XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "ggml-small.en")
     }
 
-    func testPublicInitializerDefaultsToInMemoryTranscriptHistoryStore() {
-        let runtime = AppRuntime(
+    func testPublicInitializerDefaultsToInMemoryTranscriptHistoryStore() throws {
+        let runtime = try AppRuntime(
             permissionManager: PermissionManager(),
-            settingsStore: SettingsStore(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+            settingsStore: SettingsStore(defaults: XCTUnwrap(UserDefaults(suiteName: UUID().uuidString))),
             overlayController: RecordingOverlayController(),
             hotkeyStateMachine: HotkeyGestureStateMachine(),
             audioCaptureService: StubAudioCaptureService(),
@@ -37,7 +37,7 @@ final class AppRuntimeResolutionTests: XCTestCase {
         XCTAssertTrue(runtime.transcriptHistoryStore.records().isEmpty)
     }
 
-    // MARK: - Task 17: Trusted-directory resolution tests
+    // MARK: - Trusted-directory resolution tests
 
     func testScrawlWhisperExecutableEnvOverrideIsCheckedFirst() throws {
         let tmpDir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -58,7 +58,7 @@ final class AppRuntimeResolutionTests: XCTestCase {
 
         let env = [
             "SCRAWL_WHISPER_EXECUTABLE": overridePath,
-            "PATH": pathDir.path
+            "PATH": pathDir.path,
         ]
         let result = AppRuntime.resolveWhisperExecutable(environment: env, trustedDirs: [])
         XCTAssertEqual(result.path, overridePath)
@@ -155,7 +155,7 @@ final class AppRuntimeResolutionTests: XCTestCase {
             trustedDirs: [
                 URL(filePath: "/opt/homebrew/bin"),
                 URL(filePath: "/usr/local/bin"),
-                URL(filePath: "/usr/bin")
+                URL(filePath: "/usr/bin"),
             ]
         )
         // No binary exists in any trusted dir: fall back to first trusted dir / whisper-cli
@@ -165,15 +165,17 @@ final class AppRuntimeResolutionTests: XCTestCase {
 
 private struct StubAudioCaptureService: AudioCaptureServing {
     func startCapture() throws {}
-    func stopCapture() throws -> URL { URL(filePath: "/tmp/audio.wav") }
+    func stopCapture() throws -> URL {
+        URL(filePath: "/tmp/audio.wav")
+    }
 }
 
 private struct StubTextOutputTarget: TextOutputTarget {
-    func output(_ text: String, markPrivate: Bool) async throws {}
+    func output(_: String, markPrivate _: Bool) async throws {}
 }
 
 private struct StubTranscriptionProvider: TranscriptionProvider {
-    func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
+    func transcribe(_: TranscriptionRequest) async throws -> TranscriptionResult {
         TranscriptionResult(text: "", latencyMS: 0)
     }
 }

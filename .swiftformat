@@ -1,9 +1,8 @@
 # SwiftFormat configuration for Scrawl.
 #
-# NOTE: the codebase has not been reformatted with SwiftFormat yet, so the first
-# `make format` will produce a sizable one-time diff (~700 lines). Apply it as
-# its own dedicated commit (e.g. "style: apply swiftformat"), separate from
-# feature work, then turn on the `swiftformat --lint` gate in CI.
+# Sources/ and Tests/ are kept formatted with `make format`; CI enforces this
+# via a pinned `swiftformat --lint` gate (see .github/workflows/ci.yml). Run
+# `make format` before committing to keep the gate green.
 
 --swiftversion 5.10
 --ranges nospace

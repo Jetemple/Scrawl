@@ -1,11 +1,10 @@
-import XCTest
-@testable import WhisperCppProvider
 import Foundation
 import TranscriptionCore
+@testable import WhisperCppProvider
+import XCTest
 
 final class WarmWhisperServerTests: XCTestCase {
-
-    // MARK: - Moved from WhisperCppPostProcessingTests
+    // MARK: - Supervised launch
 
     func testWarmServerLaunchIsSupervisedByOwnerProcess() {
         let launch = WarmWhisperServer.supervisedLaunch(
@@ -20,7 +19,7 @@ final class WarmWhisperServerTests: XCTestCase {
         XCTAssertTrue(launch.arguments.joined(separator: " ").contains("kill \"$child\""))
     }
 
-    // MARK: - Task 4: Reentrancy
+    // MARK: - Reentrancy
 
     func testConcurrentEnsureRunningBothThrowWhenServerExitsImmediately() async throws {
         // Create a stub executable that exits immediately
@@ -54,7 +53,7 @@ final class WarmWhisperServerTests: XCTestCase {
         } catch {}
     }
 
-    // MARK: - Task 5: Warm path fallback decision
+    // MARK: - Warm path fallback decision
 
     func testNoSpeechDetectedRethrownNotShutdown() {
         XCTAssertEqual(
@@ -91,7 +90,7 @@ final class WarmWhisperServerTests: XCTestCase {
         )
     }
 
-    // MARK: - Task 7: SIGKILL escalation
+    // MARK: - SIGKILL escalation
 
     func testRunAndWaitKillsSIGTERMIgnoringProcess() async throws {
         let provider = WhisperCppProvider(config: WhisperCppConfig(
@@ -105,7 +104,7 @@ final class WarmWhisperServerTests: XCTestCase {
         do {
             _ = try await provider.runAndWait(process: process, timeoutSeconds: 1)
             XCTFail("Expected timedOut error")
-        } catch TranscriptionError.timedOut(let seconds) {
+        } catch let TranscriptionError.timedOut(seconds) {
             XCTAssertEqual(seconds, 1)
         }
         // Process should be dead within a few seconds after SIGKILL
@@ -113,7 +112,7 @@ final class WarmWhisperServerTests: XCTestCase {
         XCTAssertFalse(process.isRunning, "Process should have been killed by SIGKILL")
     }
 
-    // MARK: - Task 8: Readiness identity check, port pre-check, budget
+    // MARK: - Readiness identity check, port pre-check, budget
 
     func testIsWhisperServerResponseAcceptsWhisperCppTitle() {
         // Empirically verified: whisper-server GET / returns HTML with <title>Whisper.cpp Server</title>
@@ -150,7 +149,7 @@ final class WarmWhisperServerTests: XCTestCase {
         XCTAssertGreaterThan(port2, 0)
     }
 
-    // MARK: - Fix 1: idle-offload timer fires for warmed-but-unused servers
+    // MARK: - Idle-offload timer fires for warmed-but-unused servers
 
     /// Verifies that a server started via ensureRunning (the warmUp path) gets an
     /// idle-offload timer and is shut down after the idle interval elapses, even
@@ -239,8 +238,8 @@ final class WarmWhisperServerTests: XCTestCase {
         let countText = (try? String(contentsOf: counterURL, encoding: .utf8)) ?? "0"
         let launches = countText.components(separatedBy: "\n").filter { $0 == "1" }.count
         XCTAssertGreaterThanOrEqual(launches, 2,
-            "Expected stub to be launched at least twice (warm-up + re-launch after idle offload); got \(launches). " +
-            "If the idle timer was not scheduled by ensureRunning, the server stays alive and no re-launch occurs.")
+                                    "Expected stub to be launched at least twice (warm-up + re-launch after idle offload); got \(launches). " +
+                                        "If the idle timer was not scheduled by ensureRunning, the server stays alive and no re-launch occurs.")
 
         await server.shutdown()
     }
@@ -326,7 +325,7 @@ final class WarmWhisperServerTests: XCTestCase {
         await server.shutdown()
     }
 
-    // MARK: - Fix 2: retry on early server exit
+    // MARK: - Retry on early server exit
 
     /// Verifies that when whisper-server exits during startup (simulated by a stub
     /// that always exits immediately), ensureRunning retries exactly once before
@@ -362,7 +361,7 @@ final class WarmWhisperServerTests: XCTestCase {
         do {
             _ = try await server.ensureRunning(key: key, modelPath: modelPath)
             XCTFail("Expected ensureRunning to throw after exhausting retries")
-        } catch TranscriptionError.executionFailed(let msg) {
+        } catch let TranscriptionError.executionFailed(msg) {
             XCTAssertTrue(
                 msg.contains("exited during startup") || msg.contains("did not become ready"),
                 "Unexpected error message: \(msg)"
@@ -377,7 +376,7 @@ final class WarmWhisperServerTests: XCTestCase {
         let countText = (try? String(contentsOf: counterURL, encoding: .utf8)) ?? "0"
         let launches = countText.components(separatedBy: "\n").filter { $0 == "1" }.count
         XCTAssertEqual(launches, 2,
-            "Expected exactly 2 launch attempts (initial + one retry); got \(launches)")
+                       "Expected exactly 2 launch attempts (initial + one retry); got \(launches)")
     }
 
     /// Verifies that the existing concurrent-callers-both-throw test remains green
