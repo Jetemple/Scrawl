@@ -3,7 +3,6 @@ import AudioCapture
 import DictionaryStore
 import HotkeyEngine
 import Permissions
-import ServiceManagement
 import SettingsStore
 import TextOutput
 import TranscriptHistoryStore
@@ -448,7 +447,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         alert.addButton(withTitle: "Open Login Items Settings")
         alert.addButton(withTitle: "OK")
         if alert.runModal() == .alertFirstButtonReturn {
-            SMAppService.openSystemSettingsLoginItems()
+            loginItem.openSystemSettings()
         }
     }
 

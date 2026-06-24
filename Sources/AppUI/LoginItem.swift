@@ -12,6 +12,10 @@ protocol LoginItemControlling {
     /// Throws if the OS rejects the change. Note: enabling can succeed while the
     /// system still requires user approval — check `isEnabled` afterward.
     func setEnabled(_ enabled: Bool) throws
+
+    /// Opens System Settings to the Login Items pane so the user can review or
+    /// approve Scrawl's login item.
+    func openSystemSettings()
 }
 
 /// `LoginItemControlling` backed by `SMAppService.mainApp` (macOS 13+).
@@ -26,5 +30,9 @@ struct SMAppServiceLoginItem: LoginItemControlling {
         } else {
             try SMAppService.mainApp.unregister()
         }
+    }
+
+    func openSystemSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 }
