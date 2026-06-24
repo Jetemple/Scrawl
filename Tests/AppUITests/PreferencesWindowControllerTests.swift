@@ -319,7 +319,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.selectSection(.models)
         try XCTUnwrap(contentView.button(titled: "Add Model…")).performClick(nil)
         try XCTUnwrap(contentView.button(titled: "Reveal Models Folder")).performClick(nil)
-        try XCTUnwrap(contentView.button(titled: "Find Models…")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Find models")).performClick(nil)
 
         XCTAssertTrue(addedModel)
         XCTAssertTrue(revealedFolder)

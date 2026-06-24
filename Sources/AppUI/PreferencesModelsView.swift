@@ -20,7 +20,7 @@ final class PreferencesModelsView: NSView {
     private let listView = PreferencesPageSupport.makeRoundedBackground()
     private let addButton = NSButton(title: "Add Model…", target: nil, action: nil)
     private let revealButton = NSButton(title: "Reveal Models Folder", target: nil, action: nil)
-    private let findModelsButton = NSButton(title: "Find Models…", target: nil, action: nil)
+    private let findModelsButton = NSButton(title: "Find models", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel Download", target: nil, action: nil)
     private var listHeightConstraint: NSLayoutConstraint?
@@ -114,7 +114,16 @@ final class PreferencesModelsView: NSView {
         cancelButton.action = #selector(cancelDownloadAction(_:))
         cancelButton.isHidden = true
 
-        PreferencesPageSupport.configureSecondaryButton(findModelsButton)
+        // A quiet inline link rather than a full button, so it doesn't compete with
+        // the primary Add/Reveal/Delete controls.
+        findModelsButton.isBordered = false
+        findModelsButton.attributedTitle = NSAttributedString(
+            string: findModelsButton.title,
+            attributes: [
+                .foregroundColor: NSColor.linkColor,
+                .font: NSFont.systemFont(ofSize: 11),
+            ]
+        )
         findModelsButton.target = self
         findModelsButton.action = #selector(openModelSourceAction(_:))
         findModelsButton.toolTip = "Open the whisper.cpp model repository in your browser."
@@ -123,16 +132,15 @@ final class PreferencesModelsView: NSView {
         buttonRow.orientation = .horizontal
         buttonRow.spacing = 8
 
-        let helpLabel = NSTextField(labelWithString: "Accepts any whisper.cpp ggml model (a .bin file) — official, quantized, or distil-whisper.")
+        let helpLabel = NSTextField(labelWithString: "Bring your own: any whisper.cpp ggml .bin.")
         helpLabel.font = .systemFont(ofSize: 11)
         helpLabel.textColor = .secondaryLabelColor
-        helpLabel.lineBreakMode = .byWordWrapping
-        helpLabel.maximumNumberOfLines = 2
+        helpLabel.lineBreakMode = .byTruncatingTail
         helpLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let helpRow = NSStackView(views: [helpLabel, NSView(), findModelsButton])
+        let helpRow = NSStackView(views: [helpLabel, findModelsButton, NSView()])
         helpRow.orientation = .horizontal
         helpRow.alignment = .centerY
-        helpRow.spacing = 8
+        helpRow.spacing = 6
 
         let page = PreferencesPageSupport.makePage(
             title: "Models",
