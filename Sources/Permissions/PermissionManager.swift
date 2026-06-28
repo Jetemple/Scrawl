@@ -1,5 +1,5 @@
-import AVFoundation
 import ApplicationServices
+import AVFoundation
 import Foundation
 
 public enum PermissionStatus: Equatable, Sendable {

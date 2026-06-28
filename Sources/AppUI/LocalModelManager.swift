@@ -107,6 +107,39 @@ private final class DownloadCallbackState: @unchecked Sendable {
     }
 }
 
+/// Coalesces the high-frequency `Progress.fractionCompleted` KVO firings that drive
+/// download progress. URLSession posts an update per buffer write — many per second during
+/// a multi-hundred-MB model download — and each one previously hopped to the MainActor,
+/// starving in-flight transcription's main-thread completion. Forwarding only when the
+/// fraction advances by at least `minimumStep` (plus the terminal 1.0) caps the work at
+/// roughly `1/minimumStep` updates for the entire download, independent of file size/speed.
+final class DownloadProgressThrottle: @unchecked Sendable {
+    private let minimumStep: Double
+    private let lock = NSLock()
+    private var lastForwarded = -1.0
+
+    init(minimumStep: Double = 0.005) {
+        self.minimumStep = minimumStep
+    }
+
+    /// Returns `true` at most ~`1/minimumStep + 1` times across a 0→1 progression: once each
+    /// time the fraction first crosses a step boundary, and once when it reaches 1.0.
+    /// Non-finite fractions are dropped. Thread-safe — KVO fires on an arbitrary queue.
+    func shouldForward(fraction: Double) -> Bool {
+        guard fraction.isFinite else { return false }
+        return lock.withLock {
+            if fraction >= 1.0 {
+                guard lastForwarded < 1.0 else { return false }
+                lastForwarded = 1.0
+                return true
+            }
+            guard fraction - lastForwarded >= minimumStep else { return false }
+            lastForwarded = fraction
+            return true
+        }
+    }
+}
+
 final class LocalModelManager: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (_ receivedBytes: Int64, _ totalBytes: Int64?) -> Void
 
@@ -117,10 +150,10 @@ final class LocalModelManager: @unchecked Sendable {
     /// cannot be replayed against a different mirror URL.
     private(set) var pendingResumeDataBySourceURL: [String: Data] = [:]
     private var operationState = ModelDownloadOperationState()
-    private var activeDownloadTask: URLSessionDownloadTask? = nil
-    private var activeDownloadSession: URLSession? = nil
-    private var activeDownloadOperationID: UUID? = nil
-    private var latestDownloadOperationID: UUID? = nil
+    private var activeDownloadTask: URLSessionDownloadTask?
+    private var activeDownloadSession: URLSession?
+    private var activeDownloadOperationID: UUID?
+    private var latestDownloadOperationID: UUID?
 
     init(modelsDirectoryURL: URL) {
         self.modelsDirectoryURL = modelsDirectoryURL
@@ -128,6 +161,45 @@ final class LocalModelManager: @unchecked Sendable {
 
     func ensureDirectory() throws {
         try FileManager.default.createDirectory(at: modelsDirectoryURL, withIntermediateDirectories: true)
+    }
+
+    /// The folder where models live. Exposed so the app can reveal it in Finder for
+    /// users who prefer to drop in their own `ggml-*.bin` files directly.
+    var modelsFolderURL: URL {
+        modelsDirectoryURL
+    }
+
+    /// Imports a user-supplied ("bring your own") model file into the models directory.
+    /// Validates the ggml magic, derives a safe id (rejecting name collisions), then
+    /// hardlinks the file when it's on the same volume — instant, no extra disk — and
+    /// falls back to a real copy across volumes. Returns the imported model's id.
+    /// Throws `CustomModelImport.ImportError` (or a `FileManager` error) on failure.
+    @discardableResult
+    func importModel(from sourceURL: URL) throws -> String {
+        guard WhisperModelFile.hasGGMLMagic(at: sourceURL) else {
+            throw CustomModelImport.ImportError.notAModelFile
+        }
+
+        let plan: CustomModelImport.Plan
+        switch CustomModelImport.plan(forSourceFileName: sourceURL.lastPathComponent, existingModelIDs: installedModelIDs()) {
+        case let .success(resolved):
+            plan = resolved
+        case let .failure(error):
+            throw error
+        }
+
+        try FileManager.default.createDirectory(at: modelsDirectoryURL, withIntermediateDirectories: true)
+        let destination = modelsDirectoryURL.appendingPathComponent(plan.destinationFileName)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw CustomModelImport.ImportError.alreadyInstalled(modelID: plan.modelID)
+        }
+
+        do {
+            try FileManager.default.linkItem(at: sourceURL, to: destination)
+        } catch {
+            try FileManager.default.copyItem(at: sourceURL, to: destination)
+        }
+        return plan.modelID
     }
 
     func installedModelIDs() -> [String] {
@@ -161,7 +233,7 @@ final class LocalModelManager: @unchecked Sendable {
 
         let targetFamilies: Set<String> = [
             canonicalFamily(from: downloadableModel.id),
-            canonicalFamily(from: downloadableModel.fileName)
+            canonicalFamily(from: downloadableModel.fileName),
         ]
 
         let installedFamilies = Set(installedModelIDs().map(canonicalFamily(from:)))
@@ -202,7 +274,7 @@ final class LocalModelManager: @unchecked Sendable {
         guard let task else { return didCancel }
         task.cancel(byProducingResumeData: { [weak self] (data: Data?) in
             guard let self, let data, let urlKey = taskURL?.absoluteString, let cancelledOperationID else { return }
-            self.lock.withLock {
+            lock.withLock {
                 // A restarted operation owns its own URLSession/resume state. A delayed
                 // callback from the cancelled task must not overwrite it.
                 guard self.latestDownloadOperationID == cancelledOperationID else { return }
@@ -266,7 +338,7 @@ final class LocalModelManager: @unchecked Sendable {
         onProgress: ProgressHandler?
     ) async throws -> URL {
         var lastError: Error?
-        for attempt in 1 ... 2 {
+        for attempt in 1...2 {
             try requireActiveDownloadOperation(operationID)
             var downloadedURL: URL?
             do {
@@ -280,7 +352,7 @@ final class LocalModelManager: @unchecked Sendable {
                 guard let http = response as? HTTPURLResponse else {
                     throw ModelDownloadError.invalidHTTPResponse(sourceURL)
                 }
-                guard (200 ... 299).contains(http.statusCode) else {
+                guard (200...299).contains(http.statusCode) else {
                     throw ModelDownloadError.badStatusCode(statusCode: http.statusCode, url: sourceURL)
                 }
                 try validateDownloadedContent(at: temporaryURL, response: response, sourceURL: sourceURL)
@@ -370,11 +442,10 @@ final class LocalModelManager: @unchecked Sendable {
                 continuation.resume(returning: (safeCopy, response))
             }
 
-            let task: URLSessionDownloadTask
-            if let resumeData {
-                task = session.downloadTask(withResumeData: resumeData, completionHandler: completionHandler)
+            let task: URLSessionDownloadTask = if let resumeData {
+                session.downloadTask(withResumeData: resumeData, completionHandler: completionHandler)
             } else {
-                task = session.downloadTask(with: sourceURL, completionHandler: completionHandler)
+                session.downloadTask(with: sourceURL, completionHandler: completionHandler)
             }
             callbackState.setTask(task)
 
@@ -396,7 +467,9 @@ final class LocalModelManager: @unchecked Sendable {
             }
 
             if let onProgress {
-                let observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak task] _, _ in
+                let throttle = DownloadProgressThrottle()
+                let observation = task.progress.observe(\.fractionCompleted, options: [.initial, .new]) { [weak task] progress, _ in
+                    guard throttle.shouldForward(fraction: progress.fractionCompleted) else { return }
                     let expected = task?.countOfBytesExpectedToReceive ?? -1
                     let totalBytes = expected > 0 ? expected : nil
                     let receivedBytes = task?.countOfBytesReceived ?? 0
@@ -541,7 +614,7 @@ extension LocalModelManager {
             displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!,
             sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
-        )
+        ),
     ]
 }
 

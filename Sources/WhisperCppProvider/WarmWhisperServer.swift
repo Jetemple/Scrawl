@@ -36,7 +36,7 @@ actor WarmWhisperServer {
 
     init(config: WhisperCppConfig) {
         self.config = config
-        self.idleOffloadSeconds = config.idleOffloadSeconds
+        idleOffloadSeconds = config.idleOffloadSeconds
     }
 
     var isEnabled: Bool {
@@ -73,7 +73,7 @@ actor WarmWhisperServer {
             TranscriptionProgressEvent(
                 phase: .transcribing,
                 modelID: request.modelID,
-                elapsedMS: Int(Date().timeIntervalSince(startedAt) * 1_000)
+                elapsedMS: Int(Date().timeIntervalSince(startedAt) * 1000)
             )
         )
 
@@ -100,7 +100,7 @@ actor WarmWhisperServer {
         let text = try WhisperCppProvider.decodeServerTranscript(data)
         return TranscriptionResult(
             text: text,
-            latencyMS: Int(Date().timeIntervalSince(startedAt) * 1_000)
+            latencyMS: Int(Date().timeIntervalSince(startedAt) * 1000)
         )
     }
 
@@ -119,12 +119,12 @@ actor WarmWhisperServer {
         baseURL = nil
     }
 
-    internal func ensureRunning(key: ServerKey, modelPath: URL) async throws -> URL {
+    func ensureRunning(key: ServerKey, modelPath: URL) async throws -> URL {
         // In-flight startup for same key — join the existing task
         if startupKey == key, let task = startupTask {
             let url = try await task.value
             // Startup succeeded; re-validate the process is still alive
-            guard let p = self.process, p.isRunning else {
+            guard let p = process, p.isRunning else {
                 shutdown()
                 return try await ensureRunning(key: key, modelPath: modelPath)
             }
@@ -248,7 +248,7 @@ actor WarmWhisperServer {
             // Identity-guard: only clear startupTask if it still belongs to this
             // generation. A racing shutdown() increments startupGeneration, so a
             // newer startup registered by another caller won't be clobbered here.
-            if self.startupGeneration == generation { startupTask = nil }
+            if startupGeneration == generation { startupTask = nil }
             return url
         } catch {
             throw error
@@ -268,7 +268,7 @@ actor WarmWhisperServer {
             "-bo", "5",
             "-bs", "5",
             "--host", "127.0.0.1",
-            "--port", String(port)
+            "--port", String(port),
         ]
         if let threads = config.threads, threads > 0 {
             arguments.append(contentsOf: ["-t", String(threads)])
@@ -279,7 +279,7 @@ actor WarmWhisperServer {
         return arguments
     }
 
-    internal func waitUntilReady(process: Process, baseURL: URL) async throws {
+    func waitUntilReady(process: Process, baseURL: URL) async throws {
         // 60 iterations × (1s sleep + 0.5s probe timeout) ≈ 90s max budget
         for _ in 0..<60 {
             guard process.isRunning else {
@@ -288,7 +288,8 @@ actor WarmWhisperServer {
             var request = URLRequest(url: baseURL)
             request.timeoutInterval = 0.5
             if let (data, _) = try? await URLSession.shared.data(for: request),
-               Self.isWhisperServerResponse(data) {
+               Self.isWhisperServerResponse(data)
+            {
                 return
             }
             try await Task.sleep(nanoseconds: 1_000_000_000)
@@ -300,7 +301,7 @@ actor WarmWhisperServer {
     /// Empirically verified against whisper-server 1.x (Homebrew): GET / returns an HTML page
     /// with the title "Whisper.cpp Server". A foreign service on the same port (e.g. a dev server
     /// returning 404 or a non-whisper process) will not contain these strings.
-    internal static func isWhisperServerResponse(_ data: Data) -> Bool {
+    static func isWhisperServerResponse(_ data: Data) -> Bool {
         guard let body = String(data: data, encoding: .utf8) else { return false }
         let lower = body.lowercased()
         return lower.contains("whisper.cpp") || lower.contains("whisper-server")
@@ -329,12 +330,14 @@ actor WarmWhisperServer {
 
     private static func multipartBody(audioURL: URL, prompt: String?, boundary: String) throws -> Data {
         var body = Data()
-        func append(_ string: String) { body.append(Data(string.utf8)) }
+        func append(_ string: String) {
+            body.append(Data(string.utf8))
+        }
 
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"file\"; filename=\"\(audioURL.lastPathComponent)\"\r\n")
         append("Content-Type: audio/wav\r\n\r\n")
-        body.append(try Data(contentsOf: audioURL))
+        try body.append(Data(contentsOf: audioURL))
         append("\r\n--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n")
         if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
@@ -348,7 +351,7 @@ actor WarmWhisperServer {
     /// Asks the kernel for a free TCP port by binding to :0 and reading the assigned address.
     /// This eliminates the random-range collision risk and TOCTOU window is minimal because the
     /// port is passed directly to whisper-server before other callers can claim it.
-    internal static func allocatePort() throws -> Int {
+    static func allocatePort() throws -> Int {
         let sock = socket(AF_INET, SOCK_STREAM, 0)
         guard sock >= 0 else {
             throw TranscriptionError.executionFailed("socket() failed: could not allocate port")
@@ -403,7 +406,7 @@ actor WarmWhisperServer {
             executableURL: URL(filePath: "/bin/sh"),
             arguments: [
                 "-c", script, "scrawl-whisper-supervisor", String(ownerPID),
-                serverExecutableURL.path
+                serverExecutableURL.path,
             ] + serverArguments
         )
     }

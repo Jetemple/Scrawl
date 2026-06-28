@@ -37,7 +37,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
 
     public init(config: WhisperCppConfig) {
         self.config = config
-        self.warmServer = WarmWhisperServer(config: config)
+        warmServer = WarmWhisperServer(config: config)
     }
 
     public func transcribe(_ request: TranscriptionRequest) async throws -> TranscriptionResult {
@@ -68,11 +68,10 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
                     startedAt: startedAt
                 )
             } catch {
-                let mapped: Error
-                if let urlError = error as? URLError, urlError.code == .timedOut {
-                    mapped = TranscriptionError.timedOut(seconds: config.transcriptionTimeoutSeconds)
+                let mapped: Error = if let urlError = error as? URLError, urlError.code == .timedOut {
+                    TranscriptionError.timedOut(seconds: config.transcriptionTimeoutSeconds)
                 } else {
-                    mapped = error
+                    error
                 }
                 switch Self.warmPathFallbackDecision(for: mapped) {
                 case .rethrow:
@@ -202,11 +201,10 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
             )
         }
 
-        let transcriptText: String
-        if let text = try? String(contentsOf: transcriptFile, encoding: .utf8) {
-            transcriptText = text
+        let transcriptText: String = if let text = try? String(contentsOf: transcriptFile, encoding: .utf8) {
+            text
         } else {
-            transcriptText = stdout
+            stdout
         }
 
         let cleaned = transcriptText
@@ -220,7 +218,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
             throw TranscriptionError.noSpeechDetected
         }
 
-        let latencyMS = Int(Date().timeIntervalSince(startedAt) * 1_000)
+        let latencyMS = Int(Date().timeIntervalSince(startedAt) * 1000)
         return TranscriptionResult(text: cleaned, latencyMS: latencyMS)
     }
 
@@ -233,7 +231,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
     }
 
     private static func elapsedMS(since startedAt: Date) -> Int {
-        Int(Date().timeIntervalSince(startedAt) * 1_000)
+        Int(Date().timeIntervalSince(startedAt) * 1000)
     }
 
     private func shouldRetryWithCPU(after error: TranscriptionError, forceNoGPU: Bool) -> Bool {
@@ -351,11 +349,10 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
     private func resolveModelPath(modelID: String) -> URL? {
         let fileManager = FileManager.default
 
-        let directName: String
-        if modelID.hasSuffix(".bin") {
-            directName = modelID
+        let directName: String = if modelID.hasSuffix(".bin") {
+            modelID
         } else {
-            directName = "\(modelID).bin"
+            "\(modelID).bin"
         }
 
         var candidates: [String] = [directName]
@@ -390,7 +387,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
             "-nt",
             "-np",
             "-otxt",
-            "-of", outputPrefix.path
+            "-of", outputPrefix.path,
         ]
 
         if let threads = config.threads, threads > 0 {
@@ -421,7 +418,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
             "-bo", "5",
             "-bs", "5",
             "--host", "127.0.0.1",
-            "--port", String(port)
+            "--port", String(port),
         ]
         if let threads = config.threads, threads > 0 {
             arguments.append(contentsOf: ["-t", String(threads)])
@@ -446,7 +443,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
         return cleaned
     }
 
-    internal func runAndWait(
+    func runAndWait(
         process: Process,
         timeoutSeconds: Int
     ) async throws -> Int32 {
@@ -533,7 +530,7 @@ private final class TranscriptionProgressReporter: @unchecked Sendable {
             TranscriptionProgressEvent(
                 phase: phase,
                 modelID: modelID,
-                elapsedMS: Int(Date().timeIntervalSince(startedAt) * 1_000)
+                elapsedMS: Int(Date().timeIntervalSince(startedAt) * 1000)
             )
         )
     }

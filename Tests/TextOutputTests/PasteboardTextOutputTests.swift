@@ -1,5 +1,5 @@
-import XCTest
 @testable import TextOutput
+import XCTest
 
 final class PasteboardTextOutputTests: XCTestCase {
     func testTranscriptWriteMarksTransientAndConcealed() {

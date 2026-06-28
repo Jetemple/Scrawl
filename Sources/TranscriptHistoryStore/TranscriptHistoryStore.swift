@@ -31,7 +31,9 @@ public protocol TranscriptHistoryStoring: Sendable {
 }
 
 public extension TranscriptHistoryStoring {
-    var loadErrorDescription: String? { nil }
+    var loadErrorDescription: String? {
+        nil
+    }
 }
 
 public final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @unchecked Sendable {
@@ -44,7 +46,9 @@ public final class InMemoryTranscriptHistoryStore: TranscriptHistoryStoring, @un
         cachedRecords = Self.normalize(records, limit: self.limit)
     }
 
-    public var loadErrorDescription: String? { nil }
+    public var loadErrorDescription: String? {
+        nil
+    }
 
     public func records() -> [TranscriptRecord] {
         lock.withLock {
@@ -147,10 +151,16 @@ public final class JSONTranscriptHistoryStore: TranscriptHistoryStoring, @unchec
             mutation(&newRecords)
             newRecords = InMemoryTranscriptHistoryStore.normalize(newRecords, limit: limit)
 
+            let directory = fileURL.deletingLastPathComponent()
+            // Owner-only data directory: an atomic write briefly leaves history.json at the
+            // umask default (0644) before the chmod below, so keep the enclosing directory
+            // 0700 to deny any cross-user traversal during that window (defense in depth).
             try FileManager.default.createDirectory(
-                at: fileURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
             )
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
             try encoder.encode(newRecords).write(to: fileURL, options: .atomic)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
             cachedRecords = newRecords

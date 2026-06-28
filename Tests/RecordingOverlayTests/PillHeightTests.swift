@@ -1,11 +1,10 @@
 import AppKit
-import XCTest
-
 @testable import RecordingOverlay
+import XCTest
 
 final class PillHeightTests: XCTestCase {
     private let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private let base = RecordingOverlayController.basePillHeight       // 34
+    private let base = RecordingOverlayController.basePillHeight // 34
     private let lineHeight = RecordingOverlayController.pillLineHeight // 16
 
     func testShortTextStaysSingleLineBaseHeight() {
@@ -17,8 +16,8 @@ final class PillHeightTests: XCTestCase {
         XCTAssertEqual(height, base)
     }
 
-    // A message too long for one line (even at maxPillWidth) must grow the pill
-    // to a second line rather than truncate.
+    /// A message too long for one line (even at maxPillWidth) must grow the pill
+    /// to a second line rather than truncate.
     func testLongTextWrapsToTwoLines() {
         let height = RecordingOverlayController.pillHeight(
             forText: "Transcription failed — the server returned an unexpected response from huggingface.co",
@@ -28,8 +27,8 @@ final class PillHeightTests: XCTestCase {
         XCTAssertEqual(height, base + lineHeight)
     }
 
-    // Text far longer than two lines must cap at two lines (the last line ellipsizes),
-    // never producing a pill taller than the two-line height.
+    /// Text far longer than two lines must cap at two lines (the last line ellipsizes),
+    /// never producing a pill taller than the two-line height.
     func testVeryLongTextCapsAtTwoLines() {
         let height = RecordingOverlayController.pillHeight(
             forText: String(repeating: "wrap ", count: 80),
@@ -52,12 +51,12 @@ final class PillHeightTests: XCTestCase {
             "No audio captured. Check your mic.",
             "Recording",
             "Transcribing",
-            "Transcription failed — the server returned an unexpected response from huggingface.co"
+            "Transcription failed — the server returned an unexpected response from huggingface.co",
         ]
         for message in messages {
             let pillWidth = RecordingOverlayController.pillWidth(forText: message, font: font, leadingAccessoryWidth: 0)
             let pillHeight = RecordingOverlayController.pillHeight(forText: message, font: font, leadingAccessoryWidth: 0)
-            let labelWidth = pillWidth - 28   // padding*2, no accessory
+            let labelWidth = pillWidth - 28 // padding*2, no accessory
 
             let allocatedLines = Int(((pillHeight - base) / lineHeight).rounded()) + 1
             let renderedLines = min(renderedLineCount(message, width: labelWidth), maxLines)

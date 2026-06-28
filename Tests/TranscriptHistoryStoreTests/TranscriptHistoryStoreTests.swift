@@ -11,8 +11,8 @@ final class TranscriptHistoryStoreTests: XCTestCase {
             id: UUID(),
             createdAt: .now,
             text: "measured",
-            recordingDurationMS: 12_000,
-            transcriptionLatencyMS: 1_400
+            recordingDurationMS: 12000,
+            transcriptionLatencyMS: 1400
         )
 
         try store.add(measured)

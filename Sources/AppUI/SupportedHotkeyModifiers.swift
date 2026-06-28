@@ -25,7 +25,7 @@ enum SupportedHotkeyModifiers {
         60: HotkeyModifierDefinition(keyCode: 60, displayName: "Right \u{21E7} Shift", flag: .shift),
         61: HotkeyModifierDefinition(keyCode: 61, displayName: "Right \u{2325} Option", flag: .option),
         62: HotkeyModifierDefinition(keyCode: 62, displayName: "Right \u{2303} Control", flag: .control),
-        63: HotkeyModifierDefinition(keyCode: 63, displayName: "Fn", flag: .function)
+        63: HotkeyModifierDefinition(keyCode: 63, displayName: "Fn", flag: .function),
     ]
 
     static func hotkey(for keyCode: UInt16) -> HotkeySetting? {

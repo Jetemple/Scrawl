@@ -108,7 +108,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             self.hotkey = hotkey
         } else {
             let description = try container.decodeIfPresent(String.self, forKey: .hotkeyDescription) ?? "Right \u{2325} Option"
-            self.hotkey = HotkeySetting(keyCode: 61, isModifierKey: true, displayName: description)
+            hotkey = HotkeySetting(keyCode: 61, isModifierKey: true, displayName: description)
         }
     }
 

@@ -94,11 +94,11 @@ public struct AppRuntime {
         )
     }
 
-    private static func resolveWhisperExecutable(home: URL) -> URL {
+    private static func resolveWhisperExecutable(home _: URL) -> URL {
         let trustedDirs = [
             URL(filePath: "/opt/homebrew/bin"),
             URL(filePath: "/usr/local/bin"),
-            URL(filePath: "/usr/bin")
+            URL(filePath: "/usr/bin"),
         ]
         return resolveWhisperExecutable(
             environment: ProcessInfo.processInfo.environment,
@@ -168,7 +168,7 @@ public struct AppRuntime {
         let keys = [
             "SCRAWL_DISABLE_GPU",
             "WHISPER_CPP_NO_GPU",
-            "WHISPER_NO_GPU"
+            "WHISPER_NO_GPU",
         ]
 
         for key in keys {
@@ -188,7 +188,7 @@ public struct AppRuntime {
         let keys = [
             "SCRAWL_WHISPER_THREADS",
             "WHISPER_CPP_THREADS",
-            "WHISPER_THREADS"
+            "WHISPER_THREADS",
         ]
 
         for key in keys {
@@ -212,17 +212,17 @@ public struct AppRuntime {
         // smaller and faster than the multilingual `medium` (1.5 GB), and the app is English-only
         // today, so `medium` would be strictly heavier with no benefit. Larger/multilingual models
         // remain one-click upgrades in the Models menu.
-        return "ggml-small.en"
+        "ggml-small.en"
     }
 
     private static func parseEnvironmentBool(_ rawValue: String) -> Bool? {
         switch rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "1", "true", "yes", "y", "on":
-            return true
+            true
         case "0", "false", "no", "n", "off":
-            return false
+            false
         default:
-            return nil
+            nil
         }
     }
 

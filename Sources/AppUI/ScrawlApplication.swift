@@ -40,7 +40,7 @@ public final class ScrawlApplication {
             DelegateRetainer.shared.instanceLock = instanceLock
         } catch {
             #if DEBUG
-            print("[Scrawl] Single-instance lock unavailable: \(error)")
+                print("[Scrawl] Single-instance lock unavailable: \(error)")
             #endif
         }
 
@@ -82,6 +82,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private let runtime: AppRuntime
     private let modelManager: LocalModelManager
+    private let loginItem: LoginItemControlling = SMAppServiceLoginItem()
     private lazy var transcriptHistoryCoordinator = TranscriptHistoryCoordinator(
         settingsStore: runtime.settingsStore,
         historyStore: runtime.transcriptHistoryStore
@@ -138,11 +139,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
-        self.modelManager = LocalModelManager(modelsDirectoryURL: runtime.modelsDirectoryURL)
+        modelManager = LocalModelManager(modelsDirectoryURL: runtime.modelsDirectoryURL)
         super.init()
     }
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         let tempDir = FileManager.default.temporaryDirectory
         DispatchQueue.global(qos: .utility).async {
             TempFileSweeper.sweep(directory: tempDir)
@@ -169,7 +170,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateStatusIcon()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationWillTerminate(_: Notification) {
         if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
             let shutdownComplete = DispatchSemaphore(value: 0)
             Task {
@@ -187,7 +188,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         DelegateRetainer.shared.instanceLock = nil
     }
 
-    func menuWillOpen(_ menu: NSMenu) {
+    func menuWillOpen(_: NSMenu) {
         reconcileAccessibilityAuthorization()
         refreshSettingsRows()
         refreshModelMenu()
@@ -196,7 +197,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
     }
 
-    @objc private func requestMicrophonePermission(_ sender: Any?) {
+    @objc private func requestMicrophonePermission(_: Any?) {
         runtime.permissionManager.requestMicrophoneAccess { [weak self] _ in
             DispatchQueue.main.async {
                 self?.updatePermissionRows()
@@ -204,11 +205,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    @objc private func requestAccessibilityPermission(_ sender: Any?) {
+    @objc private func requestAccessibilityPermission(_: Any?) {
         promptForAccessibilityPermission()
     }
 
-    @objc private func toggleHotkeyCapture(_ sender: Any?) {
+    @objc private func toggleHotkeyCapture(_: Any?) {
         if isCapturingHotkey {
             cancelHotkeyCapture(status: "Hotkey capture cancelled")
             return
@@ -221,6 +222,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         if preferencesWindowController == nil {
             preferencesWindowController = makePreferencesWindowController()
         }
+        // A "Download cancelled" badge from an earlier session is stale by the time Settings
+        // is reopened; clear it so a freshly-opened window doesn't show an alarming leftover.
+        cancelledModelID = nil
         refreshPreferencesWindow()
         preferencesWindowController?.showWindow(sender)
     }
@@ -240,6 +244,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 cancelDownload: { [weak self] in
                     self?.cancelModelDownload()
                 },
+                addModel: { [weak self] in
+                    self?.importCustomModel()
+                },
+                revealModelsFolder: { [weak self] in
+                    self?.revealModelsFolder()
+                },
+                openModelSource: {
+                    guard let url = URL(string: "https://huggingface.co/ggerganov/whisper.cpp/tree/main") else { return }
+                    NSWorkspace.shared.open(url)
+                },
                 setHotkey: { [weak self] in
                     self?.toggleHotkeyCapture(nil)
                 },
@@ -254,6 +268,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 },
                 setKeepTranscriptsInClipboardHistory: { [weak self] keep in
                     self?.mutateSettings { $0.keepTranscriptsInClipboardHistory = keep }
+                },
+                setLaunchAtLogin: { [weak self] enabled in
+                    self?.setLaunchAtLogin(enabled)
                 },
                 setTranscriptHistoryEnabled: { [weak self] enabled in
                     self?.setTranscriptHistoryEnabled(enabled)
@@ -321,9 +338,49 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 dictionaryEntries: runtime.dictionaryStore.terms().map {
                     DictionaryEntry(wrong: $0.value, correct: $0.value)
                 },
-                dictionaryLoadErrorDescription: runtime.dictionaryStore.loadErrorDescription
+                dictionaryLoadErrorDescription: runtime.dictionaryStore.loadErrorDescription,
+                launchAtLoginEnabled: loginItem.isEnabled
             )
         )
+    }
+
+    /// "Bring your own model": let the user pick a whisper.cpp ggml `.bin` and import
+    /// it into the models folder. The import (validation + hardlink/copy) runs off the
+    /// main thread so a large cross-volume copy can't freeze the UI; success refreshes
+    /// the list (the model appears as a selectable row), failure shows the reason.
+    private func importCustomModel() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a whisper.cpp ggml model file (usually named ggml-*.bin). "
+            + "Find compatible models at huggingface.co/ggerganov/whisper.cpp."
+        panel.prompt = "Add Model"
+        guard panel.runModal() == .OK, let sourceURL = panel.url else {
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            do {
+                try modelManager.importModel(from: sourceURL)
+                DispatchQueue.main.async {
+                    self.refreshPreferencesWindow()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    NSAlert(error: error).runModal()
+                }
+            }
+        }
+    }
+
+    /// Opens the models folder in Finder so power users can drop in their own
+    /// `ggml-*.bin` files directly; the existing on-disk scan picks them up.
+    private func revealModelsFolder() {
+        let folder = modelManager.modelsFolderURL
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(folder)
     }
 
     private func setTranscriptHistoryEnabled(_ enabled: Bool) {
@@ -360,6 +417,38 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func setModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
         mutateSettings { $0.modelOffloadPolicy = policy }
+    }
+
+    /// Toggles the macOS login item, then re-renders the checkbox from the live OS
+    /// state so it can never drift. On failure or when macOS requires approval,
+    /// guides the user to System Settings → General → Login Items.
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try loginItem.setEnabled(enabled)
+            if enabled, !loginItem.isEnabled {
+                presentLoginItemAlert(
+                    message: "Approval needed for launch at login",
+                    informative: "macOS needs you to allow Scrawl under System Settings → General → Login Items."
+                )
+            }
+        } catch {
+            presentLoginItemAlert(
+                message: "Couldn't update launch at login",
+                informative: "Scrawl couldn't change your login item. You can manage it under System Settings → General → Login Items."
+            )
+        }
+        refreshPreferencesWindow()
+    }
+
+    private func presentLoginItemAlert(message: String, informative: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = informative
+        alert.addButton(withTitle: "Open Login Items Settings")
+        alert.addButton(withTitle: "OK")
+        if alert.runModal() == .alertFirstButtonReturn {
+            loginItem.openSystemSettings()
+        }
     }
 
     private func copyTranscript(id: UUID) {
@@ -408,7 +497,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func saveDictionaryEntry(
         originalWrong: String?,
-        wrong: String,
+        wrong _: String,
         correct: String,
         completion: @escaping (Result<Void, Error>) -> Void
     ) {
@@ -477,12 +566,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         successStatus: String,
         failureTitle: String
     ) {
-        let completion: HistoryActionPresentationPolicy.Completion
-        switch result {
+        let completion: HistoryActionPresentationPolicy.Completion = switch result {
         case .success:
-            completion = .success
+            .success
         case .failure:
-            completion = .failure
+            .failure
         }
         let decision = historyActionPresentationPolicy.decision(
             for: action,
@@ -571,33 +659,33 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         hotkeyCaptureTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: false) { [weak self] _ in
             guard let self else { return }
-            self.cancelHotkeyCapture(status: "Hotkey capture timed out")
+            cancelHotkeyCapture(status: "Hotkey capture timed out")
         }
         if let hotkeyCaptureTimeoutTimer {
             RunLoop.main.add(hotkeyCaptureTimeoutTimer, forMode: .common)
         }
     }
 
-    @objc private func showIdleState(_ sender: Any?) {
+    @objc private func showIdleState(_: Any?) {
         runtime.overlayController.setState(.idle)
         updateStatusIcon()
     }
 
-    @objc private func showRecordingState(_ sender: Any?) {
+    @objc private func showRecordingState(_: Any?) {
         runtime.overlayController.setState(.recording)
         updateStatusIcon()
     }
 
-    @objc private func showTranscribingState(_ sender: Any?) {
+    @objc private func showTranscribingState(_: Any?) {
         runtime.overlayController.setState(.transcribing)
         updateStatusIcon()
     }
 
-    @objc private func startManualRecording(_ sender: Any?) {
+    @objc private func startManualRecording(_: Any?) {
         beginRecording(origin: .manual)
     }
 
-    @objc private func stopManualRecordingAndTranscribe(_ sender: Any?) {
+    @objc private func stopManualRecordingAndTranscribe(_: Any?) {
         stopRecordingAndTranscribe(reason: "Manual stop")
     }
 
@@ -627,6 +715,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func selectModel(id modelID: String) {
+        cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
         mutateSettings {
             $0.selectedModelID = modelID
             if $0.defaultModelID.isEmpty {
@@ -646,7 +735,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         startModelDownload(model)
     }
 
-    @objc private func deleteSelectedModel(_ sender: Any?) {
+    @objc private func deleteSelectedModel(_: Any?) {
         let selected = runtime.settingsStore.load().selectedModelID
 
         guard modelManager.modelExists(id: selected) else {
@@ -655,14 +744,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         // Build confirmation alert matching existing NSAlert style in this file.
-        let displayName = LocalModelManager.downloadableModels
-            .first(where: { $0.id == selected })?.displayName
+        let catalogModel = LocalModelManager.downloadableModels.first(where: { $0.id == selected })
+        let isBuiltIn = catalogModel != nil
+        let displayName = catalogModel?.displayName
             ?? selected.replacingOccurrences(of: "ggml-", with: "")
 
         let modelURL = modelManager.modelURL(id: selected)
         var sizeNote = ""
         if let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
-           let bytes = attrs[.size] as? Int64, bytes > 0 {
+           let bytes = attrs[.size] as? Int64, bytes > 0
+        {
             let mb = Double(bytes) / (1024 * 1024)
             sizeNote = " (\(String(format: "%.0f", mb)) MB)"
         }
@@ -670,7 +761,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Delete \"\(displayName)\"?"
-        alert.informativeText = "This removes the model file\(sizeNote) from your Mac. You can re-download it later."
+        alert.informativeText = ModelDeletionPrompt.informativeText(sizeNote: sizeNote, isBuiltIn: isBuiltIn)
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -746,23 +837,23 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         modelDownloadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await self.modelManager.download(model: model) { [weak self] receivedBytes, totalBytes in
+                _ = try await modelManager.download(model: model) { [weak self] receivedBytes, totalBytes in
                     guard let self else { return }
                     Task { @MainActor [weak self] in
-                        guard let self, self.modelDownloadGeneration == downloadGeneration else { return }
-                        let newText = self.downloadProgressText(
+                        guard let self, modelDownloadGeneration == downloadGeneration else { return }
+                        let newText = downloadProgressText(
                             for: model,
                             receivedBytes: receivedBytes,
                             totalBytes: totalBytes
                         )
-                        self.setStatus(newText)
+                        setStatus(newText)
                         // Only rebuild the Models page when the rendered progress string
                         // changes — the callback fires on every URLSession data chunk,
                         // which is far more often than the text visually changes.
-                        let progressLabel = self.formatProgressLabel(receivedBytes: receivedBytes, totalBytes: totalBytes)
-                        guard progressLabel != self.currentDownloadProgressText else { return }
-                        self.currentDownloadProgressText = progressLabel
-                        self.refreshPreferencesWindow()
+                        let progressLabel = formatProgressLabel(receivedBytes: receivedBytes, totalBytes: totalBytes)
+                        guard progressLabel != currentDownloadProgressText else { return }
+                        currentDownloadProgressText = progressLabel
+                        refreshPreferencesWindow()
                     }
                 }
                 await MainActor.run {
@@ -958,7 +1049,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         NSWorkspace.shared.open(url)
     }
 
-    private func presentMissingModelAlert(triggeredByHotkey: Bool) {
+    private func presentMissingModelAlert(triggeredByHotkey _: Bool) {
         let recommendedModel = preferredInitialDownloadModel()
         guard let recommendedModel else {
             _ = presentAlert(
@@ -974,12 +1065,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let alert = NSAlert()
         alert.messageText = "Set Up Speech Recognition"
         alert.informativeText = """
-            Scrawl transcribes audio locally on your Mac using OpenAI's \
-            Whisper model. No data leaves your device.
+        Scrawl transcribes audio locally on your Mac using OpenAI's \
+        Whisper model. No data leaves your device.
 
-            To get started, download the \(recommendedModelName) model. \
-            You can switch to a larger model later for improved accuracy.
-            """
+        To get started, download the \(recommendedModelName) model. \
+        You can switch to a larger model later for improved accuracy.
+        """
         alert.alertStyle = .informational
         if let icon = NSImage(systemSymbolName: "waveform", accessibilityDescription: nil) {
             alert.icon = icon.withSymbolConfiguration(.init(pointSize: 48, weight: .medium))
@@ -998,7 +1089,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             runtime.recommendedDefaultModelID,
             "ggml-small.en",
             "ggml-medium",
-            "ggml-tiny.en"
+            "ggml-tiny.en",
         ]
 
         for modelID in preferredOrder {
@@ -1112,7 +1203,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    @objc private func quit(_ sender: Any?) {
+    @objc private func quit(_: Any?) {
         NSApplication.shared.terminate(nil)
     }
 
@@ -1146,7 +1237,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         menu.addItem(.separator())
 
-        let preferencesItem = NSMenuItem(title: "Preferences...", action: #selector(openPreferences(_:)), keyEquivalent: ",")
+        let preferencesItem = NSMenuItem(title: "Preferences…", action: #selector(openPreferences(_:)), keyEquivalent: ",")
         preferencesItem.target = self
         menu.addItem(preferencesItem)
 
@@ -1168,12 +1259,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let micItem = NSMenuItem(title: "", action: #selector(requestMicrophonePermission(_:)), keyEquivalent: "")
         micItem.target = self
         menu.addItem(micItem)
-        self.microphoneItem = micItem
+        microphoneItem = micItem
 
         let axItem = NSMenuItem(title: "", action: #selector(requestAccessibilityPermission(_:)), keyEquivalent: "")
         axItem.target = self
         menu.addItem(axItem)
-        self.accessibilityItem = axItem
+        accessibilityItem = axItem
 
         // Debug tools — only visible with SCRAWL_DEBUG=1
         if ProcessInfo.processInfo.environment["SCRAWL_DEBUG"] != nil {
@@ -1204,7 +1295,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         menu.addItem(.separator())
 
-        let setHotkeyItem = NSMenuItem(title: "Set Hotkey...", action: #selector(toggleHotkeyCapture(_:)), keyEquivalent: "")
+        let setHotkeyItem = NSMenuItem(title: "Set Hotkey…", action: #selector(toggleHotkeyCapture(_:)), keyEquivalent: "")
         setHotkeyItem.target = self
         menu.addItem(setHotkeyItem)
         self.setHotkeyItem = setHotkeyItem
@@ -1226,11 +1317,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             hotkey: hotkey,
             onKeyDown: { [weak self] in
                 guard let self else { return }
-                self.dispatchHotkeyActionsAndScheduleNext(self.runtime.hotkeyStateMachine.keyDown(at: Date()))
+                dispatchHotkeyActionsAndScheduleNext(runtime.hotkeyStateMachine.keyDown(at: Date()))
             },
             onKeyUp: { [weak self] in
                 guard let self else { return }
-                self.dispatchHotkeyActionsAndScheduleNext(self.runtime.hotkeyStateMachine.keyUp(at: Date()))
+                dispatchHotkeyActionsAndScheduleNext(runtime.hotkeyStateMachine.keyUp(at: Date()))
             }
         )
         monitor.start()
@@ -1275,7 +1366,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         hotkeyGestureTimer = timer
     }
 
-    @objc private func handleHotkeyGestureTimer(_ timer: Timer) {
+    @objc private func handleHotkeyGestureTimer(_: Timer) {
         dispatchHotkeyActionsAndScheduleNext(runtime.hotkeyStateMachine.tick(at: Date()))
     }
 
@@ -1356,7 +1447,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         recordingSafetyTimer = nil
 
         let audioURL: URL
-        let recordingDurationMS = recordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1_000) }
+        let recordingDurationMS = recordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) }
         do {
             audioURL = try runtime.audioCaptureService.stopCapture()
         } catch {
@@ -1382,8 +1473,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setStatus("Transcribing...")
 
         let settings = runtime.settingsStore.load()
-        let runtime = self.runtime
-        let insertionTargetApp = self.insertionTargetApp
+        let runtime = runtime
+        let insertionTargetApp = insertionTargetApp
         let operationGeneration = activeOperationGeneration.current
         let promptContext = PreferencesContentState.vocabularyPrompt(terms: runtime.dictionaryStore.terms())
 
@@ -1431,7 +1522,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 return
             }
             if app.processIdentifier != selfPID {
-                self.lastExternalActiveApp = app
+                lastExternalActiveApp = app
             }
         }
 
@@ -1442,9 +1533,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self, self.recordingOrigin != nil else { return }
-            self.setStatus("Auto-stopping...")
-            self.stopRecordingAndTranscribe(reason: "System sleep")
+            guard let self, recordingOrigin != nil else { return }
+            setStatus("Auto-stopping...")
+            stopRecordingAndTranscribe(reason: "System sleep")
         }
 
         // On wake, reset the hotkey gesture state machine so any partially
@@ -1456,9 +1547,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            self.hotkeyGestureTimer?.invalidate()
-            self.hotkeyGestureTimer = nil
-            self.runtime.hotkeyStateMachine.reset()
+            hotkeyGestureTimer?.invalidate()
+            hotkeyGestureTimer = nil
+            runtime.hotkeyStateMachine.reset()
         }
     }
 
@@ -1573,7 +1664,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             .replacingOccurrences(of: "ggml-", with: "")
         infoLineItem?.title = "Model: \(modelName)"
         hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input..." : "Hotkey: \(settings.hotkey.displayName)"
-        setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey..."
+        setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey…"
         setHotkeyItem?.state = isCapturingHotkey ? .on : .off
         statusItem?.button?.toolTip = isCapturingHotkey ? "Scrawl: waiting for hotkey input" : "Scrawl: Hotkey \(settings.hotkey.displayName)"
         refreshPreferencesWindow()
@@ -1695,7 +1786,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private static let ongoingStatuses: Set<String> = [
-        "Recording...", "Transcribing...", hotkeyCapturePrompt
+        "Recording...", "Transcribing...", hotkeyCapturePrompt,
     ]
 
     private func setStatus(_ text: String, autoClear: Bool = true) {
@@ -1737,7 +1828,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         #if DEBUG
-        print("[Scrawl] \(text)")
+            print("[Scrawl] \(text)")
         #endif
         return statusGeneration
     }
@@ -1757,7 +1848,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
     }
 
-    @objc private func handleStatusAutoClearTimer(_ timer: Timer) {
+    @objc private func handleStatusAutoClearTimer(_: Timer) {
         setStatus("Idle")
     }
 
@@ -1780,11 +1871,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private func permissionMenuTitle(for name: String, status: PermissionStatus) -> String {
         switch status {
         case .authorized:
-            return "\(name): Authorized"
+            "\(name): Authorized"
         case .denied:
-            return "\(name): Denied (click to retry)"
+            "\(name): Denied (click to retry)"
         case .notDetermined:
-            return "\(name): Not Requested (click to request)"
+            "\(name): Not Requested (click to request)"
         }
     }
 
@@ -1797,16 +1888,15 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        let symbolName: String
-        switch runtime.overlayController.state {
+        let symbolName = switch runtime.overlayController.state {
         case .idle:
-            symbolName = "quote.bubble.fill"
+            "quote.bubble.fill"
         case .hotkeyCapture:
-            symbolName = "keyboard.fill"
+            "keyboard.fill"
         case .recording:
-            symbolName = "waveform.circle.fill"
+            "waveform.circle.fill"
         case .transcribing:
-            symbolName = "ellipsis.circle.fill"
+            "ellipsis.circle.fill"
         }
 
         if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Scrawl") {
@@ -1831,20 +1921,20 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var hasActiveOperation: Bool {
         switch runtime.overlayController.state {
         case .idle:
-            return false
+            false
         case .hotkeyCapture, .recording, .transcribing:
-            return true
+            true
         }
     }
 
     private func scheduleSafetyStopTimer() {
         recordingSafetyTimer?.invalidate()
         recordingSafetyTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: false) { [weak self] _ in
-            guard let self, self.recordingOrigin != nil else {
+            guard let self, recordingOrigin != nil else {
                 return
             }
-            self.setStatus("Auto-stopping...")
-            self.stopRecordingAndTranscribe(reason: "Safety timeout")
+            setStatus("Auto-stopping...")
+            stopRecordingAndTranscribe(reason: "Safety timeout")
         }
         if let recordingSafetyTimer {
             RunLoop.main.add(recordingSafetyTimer, forMode: .common)
@@ -1860,8 +1950,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             try await runtime.textOutputTarget.output(text, markPrivate: !keepInHistory)
             return .pasted
         } catch TextOutputError.secureInputActive {
-            setStatus("Secure field — transcript copied to clipboard")
-            runtime.overlayController.showTransientMessage("Secure field detected — transcript copied to clipboard")
+            setStatus("Auto-paste paused — secure input is on")
+            runtime.overlayController.showTransientMessage(
+                TextOutputError.secureInputActive.errorDescription
+                    ?? "Secure input is on — transcript copied to clipboard; press ⌘V to paste."
+            )
             return .copiedForSecureInput
         } catch {
             let description = describe(error)
@@ -1894,7 +1987,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 updatedSettings = current
             }
             if let previousSettings, let updatedSettings,
-               let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
+               let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider
+            {
                 Task {
                     if previousSettings.modelID != updatedSettings.modelID {
                         await provider.shutdown()
@@ -1939,9 +2033,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         if operationGeneration == activeOperationGeneration.current {
             runtime.overlayController.setState(.idle)
             updateStatusIcon()
-            if latencyMS >= 1_000 {
+            if latencyMS >= 1000 {
                 originatingStatusGeneration = applyStatus(
-                    String(format: "Done (%.1fs)", Double(latencyMS) / 1_000)
+                    String(format: "Done (%.1fs)", Double(latencyMS) / 1000)
                 )
             } else {
                 originatingStatusGeneration = applyStatus("Done (\(latencyMS)ms)")
@@ -1966,10 +2060,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             refreshPreferencesWindow()
             if let originatingStatusGeneration,
                activeOperationGeneration.shouldPresentDelayedFailure(
-                for: operationGeneration,
-                originatingStatusGeneration: originatingStatusGeneration,
-                hasActiveOperation: hasActiveOperation
-               ) {
+                   for: operationGeneration,
+                   originatingStatusGeneration: originatingStatusGeneration,
+                   hasActiveOperation: hasActiveOperation
+               )
+            {
                 applyStatus("History unavailable: \(describe(error))", autoClear: false)
                 runtime.overlayController.showTransientMessage("Transcript history could not be saved")
             }

@@ -12,12 +12,17 @@ final class PreferencesGeneralView: NSView {
     private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
     private let offloadPopup = NSPopUpButton()
     private let clipboardHistoryCheckbox = NSButton(checkboxWithTitle: "Keep transcripts in clipboard history", target: nil, action: nil)
+    private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
     private let requestMicrophone: () -> Void
     private let requestAccessibility: () -> Void
     private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
     private let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
+    private let setLaunchAtLogin: (Bool) -> Void
 
-    var modelOffloadChoices: [String] { offloadPopup.itemTitles }
+    var modelOffloadChoices: [String] {
+        offloadPopup.itemTitles
+    }
+
     var selectedModelOffloadPolicy: ModelOffloadPolicy? {
         guard offloadPopup.indexOfSelectedItem >= 0 else { return nil }
         return ModelOffloadPolicy.allCases[offloadPopup.indexOfSelectedItem]
@@ -27,12 +32,14 @@ final class PreferencesGeneralView: NSView {
         requestMicrophone: @escaping () -> Void,
         requestAccessibility: @escaping () -> Void,
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void,
-        setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in }
+        setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
+        setLaunchAtLogin: @escaping (Bool) -> Void = { _ in }
     ) {
         self.requestMicrophone = requestMicrophone
         self.requestAccessibility = requestAccessibility
         self.setModelOffloadPolicy = setModelOffloadPolicy
         self.setKeepTranscriptsInClipboardHistory = setKeepTranscriptsInClipboardHistory
+        self.setLaunchAtLogin = setLaunchAtLogin
         super.init(frame: .zero)
 
         PreferencesPageSupport.configureSecondaryButton(microphoneButton)
@@ -60,6 +67,19 @@ final class PreferencesGeneralView: NSView {
         clipboardGroup.alignment = .leading
         clipboardGroup.spacing = 3
 
+        launchAtLoginCheckbox.target = self
+        launchAtLoginCheckbox.action = #selector(launchAtLoginChanged(_:))
+        launchAtLoginCheckbox.font = .systemFont(ofSize: 13)
+
+        let launchAtLoginSubtitle = NSTextField(labelWithString: "Start Scrawl automatically when you sign in.")
+        launchAtLoginSubtitle.font = .systemFont(ofSize: 11)
+        launchAtLoginSubtitle.textColor = .secondaryLabelColor
+
+        let launchAtLoginGroup = NSStackView(views: [launchAtLoginCheckbox, launchAtLoginSubtitle])
+        launchAtLoginGroup.orientation = .vertical
+        launchAtLoginGroup.alignment = .leading
+        launchAtLoginGroup.spacing = 3
+
         let page = PreferencesPageSupport.makePage(
             title: "General",
             description: "Scrawl readiness and current transcription setup.",
@@ -70,22 +90,26 @@ final class PreferencesGeneralView: NSView {
                     PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel),
                     PreferencesPageSupport.makeSettingRow(
                         title: "Offload model",
-                        detail: NSTextField(labelWithString: "After inactivity"),
+                        // The popup value (Immediately / 1 minute / … / Never) already states
+                        // the timing, so no static detail — a fixed "After inactivity" label
+                        // contradicted the "Immediately" and "Never" choices.
+                        detail: NSTextField(labelWithString: ""),
                         action: offloadPopup
-                    )
+                    ),
                 ]),
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
-                    PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton)
+                    PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton),
                 ]),
-                clipboardGroup
+                clipboardGroup,
+                launchAtLoginGroup,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -93,7 +117,8 @@ final class PreferencesGeneralView: NSView {
         settings: AppSettings,
         microphoneStatus: PermissionStatus,
         accessibilityStatus: PermissionStatus,
-        isCapturingHotkey: Bool
+        isCapturingHotkey: Bool,
+        launchAtLoginEnabled: Bool
     ) {
         modelLabel.stringValue = PreferencesModelState.displayName(forInstalledModelID: settings.modelID)
         hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input..." : settings.hotkey.displayName
@@ -108,6 +133,7 @@ final class PreferencesGeneralView: NSView {
         accessibilityButton.isHidden = accessibilityStatus == .authorized
         offloadPopup.selectItem(at: ModelOffloadPolicy.allCases.firstIndex(of: settings.modelOffloadPolicy) ?? 0)
         clipboardHistoryCheckbox.state = settings.keepTranscriptsInClipboardHistory ? .on : .off
+        launchAtLoginCheckbox.state = launchAtLoginEnabled ? .on : .off
     }
 
     func selectModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
@@ -133,8 +159,18 @@ final class PreferencesGeneralView: NSView {
         clipboardHistoryCheckbox.state == .on
     }
 
-    @objc private func requestMicrophoneAccess(_ sender: NSButton) { requestMicrophone() }
-    @objc private func requestAccessibilityAccess(_ sender: NSButton) { requestAccessibility() }
+    var isLaunchAtLoginEnabled: Bool {
+        launchAtLoginCheckbox.state == .on
+    }
+
+    @objc private func requestMicrophoneAccess(_: NSButton) {
+        requestMicrophone()
+    }
+
+    @objc private func requestAccessibilityAccess(_: NSButton) {
+        requestAccessibility()
+    }
+
     @objc private func modelOffloadChanged(_ sender: NSPopUpButton) {
         guard sender.indexOfSelectedItem >= 0 else { return }
         setModelOffloadPolicy(ModelOffloadPolicy.allCases[sender.indexOfSelectedItem])
@@ -142,5 +178,9 @@ final class PreferencesGeneralView: NSView {
 
     @objc private func clipboardHistoryChanged(_ sender: NSButton) {
         setKeepTranscriptsInClipboardHistory(sender.state == .on)
+    }
+
+    @objc private func launchAtLoginChanged(_ sender: NSButton) {
+        setLaunchAtLogin(sender.state == .on)
     }
 }

@@ -68,7 +68,7 @@ final class HotkeyMonitor {
         let downFromSource = CGEventSource.keyState(.hidSystemState, key: hotkey.keyCode)
         let downNow = downFromEvent || downFromSource
 
-        if downNow && !isDown {
+        if downNow, !isDown {
             isDown = true
             Task { @MainActor in
                 onKeyDown()
@@ -76,7 +76,7 @@ final class HotkeyMonitor {
             return
         }
 
-        if !downNow && isDown {
+        if !downNow, isDown {
             isDown = false
             Task { @MainActor in
                 onKeyUp()

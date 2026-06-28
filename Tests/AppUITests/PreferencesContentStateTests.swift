@@ -11,7 +11,7 @@ final class PreferencesContentStateTests: XCTestCase {
                 VocabularyTerm(value: " Anduril "),
                 VocabularyTerm(value: "anduril"),
                 VocabularyTerm(value: "Postgres"),
-                VocabularyTerm(value: String(repeating: "x", count: 500))
+                VocabularyTerm(value: String(repeating: "x", count: 500)),
             ],
             maximumLength: 48
         )
@@ -28,8 +28,8 @@ final class PreferencesContentStateTests: XCTestCase {
             id: UUID(),
             createdAt: .now,
             text: "one two three four",
-            recordingDurationMS: 2_000,
-            transcriptionLatencyMS: 1_400
+            recordingDurationMS: 2000,
+            transcriptionLatencyMS: 1400
         )
 
         XCTAssertEqual(
@@ -105,7 +105,7 @@ final class PreferencesContentStateTests: XCTestCase {
     func testFilteredHistoryReturnsAllRecordsForEmptyQueryAndPreservesOrder() {
         let records = [
             record(id: "00000000-0000-0000-0000-000000000001", text: "First"),
-            record(id: "00000000-0000-0000-0000-000000000002", text: "Second")
+            record(id: "00000000-0000-0000-0000-000000000002", text: "Second"),
         ]
 
         XCTAssertEqual(PreferencesContentState.filteredHistory(records: records, query: ""), records)
@@ -159,10 +159,10 @@ final class PreferencesContentStateTests: XCTestCase {
         )
     }
 
-    func testResolvedHistorySelectionFallsBackToFirstVisibleRecord() {
+    func testResolvedHistorySelectionFallsBackToFirstVisibleRecord() throws {
         let first = record(id: "00000000-0000-0000-0000-000000000001", text: "First")
         let second = record(id: "00000000-0000-0000-0000-000000000002", text: "Second")
-        let hiddenID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        let hiddenID = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000003"))
 
         XCTAssertEqual(
             PreferencesContentState.resolvedHistorySelection(
@@ -199,7 +199,7 @@ final class PreferencesContentStateTests: XCTestCase {
     func testFilteredDictionaryReturnsAllForEmptyQueryAndEmptyForNoMatches() {
         let entries = [
             DictionaryEntry(wrong: "wispr", correct: "Whisper"),
-            DictionaryEntry(wrong: "pie torch", correct: "PyTorch")
+            DictionaryEntry(wrong: "pie torch", correct: "PyTorch"),
         ]
 
         XCTAssertEqual(PreferencesContentState.filteredDictionary(entries: entries, query: ""), entries)

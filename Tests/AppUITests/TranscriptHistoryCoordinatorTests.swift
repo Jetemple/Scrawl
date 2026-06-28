@@ -9,10 +9,10 @@ final class TranscriptHistoryCoordinatorTests: XCTestCase {
         let historyStore = InMemoryTranscriptHistoryStore()
         let coordinator = TranscriptHistoryCoordinator(settingsStore: settingsStore, historyStore: historyStore)
 
-        try coordinator.add(text: "hello world", recordingDurationMS: 2_000, transcriptionLatencyMS: 500)
+        try coordinator.add(text: "hello world", recordingDurationMS: 2000, transcriptionLatencyMS: 500)
 
         let record = try XCTUnwrap(historyStore.records().first)
-        XCTAssertEqual(record.recordingDurationMS, 2_000)
+        XCTAssertEqual(record.recordingDurationMS, 2000)
         XCTAssertEqual(record.transcriptionLatencyMS, 500)
     }
 
@@ -43,7 +43,7 @@ final class TranscriptHistoryCoordinatorTests: XCTestCase {
     func testDisableClearsRecordsBeforeSavingDisabledSetting() throws {
         let settingsStore = makeSettingsStore()
         let historyStore = InMemoryTranscriptHistoryStore(records: [
-            TranscriptRecord(id: UUID(), createdAt: .now, text: "delete me")
+            TranscriptRecord(id: UUID(), createdAt: .now, text: "delete me"),
         ])
         let coordinator = TranscriptHistoryCoordinator(settingsStore: settingsStore, historyStore: historyStore)
 
@@ -77,7 +77,7 @@ final class TranscriptHistoryCoordinatorTests: XCTestCase {
         XCTAssertTrue(settingsStore.load().isTranscriptHistoryEnabled)
     }
 
-    func testDisableWaitsForInFlightAddThenClearsIt() throws {
+    func testDisableWaitsForInFlightAddThenClearsIt() {
         let settingsStore = makeSettingsStore()
         let historyStore = BlockingAddHistoryStore()
         let coordinator = TranscriptHistoryCoordinator(settingsStore: settingsStore, historyStore: historyStore)
@@ -121,10 +121,15 @@ private struct FailingClearHistoryStore: TranscriptHistoryStoring {
         case clear
     }
 
-    func records() -> [TranscriptRecord] { [] }
-    func add(_ record: TranscriptRecord) throws {}
-    func delete(ids: Set<UUID>) throws {}
-    func clear() throws { throw Failure.clear }
+    func records() -> [TranscriptRecord] {
+        []
+    }
+
+    func add(_: TranscriptRecord) throws {}
+    func delete(ids _: Set<UUID>) throws {}
+    func clear() throws {
+        throw Failure.clear
+    }
 }
 
 private final class BlockingAddHistoryStore: TranscriptHistoryStoring, @unchecked Sendable {

@@ -18,7 +18,7 @@ final class TempFileSweeperTests: XCTestCase {
 
     // MARK: - Matching files are removed
 
-    func testMatchingAudioFilesAreRemoved() throws {
+    func testMatchingAudioFilesAreRemoved() {
         let audioFile = tempDir.appending(path: "scrawl-audio-abc123.wav")
         FileManager.default.createFile(atPath: audioFile.path, contents: Data("audio".utf8))
 
@@ -27,7 +27,7 @@ final class TempFileSweeperTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: audioFile.path))
     }
 
-    func testMatchingTranscriptFilesAreRemoved() throws {
+    func testMatchingTranscriptFilesAreRemoved() {
         let transcriptFile = tempDir.appending(path: "scrawl-transcript-xyz.txt")
         FileManager.default.createFile(atPath: transcriptFile.path, contents: Data("text".utf8))
 
@@ -36,7 +36,7 @@ final class TempFileSweeperTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: transcriptFile.path))
     }
 
-    func testMatchingWhisperTempFilesAreRemoved() throws {
+    func testMatchingWhisperTempFilesAreRemoved() {
         let whisperFile = tempDir.appending(path: "scrawl-whisper-temp.txt")
         FileManager.default.createFile(atPath: whisperFile.path, contents: Data("data".utf8))
 
@@ -45,7 +45,7 @@ final class TempFileSweeperTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: whisperFile.path))
     }
 
-    func testMatchingDownloadTempFilesAreRemoved() throws {
+    func testMatchingDownloadTempFilesAreRemoved() {
         let downloadFile = tempDir.appending(path: "scrawl-download-model.bin")
         FileManager.default.createFile(atPath: downloadFile.path, contents: Data("model".utf8))
 
@@ -56,7 +56,7 @@ final class TempFileSweeperTests: XCTestCase {
 
     // MARK: - Non-matching files are preserved
 
-    func testNonMatchingFilesAreNotRemoved() throws {
+    func testNonMatchingFilesAreNotRemoved() {
         let keepFile = tempDir.appending(path: "other-app-temp.wav")
         FileManager.default.createFile(atPath: keepFile.path, contents: Data("keep".utf8))
 
@@ -65,7 +65,7 @@ final class TempFileSweeperTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: keepFile.path))
     }
 
-    func testFilesWithPrefixInMiddleAreNotRemoved() throws {
+    func testFilesWithPrefixInMiddleAreNotRemoved() {
         // "scrawl-audio-" must match at the START of lastPathComponent, not anywhere
         let midFile = tempDir.appending(path: "notscrawl-audio-foo.wav")
         FileManager.default.createFile(atPath: midFile.path, contents: Data("keep".utf8))
@@ -75,7 +75,7 @@ final class TempFileSweeperTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: midFile.path))
     }
 
-    func testMixedBatchOnlyRemovesMatching() throws {
+    func testMixedBatchOnlyRemovesMatching() {
         let audioFile = tempDir.appending(path: "scrawl-audio-1.wav")
         let transcriptFile = tempDir.appending(path: "scrawl-transcript-1.txt")
         let otherFile = tempDir.appending(path: "unrelated.txt")
@@ -114,7 +114,7 @@ final class TempFileSweeperTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: nestedFile.path))
     }
 
-    func testCustomPrefixesAreRespected() throws {
+    func testCustomPrefixesAreRespected() {
         let customFile = tempDir.appending(path: "my-custom-prefix-data.tmp")
         let defaultFile = tempDir.appending(path: "scrawl-audio-data.wav")
         FileManager.default.createFile(atPath: customFile.path, contents: Data("x".utf8))

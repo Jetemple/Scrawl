@@ -31,9 +31,17 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private var editorField: NSTextField?
 
     private(set) var state = State.empty
-    var visibleWrongValues: [String] { visibleTerms.map(\.value) }
-    var selectedWrong: String? { selectedValues.count == 1 ? selectedValues.first : nil }
-    var usesGroupedWorkspace: Bool { workspaceGroup is PreferencesBackgroundView }
+    var visibleWrongValues: [String] {
+        visibleTerms.map(\.value)
+    }
+
+    var selectedWrong: String? {
+        selectedValues.count == 1 ? selectedValues.first : nil
+    }
+
+    var usesGroupedWorkspace: Bool {
+        workspaceGroup is PreferencesBackgroundView
+    }
 
     init(actions: Actions) {
         self.actions = actions
@@ -43,7 +51,9 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     func update(entries: [DictionaryEntry], loadErrorDescription: String?) {
         terms = entries.map { VocabularyTerm(value: $0.correct) }
@@ -56,10 +66,15 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         applyFilter()
     }
 
-    func controlTextDidChange(_ obj: Notification) { applyFilter() }
-    func numberOfRows(in tableView: NSTableView) -> Int { visibleTerms.count }
+    func controlTextDidChange(_: Notification) {
+        applyFilter()
+    }
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+    func numberOfRows(in _: NSTableView) -> Int {
+        visibleTerms.count
+    }
+
+    func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard visibleTerms.indices.contains(row) else { return nil }
         let cell = NSTableCellView()
         let label = NSTextField(labelWithString: visibleTerms[row].value)
@@ -69,12 +84,12 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
             label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
-            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
+    func tableViewSelectionDidChange(_: Notification) {
         selectedValues = Set(tableView.selectedRowIndexes.compactMap {
             visibleTerms.indices.contains($0) ? visibleTerms[$0].value : nil
         })
@@ -83,6 +98,10 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 
     private func buildView() {
         termField.placeholderString = "Add a preferred term"
+        // A plain NSTextField defaults to a square bezel, whose sharp corners clash
+        // with the rounded search field and list group below it. The rounded bezel
+        // gives the input the same soft corners as everything around it.
+        termField.bezelStyle = .roundedBezel
         PreferencesPageSupport.configureSecondaryButton(addButton)
         addButton.bezelColor = .controlAccentColor
         addButton.target = self
@@ -127,7 +146,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         stateView.addSubview(stateStack)
         NSLayoutConstraint.activate([
             stateStack.centerXAnchor.constraint(equalTo: stateView.centerXAnchor),
-            stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor)
+            stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
         ])
 
         let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
@@ -147,13 +166,13 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
                 addRow,
                 searchField,
                 workspace,
-                PreferencesPageSupport.makeActionRow(buttons: [editButton, deleteButton])
+                PreferencesPageSupport.makeActionRow(buttons: [editButton, deleteButton]),
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
     }
 
-    @objc private func addTerm(_ sender: NSButton) {
+    @objc private func addTerm(_: NSButton) {
         let value = termField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         addButton.isEnabled = false
@@ -215,7 +234,9 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         }
     }
 
-    @objc private func editSelected(_ sender: Any?) { showEditorForSelection() }
+    @objc private func editSelected(_: Any?) {
+        showEditorForSelection()
+    }
 
     private func showEditorForSelection() {
         guard let selectedWrong else { return }
@@ -225,9 +246,11 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private func showEditor(original: String) {
         guard let window else { return }
         let field = NSTextField(string: original)
+        field.bezelStyle = .roundedBezel // Match the rounded input on the Vocabulary page.
         let cancel = NSButton(title: "Cancel", target: nil, action: nil)
         let save = NSButton(title: "Save", target: nil, action: nil)
         save.keyEquivalent = "\r"
+        cancel.keyEquivalent = "\u{1b}" // Escape dismisses, matching macOS sheet convention.
         let root = NSStackView(views: [NSTextField(labelWithString: "Preferred term"), field, NSStackView(views: [NSView(), cancel, save])])
         root.orientation = .vertical
         root.alignment = .width
@@ -247,7 +270,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         panel.makeFirstResponder(field)
     }
 
-    @objc private func cancelEditor(_ sender: NSButton) {
+    @objc private func cancelEditor(_: NSButton) {
         guard let window = editorWindow, let sheet = window.attachedSheet else { return }
         window.endSheet(sheet)
         clearEditorState()
@@ -277,7 +300,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         editorWindow = nil
     }
 
-    @objc private func deleteSelected(_ sender: Any? = nil) {
+    @objc private func deleteSelected(_: Any? = nil) {
         guard !selectedValues.isEmpty else { return }
         if selectedValues.count > 1 {
             let alert = NSAlert()

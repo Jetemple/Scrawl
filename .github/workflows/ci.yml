@@ -60,5 +60,17 @@ jobs:
       - name: SwiftLint
         # Runs without --strict: warnings annotate the PR, only errors fail CI.
         run: swiftlint lint --reporter github-actions-logging
-      # NOTE: a `swiftformat Sources Tests --lint` gate belongs here too, but only
-      # after the one-time `make format` reformat lands as its own commit.
+      - name: SwiftFormat (lint)
+        # Pinned to a known release so the default ruleset can't drift under the
+        # runner's Homebrew and fail the gate on already-formatted code.
+        env:
+          SWIFTFORMAT_VERSION: 0.61.1
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/swiftformat.zip" \
+            "https://github.com/nicklockwood/SwiftFormat/releases/download/${SWIFTFORMAT_VERSION}/swiftformat.zip"
+          unzip -o -q "$RUNNER_TEMP/swiftformat.zip" -d "$RUNNER_TEMP/swiftformat-bin"
+          bin="$(find "$RUNNER_TEMP/swiftformat-bin" -type f -name swiftformat | head -1)"
+          chmod +x "$bin"
+          "$bin" --version
+          "$bin" Sources Tests --lint

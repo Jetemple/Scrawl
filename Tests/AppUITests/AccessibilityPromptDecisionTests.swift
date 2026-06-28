@@ -13,8 +13,8 @@ final class AccessibilityPromptDecisionTests: XCTestCase {
         )
     }
 
-    // First request: show the system prompt ONLY. It already offers "Open System Settings",
-    // so the app must not also open Settings — that's the double-open the user reported.
+    /// First request: show the system prompt ONLY. It already offers "Open System Settings",
+    /// so the app must not also open Settings — that's the double-open the user reported.
     func testFirstRequestShowsSystemPromptOnly() {
         XCTAssertEqual(
             AccessibilityPromptDecision.decide(isAuthorized: false, hasShownSystemPrompt: false),
@@ -22,8 +22,8 @@ final class AccessibilityPromptDecisionTests: XCTestCase {
         )
     }
 
-    // Already showed the prompt and still denied: macOS won't re-show it, so Settings is
-    // the only way forward.
+    /// Already showed the prompt and still denied: macOS won't re-show it, so Settings is
+    /// the only way forward.
     func testRepeatRequestOpensSettings() {
         XCTAssertEqual(
             AccessibilityPromptDecision.decide(isAuthorized: false, hasShownSystemPrompt: true),
