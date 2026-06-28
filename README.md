@@ -57,7 +57,7 @@ On first launch, grant Microphone and Accessibility. Open the menubar's Models m
 
 - **Fully local.** Audio never leaves your Mac.
 - **Pastes at the cursor.** Straight into the focused field, or the clipboard if an app blocks it.
-- **Bring your own model.** Ships with tiny/small/medium/large-v3-turbo, or load any whisper.cpp ggml model.
+- **Bring your own model.** Download a built-in size (tiny/small/medium/large-v3-turbo), or load any whisper.cpp ggml model.
 - **Stays warm.** Keeps the model in memory between recordings, unloads it after idle. GPU by default, CPU fallback.
 - **Custom vocabulary.** Teach it the names, jargon, and acronyms you use.
 - **Local history.** Last 100 transcripts, searchable, on-device. One switch wipes them.
