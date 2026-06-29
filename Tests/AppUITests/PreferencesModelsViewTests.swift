@@ -38,6 +38,62 @@ final class PreferencesModelsViewTests: XCTestCase {
             "Status label must be wide enough to show 'Download cancelled' without truncation"
         )
     }
+
+    @MainActor
+    func testActionControlsFitWhenCancelDownloadIsVisibleAtMinimumWidth() {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 440, height: 320)
+        view.update(rows: [
+            PreferencesModelRow(
+                id: "ggml-small.en",
+                displayName: "Small (English)",
+                isInstalled: true,
+                isSelected: true,
+                isDownloading: false,
+                isCancelled: false,
+                downloadProgressText: nil
+            ),
+        ], downloadableModels: [], isDownloadInProgress: true)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(view.visibleActionControlsWithinBounds)
+    }
+
+    @MainActor
+    func testSelectedIndicatorUsesCompactActionSlot() throws {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 480, height: 320)
+        view.update(rows: [
+            PreferencesModelRow(
+                id: "ggml-small.en",
+                displayName: "Small (English)",
+                isInstalled: true,
+                isSelected: true,
+                isDownloading: false,
+                isCancelled: false,
+                downloadProgressText: nil
+            ),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(try XCTUnwrap(view.visibleSelectedIndicatorWidth), 28, accuracy: 0.5)
+    }
 }
 
 private extension NSView {

@@ -26,6 +26,9 @@ final class PreferencesModelsView: NSView {
     private var listHeightConstraint: NSLayoutConstraint?
     private var twoLineRowCount = 0
     private var selectedRowHasAction = false
+    private var selectedIndicatorView: NSView?
+    private let rowActionWidth: CGFloat = 86
+    private let selectedIndicatorWidth: CGFloat = 28
 
     var listIsTopAnchored: Bool {
         modelsStack.superview?.isFlipped == true
@@ -39,10 +42,24 @@ final class PreferencesModelsView: NSView {
         selectedRowHasAction
     }
 
+    var visibleActionControlsWithinBounds: Bool {
+        [addButton, revealButton, deleteButton, cancelButton, findModelsButton]
+            .filter { !$0.isHidden }
+            .allSatisfy {
+                bounds.contains(convert($0.bounds, from: $0))
+            }
+    }
+
+    var visibleSelectedIndicatorWidth: CGFloat? {
+        selectedIndicatorView?.frame.width
+    }
+
     var isCriticalContentWithinBounds: Bool {
-        [listView, deleteButton].allSatisfy {
-            bounds.contains(convert($0.bounds, from: $0))
-        }
+        [listView, deleteButton]
+            .filter { !$0.isHidden }
+            .allSatisfy {
+                bounds.contains(convert($0.bounds, from: $0))
+            }
     }
 
     init(
@@ -130,7 +147,8 @@ final class PreferencesModelsView: NSView {
 
         let buttonRow = NSStackView(views: [addButton, revealButton, NSView(), deleteButton, cancelButton])
         buttonRow.orientation = .horizontal
-        buttonRow.spacing = 8
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 6
 
         let helpLabel = NSTextField(labelWithString: "Bring your own: any whisper.cpp ggml .bin.")
         helpLabel.font = .systemFont(ofSize: 11)
@@ -140,7 +158,7 @@ final class PreferencesModelsView: NSView {
         let helpRow = NSStackView(views: [helpLabel, findModelsButton, NSView()])
         helpRow.orientation = .horizontal
         helpRow.alignment = .centerY
-        helpRow.spacing = 6
+        helpRow.spacing = 5
 
         let page = PreferencesPageSupport.makePage(
             title: "Models",
@@ -159,10 +177,12 @@ final class PreferencesModelsView: NSView {
     func update(rows: [PreferencesModelRow], downloadableModels: [DownloadableModel], isDownloadInProgress: Bool) {
         downloadableModelsByID = Dictionary(uniqueKeysWithValues: downloadableModels.map { ($0.id, $0) })
         deleteButton.isEnabled = rows.contains { $0.isSelected && $0.isInstalled }
+        deleteButton.isHidden = isDownloadInProgress
         cancelButton.isEnabled = isDownloadInProgress
         cancelButton.isHidden = !isDownloadInProgress
         twoLineRowCount = rows.count
         selectedRowHasAction = false
+        selectedIndicatorView = nil
         listHeightConstraint?.constant = min(300, max(140, CGFloat(rows.count) * 64))
 
         for arrangedSubview in modelsStack.arrangedSubviews {
@@ -219,11 +239,17 @@ final class PreferencesModelsView: NSView {
             ) ?? NSImage())
             checkmark.contentTintColor = .systemBlue
             checkmark.symbolConfiguration = .init(pointSize: 13, weight: .medium)
+            checkmark.setContentHuggingPriority(.required, for: .horizontal)
+            checkmark.setContentCompressionResistancePriority(.required, for: .horizontal)
+            checkmark.translatesAutoresizingMaskIntoConstraints = false
+            checkmark.widthAnchor.constraint(equalToConstant: selectedIndicatorWidth).isActive = true
             actionArea = checkmark
+            selectedIndicatorView = checkmark
         } else {
             let actionButton = NSButton(title: row.actionTitle, target: self, action: nil)
             actionButton.identifier = NSUserInterfaceItemIdentifier(row.id)
             PreferencesPageSupport.configureSecondaryButton(actionButton)
+            actionButton.setContentCompressionResistancePriority(.required, for: .horizontal)
             if row.isInstalled {
                 actionButton.action = #selector(selectModelAction(_:))
                 actionButton.isEnabled = row.canSelect
@@ -231,10 +257,10 @@ final class PreferencesModelsView: NSView {
                 actionButton.action = #selector(downloadModelAction(_:))
                 actionButton.isEnabled = row.canDownload && !isDownloadBlocked
             }
+            actionButton.translatesAutoresizingMaskIntoConstraints = false
+            actionButton.widthAnchor.constraint(equalToConstant: rowActionWidth).isActive = true
             actionArea = actionButton
         }
-        actionArea.translatesAutoresizingMaskIntoConstraints = false
-        actionArea.widthAnchor.constraint(equalToConstant: 88).isActive = true
 
         let topLine = NSStackView(views: [nameLabel, NSView(), statusLabel, actionArea])
         topLine.orientation = .horizontal
@@ -248,8 +274,8 @@ final class PreferencesModelsView: NSView {
         let rowStack = NSStackView(views: [topLine, detailLine])
         rowStack.orientation = .vertical
         rowStack.alignment = .width
-        rowStack.spacing = 3
-        rowStack.edgeInsets = NSEdgeInsets(top: 9, left: 14, bottom: 9, right: 14)
+        rowStack.spacing = 2
+        rowStack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 12)
         return rowStack
     }
 
