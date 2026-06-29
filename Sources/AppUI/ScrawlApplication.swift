@@ -320,7 +320,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             selectedModelID: settings.modelID,
             downloadingModelID: downloadingModelID,
             cancelledModelID: cancelledModelID,
-            downloadProgressText: currentDownloadProgressText
+            downloadProgressText: currentDownloadProgressText,
+            includeParakeet: LocalModelManager.isParakeetAvailable
         )
 
         preferencesWindowController.update(

@@ -44,7 +44,7 @@ enum PreferencesModelState {
         downloadingModelID: String?,
         cancelledModelID: String? = nil,
         downloadProgressText: String? = nil,
-        includeParakeet: Bool = LocalModelManager.isParakeetAvailable
+        includeParakeet: Bool = false
     ) -> [PreferencesModelRow] {
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
