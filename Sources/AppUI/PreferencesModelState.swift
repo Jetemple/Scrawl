@@ -6,19 +6,41 @@ struct PreferencesModelRow: Equatable, Sendable {
     let isInstalled: Bool
     let isSelected: Bool
     let isDownloading: Bool
+    let isPreparing: Bool
     let isCancelled: Bool
     /// Non-nil only while this row's model is being downloaded, e.g. "25% (412/1621 MB)".
     let downloadProgressText: String?
 
+    init(
+        id: String,
+        displayName: String,
+        isInstalled: Bool,
+        isSelected: Bool,
+        isDownloading: Bool,
+        isPreparing: Bool = false,
+        isCancelled: Bool,
+        downloadProgressText: String?
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.isInstalled = isInstalled
+        self.isSelected = isSelected
+        self.isDownloading = isDownloading
+        self.isPreparing = isPreparing
+        self.isCancelled = isCancelled
+        self.downloadProgressText = downloadProgressText
+    }
+
     var canDownload: Bool {
-        !isInstalled && !isDownloading
+        !isInstalled && !isDownloading && !isPreparing
     }
 
     var canSelect: Bool {
-        isInstalled && !isSelected && !isDownloading
+        isInstalled && !isSelected && !isDownloading && !isPreparing
     }
 
     var statusText: String {
+        if isPreparing { return "Preparing" }
         if isDownloading { return "Downloading" }
         // Installed/selected truth wins over a stale cancelled flag: a model that is
         // actually on disk is never "cancelled", even if a cancel raced its install.
@@ -29,6 +51,7 @@ struct PreferencesModelRow: Equatable, Sendable {
     }
 
     var actionTitle: String {
+        if isPreparing { return "Preparing" }
         if isDownloading { return "Downloading" }
         if isSelected { return "Selected" }
         if isInstalled { return "Use" }
@@ -44,7 +67,8 @@ enum PreferencesModelState {
         downloadingModelID: String?,
         cancelledModelID: String? = nil,
         downloadProgressText: String? = nil,
-        includeParakeet: Bool = false
+        includeParakeet: Bool = false,
+        parakeetPreparationProgressText: String? = nil
     ) -> [PreferencesModelRow] {
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
@@ -67,8 +91,9 @@ enum PreferencesModelState {
                     isInstalled: true,
                     isSelected: selectedModelID == LocalModelManager.parakeetModelID,
                     isDownloading: false,
+                    isPreparing: parakeetPreparationProgressText != nil,
                     isCancelled: false,
-                    downloadProgressText: nil
+                    downloadProgressText: parakeetPreparationProgressText
                 )
             )
         }

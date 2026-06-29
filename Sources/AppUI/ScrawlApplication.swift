@@ -128,6 +128,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var currentDownloadProgressText: String?
     private var modelDownloadGeneration: UUID?
     private var modelDownloadTask: Task<Void, Never>?
+    private var parakeetPreparationState = ParakeetPreparationState()
+    private var parakeetPreparationGeneration: UUID?
+    private var parakeetPreparationTask: Task<Void, Never>?
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
     private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
@@ -168,9 +171,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
         setStatus("Idle")
         updateStatusIcon()
+        startParakeetPreloadIfNeeded()
     }
 
     func applicationWillTerminate(_: Notification) {
+        parakeetPreparationTask?.cancel()
+        parakeetPreparationTask = nil
         if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
             let shutdownComplete = DispatchSemaphore(value: 0)
             Task {
@@ -321,7 +327,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             downloadingModelID: downloadingModelID,
             cancelledModelID: cancelledModelID,
             downloadProgressText: currentDownloadProgressText,
-            includeParakeet: LocalModelManager.isParakeetAvailable
+            includeParakeet: LocalModelManager.isParakeetAvailable,
+            parakeetPreparationProgressText: parakeetPreparationState.modelRowProgressText
         )
 
         preferencesWindowController.update(
@@ -723,6 +730,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 $0.defaultModelID = modelID
             }
         }
+        if modelID == LocalModelManager.parakeetModelID {
+            startParakeetPreloadIfNeeded()
+        } else {
+            cancelParakeetPreparation()
+        }
         setStatus("Selected model: \(modelID)")
     }
 
@@ -938,7 +950,23 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
         let settings = runtime.settingsStore.load()
         if settings.modelID == LocalModelManager.parakeetModelID, LocalModelManager.isParakeetAvailable {
-            return true
+            if let failureMessage = parakeetPreparationState.failureMessage {
+                presentParakeetSetupFailure(details: failureMessage)
+                return false
+            }
+            switch ParakeetDictationReadiness.evaluate(
+                selectedModelID: settings.modelID,
+                isParakeetAvailable: LocalModelManager.isParakeetAvailable,
+                preparationState: parakeetPreparationState
+            ) {
+            case .ready:
+                return true
+            case let .notReady(message):
+                startParakeetPreloadIfNeeded()
+                runtime.overlayController.showTransientMessage(message)
+                setStatus(message)
+                return false
+            }
         }
 
         if modelManager.modelExists(id: settings.modelID) {
@@ -1107,6 +1135,122 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             }
         }
         return LocalModelManager.downloadableModels.first
+    }
+
+    private func startParakeetPreloadIfNeeded() {
+        let settings = runtime.settingsStore.load()
+        guard ParakeetPreloadPolicy.shouldPreload(
+            selectedModelID: settings.modelID,
+            isParakeetAvailable: LocalModelManager.isParakeetAvailable
+        ) else {
+            return
+        }
+        guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
+            return
+        }
+        guard let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider else {
+            return
+        }
+
+        let generation = UUID()
+        parakeetPreparationGeneration = generation
+        parakeetPreparationState.apply(.started)
+        publishParakeetPreparationState()
+
+        parakeetPreparationTask = Task { [weak self] in
+            do {
+                try await provider.prepareModel(
+                    modelID: settings.modelID,
+                    language: settings.language,
+                    progressHandler: { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            self?.applyParakeetPreparationEvent(
+                                .progress(ParakeetPreparationProgress(progress)),
+                                generation: generation
+                            )
+                        }
+                    }
+                )
+                await MainActor.run { [weak self] in
+                    self?.applyParakeetPreparationEvent(.ready, generation: generation)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    if error is CancellationError { return }
+                    applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
+                    presentParakeetSetupFailure(details: describe(error))
+                }
+            }
+        }
+    }
+
+    private func cancelParakeetPreparation() {
+        parakeetPreparationTask?.cancel()
+        parakeetPreparationTask = nil
+        parakeetPreparationGeneration = nil
+        parakeetPreparationState = ParakeetPreparationState()
+        refreshPreferencesWindow()
+    }
+
+    private func applyParakeetPreparationEvent(_ event: ParakeetPreparationEvent, generation: UUID) {
+        guard parakeetPreparationGeneration == generation else { return }
+        parakeetPreparationState.apply(event)
+        if event == .ready {
+            parakeetPreparationGeneration = nil
+            parakeetPreparationTask = nil
+            setStatus("Parakeet ready")
+        } else {
+            publishParakeetPreparationState()
+        }
+    }
+
+    private func publishParakeetPreparationState() {
+        if let statusText = parakeetPreparationState.statusText {
+            setStatus(statusText)
+        }
+        refreshPreferencesWindow()
+    }
+
+    private func presentParakeetSetupFailure(details: String) {
+        let response = presentAlert(
+            title: "Parakeet setup failed",
+            message: """
+            Scrawl could not download or prepare Parakeet.
+
+            \(details)
+            """,
+            primaryButton: "Switch to Whisper",
+            secondaryButton: "Not Now"
+        )
+        if response == .alertFirstButtonReturn {
+            switchToWhisperFallbackAfterParakeetFailure()
+        }
+    }
+
+    private func switchToWhisperFallbackAfterParakeetFailure() {
+        if let installed = modelManager.installedModelIDs().first {
+            mutateSettings {
+                $0.selectedModelID = installed
+                if $0.defaultModelID.isEmpty || $0.defaultModelID == LocalModelManager.parakeetModelID {
+                    $0.defaultModelID = installed
+                }
+            }
+            setStatus("Selected model: \(installed)")
+            return
+        }
+
+        guard let recommendedModel = preferredInitialDownloadModel() else {
+            setStatus("No Whisper model available")
+            return
+        }
+        mutateSettings {
+            $0.selectedModelID = recommendedModel.id
+            if $0.defaultModelID.isEmpty || $0.defaultModelID == LocalModelManager.parakeetModelID {
+                $0.defaultModelID = recommendedModel.id
+            }
+        }
+        startModelDownload(recommendedModel)
     }
 
     private func applyRecommendedModelDefaultsIfNeeded() {
@@ -1823,9 +1967,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         statusLineItem?.isHidden = false
         statusLineItem?.title = "Status: \(text)"
+        if !isCapturingHotkey {
+            statusItem?.button?.toolTip = "Scrawl: \(text)"
+        }
 
         let isOngoing = Self.ongoingStatuses.contains(text)
             || text.hasPrefix("Downloading ")
+            || text.hasPrefix("Preparing Parakeet")
             || text.hasPrefix("Loading model:")
             || text.hasPrefix("Transcribing with ")
             || text.hasPrefix("Retrying on CPU")

@@ -20,6 +20,16 @@ struct ParakeetPreparationProgress: Equatable, Sendable {
         self.fractionCompleted = fractionCompleted
         self.phase = phase
     }
+
+    init(_ progress: ModelPreparationProgress) {
+        fractionCompleted = progress.fractionCompleted
+        phase = switch progress.phase {
+        case .checkingCache, .downloading:
+            .downloading
+        case .optimizing:
+            .optimizing
+        }
+    }
 }
 
 enum ParakeetPreparationEvent: Equatable, Sendable {
@@ -122,9 +132,9 @@ enum ParakeetDictationReadiness: Equatable {
         ) else {
             return .ready
         }
-        if preparationState.isPreparing {
-            return .notReady(message: "Parakeet is still setting up — ready shortly")
+        if preparationState.isReady {
+            return .ready
         }
-        return .ready
+        return .notReady(message: "Parakeet is still setting up — ready shortly")
     }
 }

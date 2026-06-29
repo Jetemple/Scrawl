@@ -18,6 +18,24 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(rows[0].canDownload)
     }
 
+    func testRowsShowParakeetPreparationProgressWhenPreparing() throws {
+        let rows = PreferencesModelState.rows(
+            downloadableModels: [],
+            installedModelIDs: [],
+            selectedModelID: "parakeet-v3",
+            downloadingModelID: nil,
+            includeParakeet: true,
+            parakeetPreparationProgressText: "Downloading model 37%"
+        )
+
+        XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
+        XCTAssertTrue(rows[0].isInstalled)
+        XCTAssertTrue(rows[0].isSelected)
+        XCTAssertTrue(rows[0].isPreparing)
+        XCTAssertEqual(rows[0].statusText, "Preparing")
+        XCTAssertEqual(rows[0].downloadProgressText, "Downloading model 37%")
+    }
+
     func testRowsHideParakeetModelWhenUnavailable() {
         let rows = PreferencesModelState.rows(
             downloadableModels: [],
