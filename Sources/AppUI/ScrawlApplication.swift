@@ -750,31 +750,22 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     @objc private func deleteSelectedModel(_: Any?) {
         let selected = runtime.settingsStore.load().selectedModelID
+        let parakeetCache = LiveParakeetModelCacheStore()
 
-        guard modelManager.modelExists(id: selected) else {
+        guard let target = ModelDeletionCoordinator.target(
+            selectedModelID: selected,
+            whisperStore: modelManager,
+            parakeetCache: parakeetCache
+        ) else {
             setStatus("No installed model to delete")
             return
         }
 
         // Build confirmation alert matching existing NSAlert style in this file.
-        let catalogModel = LocalModelManager.downloadableModels.first(where: { $0.id == selected })
-        let isBuiltIn = catalogModel != nil
-        let displayName = catalogModel?.displayName
-            ?? selected.replacingOccurrences(of: "ggml-", with: "")
-
-        let modelURL = modelManager.modelURL(id: selected)
-        var sizeNote = ""
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
-           let bytes = attrs[.size] as? Int64, bytes > 0
-        {
-            let mb = Double(bytes) / (1024 * 1024)
-            sizeNote = " (\(String(format: "%.0f", mb)) MB)"
-        }
-
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Delete \"\(displayName)\"?"
-        alert.informativeText = ModelDeletionPrompt.informativeText(sizeNote: sizeNote, isBuiltIn: isBuiltIn)
+        alert.messageText = "Delete \"\(target.displayName)\"?"
+        alert.informativeText = ModelDeletionPrompt.informativeText(sizeNote: target.sizeNote, isBuiltIn: target.isBuiltIn)
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -783,9 +774,15 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         do {
-            try modelManager.deleteModel(id: selected)
-            let installed = modelManager.installedModelIDs()
-            if let fallback = installed.first {
+            let result = try ModelDeletionCoordinator.deleteTarget(
+                target,
+                whisperStore: modelManager,
+                parakeetCache: parakeetCache
+            )
+            if result.resetParakeetPreparation {
+                cancelParakeetPreparation()
+            }
+            if let fallback = result.fallbackModelID {
                 mutateSettings { settings in
                     settings.selectedModelID = fallback
                 }

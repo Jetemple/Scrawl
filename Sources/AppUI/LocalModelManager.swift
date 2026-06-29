@@ -1,4 +1,5 @@
 import Foundation
+import ParakeetProvider
 import TranscriptionCore
 
 struct DownloadableModel: Equatable, Sendable {
@@ -219,6 +220,11 @@ final class LocalModelManager: @unchecked Sendable {
     }
 
     func modelExists(id: String) -> Bool {
+        #if arch(arm64)
+        if id == Self.parakeetModelID {
+            return ParakeetTranscriptionProvider.parakeetV3CacheExists()
+        }
+        #endif
         let path = modelsDirectoryURL.appendingPathComponent("\(id).bin")
         return FileManager.default.fileExists(atPath: path.path)
     }
@@ -245,7 +251,23 @@ final class LocalModelManager: @unchecked Sendable {
         modelsDirectoryURL.appendingPathComponent("\(id).bin")
     }
 
+    func modelSizeBytes(id: String) -> Int64? {
+        #if arch(arm64)
+        if id == Self.parakeetModelID {
+            return ParakeetTranscriptionProvider.parakeetV3CacheSizeBytes()
+        }
+        #endif
+        let url = modelURL(id: id)
+        return Self.fileSizeBytes(at: url)
+    }
+
     func deleteModel(id: String) throws {
+        #if arch(arm64)
+        if id == Self.parakeetModelID {
+            _ = try ParakeetTranscriptionProvider.deleteParakeetV3Cache()
+            return
+        }
+        #endif
         let url = modelURL(id: id)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return
@@ -575,6 +597,44 @@ final class LocalModelManager: @unchecked Sendable {
             return description
         }
         return String(describing: error)
+    }
+}
+
+extension LocalModelManager: WhisperModelDeletionStore {
+    func whisperModelExists(id: String) -> Bool {
+        let path = modelsDirectoryURL.appendingPathComponent("\(id).bin")
+        return FileManager.default.fileExists(atPath: path.path)
+    }
+
+    func whisperModelSizeBytes(id: String) -> Int64? {
+        Self.fileSizeBytes(at: modelURL(id: id))
+    }
+
+    func installedWhisperModelIDs() -> [String] {
+        installedModelIDs()
+    }
+
+    func deleteWhisperModel(id: String) throws {
+        let url = modelURL(id: id)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: url)
+    }
+}
+
+private extension LocalModelManager {
+    static func fileSizeBytes(at url: URL) -> Int64? {
+        guard let rawSize = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] else {
+            return nil
+        }
+        if let size = rawSize as? Int64 {
+            return size
+        }
+        if let size = rawSize as? NSNumber {
+            return size.int64Value
+        }
+        return nil
     }
 }
 
