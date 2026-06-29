@@ -935,20 +935,28 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
-        if !FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) {
-            setStatus("whisper-cli missing")
-            presentWhisperMissingAlert()
-            return false
+        let settings = runtime.settingsStore.load()
+        if settings.modelID == LocalModelManager.parakeetModelID, LocalModelManager.isParakeetAvailable {
+            return true
         }
 
-        let settings = runtime.settingsStore.load()
         if modelManager.modelExists(id: settings.modelID) {
+            guard FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) else {
+                setStatus("whisper-cli missing")
+                presentWhisperMissingAlert()
+                return false
+            }
             return true
         }
 
         let installed = modelManager.installedModelIDs()
         if let fallback = installed.first {
             mutateSettings { $0.selectedModelID = fallback }
+            guard FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) else {
+                setStatus("whisper-cli missing")
+                presentWhisperMissingAlert()
+                return false
+            }
             return true
         }
 
@@ -1679,13 +1687,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let settings = runtime.settingsStore.load()
 
         let installed = modelManager.installedModelIDs()
-        if installed.isEmpty {
+        let installedMenuModelIDs = LocalModelManager.isParakeetAvailable
+            ? [LocalModelManager.parakeetModelID] + installed
+            : installed
+        if installedMenuModelIDs.isEmpty {
             let empty = NSMenuItem(title: "No installed models", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             modelsSubmenu.addItem(empty)
         } else {
-            for modelID in installed {
-                let displayName = modelID.replacingOccurrences(of: "ggml-", with: "")
+            for modelID in installedMenuModelIDs {
+                let displayName = PreferencesModelState.displayName(forInstalledModelID: modelID)
                 let item = NSMenuItem(title: displayName, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = modelID

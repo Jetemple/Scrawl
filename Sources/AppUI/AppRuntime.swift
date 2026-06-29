@@ -9,6 +9,7 @@ import SettingsStore
 import TextOutput
 import TranscriptHistoryStore
 import TranscriptionCore
+import ParakeetProvider
 import WhisperCppProvider
 
 public struct AppRuntime {
@@ -69,6 +70,21 @@ public struct AppRuntime {
         let dictionaryURL = appSupportDirectory.appending(path: "dictionary.json")
         let historyURL = appSupportDirectory.appending(path: "history.json")
 
+        let whisperProvider = WhisperCppProvider(
+            config: WhisperCppConfig(
+                executableURL: executableURL,
+                modelsDirectoryURL: modelsDir,
+                disableGPU: disableGPU,
+                threads: threadCount,
+                idleOffloadSeconds: settings.modelOffloadPolicy.idleSeconds
+            )
+        )
+        #if arch(arm64)
+        let parakeetProvider: (any TranscriptionProvider)? = ParakeetTranscriptionProvider()
+        #else
+        let parakeetProvider: (any TranscriptionProvider)? = nil
+        #endif
+
         return AppRuntime(
             permissionManager: PermissionManager(),
             settingsStore: settingsStore,
@@ -78,14 +94,9 @@ public struct AppRuntime {
             textOutputTarget: PasteboardTextOutput(),
             dictionaryStore: JSONDictionaryStore(fileURL: dictionaryURL),
             transcriptHistoryStore: JSONTranscriptHistoryStore(fileURL: historyURL),
-            whisperProvider: WhisperCppProvider(
-                config: WhisperCppConfig(
-                    executableURL: executableURL,
-                    modelsDirectoryURL: modelsDir,
-                    disableGPU: disableGPU,
-                    threads: threadCount,
-                    idleOffloadSeconds: settings.modelOffloadPolicy.idleSeconds
-                )
+            whisperProvider: RoutingTranscriptionProvider(
+                whisperProvider: whisperProvider,
+                parakeetProvider: parakeetProvider
             ),
             modelsDirectoryURL: modelsDir,
             whisperExecutableURL: executableURL,
@@ -208,11 +219,15 @@ public struct AppRuntime {
     }
 
     static func resolveRecommendedDefaultModelID() -> String {
+        #if arch(arm64)
+        return TranscriptionModelID.parakeetV3
+        #else
         // First-run onboarding favors a fast, lightweight download. `small.en` (466 MB) is far
         // smaller and faster than the multilingual `medium` (1.5 GB), and the app is English-only
         // today, so `medium` would be strictly heavier with no benefit. Larger/multilingual models
         // remain one-click upgrades in the Models menu.
-        "ggml-small.en"
+        return "ggml-small.en"
+        #endif
     }
 
     private static func parseEnvironmentBool(_ rawValue: String) -> Bool? {

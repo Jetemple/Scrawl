@@ -1,4 +1,5 @@
 import Foundation
+import TranscriptionCore
 
 struct DownloadableModel: Equatable, Sendable {
     let id: String
@@ -586,6 +587,17 @@ private extension NSLock {
 }
 
 extension LocalModelManager {
+    static let parakeetModelID = TranscriptionModelID.parakeetV3
+    static let parakeetDisplayName = "Parakeet v3 — recommended"
+
+    static var isParakeetAvailable: Bool {
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     static let downloadableModels: [DownloadableModel] = [
         DownloadableModel(
             id: "ggml-tiny.en",

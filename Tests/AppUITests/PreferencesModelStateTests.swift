@@ -2,6 +2,34 @@
 import XCTest
 
 final class PreferencesModelStateTests: XCTestCase {
+    func testRowsIncludeParakeetModelWhenAvailable() throws {
+        let rows = PreferencesModelState.rows(
+            downloadableModels: [],
+            installedModelIDs: [],
+            selectedModelID: "parakeet-v3",
+            downloadingModelID: nil,
+            includeParakeet: true
+        )
+
+        XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
+        XCTAssertEqual(rows[0].displayName, "Parakeet v3 — recommended")
+        XCTAssertTrue(rows[0].isInstalled)
+        XCTAssertTrue(rows[0].isSelected)
+        XCTAssertFalse(rows[0].canDownload)
+    }
+
+    func testRowsHideParakeetModelWhenUnavailable() {
+        let rows = PreferencesModelState.rows(
+            downloadableModels: [],
+            installedModelIDs: [],
+            selectedModelID: "parakeet-v3",
+            downloadingModelID: nil,
+            includeParakeet: false
+        )
+
+        XCTAssertTrue(rows.isEmpty)
+    }
+
     func testRowsMarkSelectedInstalledAndDownloadingModels() throws {
         let rows = try PreferencesModelState.rows(
             downloadableModels: [

@@ -43,7 +43,8 @@ enum PreferencesModelState {
         selectedModelID: String,
         downloadingModelID: String?,
         cancelledModelID: String? = nil,
-        downloadProgressText: String? = nil
+        downloadProgressText: String? = nil,
+        includeParakeet: Bool = LocalModelManager.isParakeetAvailable
     ) -> [PreferencesModelRow] {
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
@@ -57,7 +58,22 @@ enum PreferencesModelState {
         let downloadableIDs = Set(downloadableModels.map(\.id))
         let downloadableFamilies = Set(downloadableModels.map { canonicalFamily($0.id) })
 
-        var rows = downloadableModels.map { model in
+        var rows: [PreferencesModelRow] = []
+        if includeParakeet {
+            rows.append(
+                PreferencesModelRow(
+                    id: LocalModelManager.parakeetModelID,
+                    displayName: LocalModelManager.parakeetDisplayName,
+                    isInstalled: true,
+                    isSelected: selectedModelID == LocalModelManager.parakeetModelID,
+                    isDownloading: false,
+                    isCancelled: false,
+                    downloadProgressText: nil
+                )
+            )
+        }
+
+        rows.append(contentsOf: downloadableModels.map { model in
             let installedModelID = installedIDs.contains(model.id) ? model.id : installedIDByFamily[canonicalFamily(model.id)]
             let rowModelID = installedModelID ?? model.id
             let isInstalled = installedModelID != nil
@@ -74,7 +90,7 @@ enum PreferencesModelState {
                 isCancelled: isCancelled,
                 downloadProgressText: isDownloading ? downloadProgressText : nil
             )
-        }
+        })
 
         let customRows = installedModelIDs
             .filter { !downloadableIDs.contains($0) && !downloadableFamilies.contains(canonicalFamily($0)) }
@@ -97,7 +113,10 @@ enum PreferencesModelState {
     }
 
     static func displayName(forInstalledModelID modelID: String) -> String {
-        modelID.replacingOccurrences(of: "ggml-", with: "")
+        if modelID == LocalModelManager.parakeetModelID {
+            return "Parakeet v3"
+        }
+        return modelID.replacingOccurrences(of: "ggml-", with: "")
     }
 
     /// Strips the `ggml-` prefix and `.bin` extension so that files stored with

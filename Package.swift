@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "HotkeyEngine", targets: ["HotkeyEngine"]),
         .library(name: "AudioCapture", targets: ["AudioCapture"]),
         .library(name: "TranscriptionCore", targets: ["TranscriptionCore"]),
+        .library(name: "ParakeetProvider", targets: ["ParakeetProvider"]),
         .library(name: "WhisperCppProvider", targets: ["WhisperCppProvider"]),
         .library(name: "TextOutput", targets: ["TextOutput"]),
         .library(name: "DictionaryStore", targets: ["DictionaryStore"]),
@@ -19,6 +20,12 @@ let package = Package(
         .library(name: "SettingsStore", targets: ["SettingsStore"]),
         .library(name: "Permissions", targets: ["Permissions"]),
         .library(name: "RecordingOverlay", targets: ["RecordingOverlay"])
+    ],
+    dependencies: [
+        .package(
+            url: "https://github.com/FluidInference/FluidAudio.git",
+            revision: "a95ec26ee05f19b5f6e69c62e1d4fae420537730"
+        )
     ],
     targets: [
         .executableTarget(
@@ -51,12 +58,20 @@ let package = Package(
                 "TextOutput",
                 "TranscriptHistoryStore",
                 "TranscriptionCore",
+                "ParakeetProvider",
                 "WhisperCppProvider"
             ]
         ),
         .target(name: "HotkeyEngine"),
         .target(name: "AudioCapture"),
         .target(name: "TranscriptionCore"),
+        .target(
+            name: "ParakeetProvider",
+            dependencies: [
+                "TranscriptionCore",
+                .product(name: "FluidAudio", package: "FluidAudio")
+            ]
+        ),
         .target(
             name: "WhisperCppProvider",
             dependencies: [
@@ -112,6 +127,22 @@ let package = Package(
             name: "WhisperCppProviderTests",
             dependencies: [
                 "WhisperCppProvider"
+            ]
+        ),
+        .testTarget(
+            name: "ParakeetProviderTests",
+            dependencies: [
+                "ParakeetProvider"
+            ],
+            resources: [
+                .copy("Fixtures/clip5.wav")
+            ]
+        ),
+        .testTarget(
+            name: "RoutingTranscriptionProviderTests",
+            dependencies: [
+                "ParakeetProvider",
+                "TranscriptionCore"
             ]
         ),
         .testTarget(

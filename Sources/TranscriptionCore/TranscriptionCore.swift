@@ -58,6 +58,10 @@ public enum TranscriptionError: Error {
     case timedOut(seconds: Int)
 }
 
+public enum TranscriptionModelID {
+    public static let parakeetV3 = "parakeet-v3"
+}
+
 extension TranscriptionError: LocalizedError {
     public var errorDescription: String? {
         switch self {
