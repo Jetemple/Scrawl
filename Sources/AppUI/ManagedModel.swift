@@ -74,10 +74,7 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
     }
 
     var displayName: String {
-        if let downloadableModel {
-            return downloadableModel.displayName
-        }
-        return PreferencesModelState.displayName(forInstalledModelID: id)
+        PreferencesModelState.displayName(forModelID: id)
     }
 
     var isAvailable: Bool { true }
@@ -134,7 +131,7 @@ final class ParakeetManagedModel: ManagedModel, @unchecked Sendable {
     }
 
     var id: String { TranscriptionModelID.parakeetV3 }
-    var displayName: String { "Parakeet v3 — recommended" }
+    var displayName: String { PreferencesModelState.displayName(forModelID: id) }
     var isAvailable: Bool { true }
     var preparesOnSelection: Bool { true }
 

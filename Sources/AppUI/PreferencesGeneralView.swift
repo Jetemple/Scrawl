@@ -120,7 +120,7 @@ final class PreferencesGeneralView: NSView {
         isCapturingHotkey: Bool,
         launchAtLoginEnabled: Bool
     ) {
-        modelLabel.stringValue = PreferencesModelState.displayName(forInstalledModelID: settings.modelID)
+        modelLabel.stringValue = PreferencesModelState.displayName(forModelID: settings.modelID)
         hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input..." : settings.hotkey.displayName
         updatePermissionLabel(microphoneLabel, status: microphoneStatus)
         updatePermissionLabel(accessibilityLabel, status: accessibilityStatus)

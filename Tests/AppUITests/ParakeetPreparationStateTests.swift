@@ -8,18 +8,18 @@ final class ParakeetPreparationStateTests: XCTestCase {
 
         state.apply(.started)
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Preparing Parakeet...")
-        XCTAssertEqual(state.modelRowProgressText, "Setting up")
+        XCTAssertEqual(state.statusText, "Setting up Parakeet (one-time)…")
+        XCTAssertEqual(state.modelRowProgressText, "Preparing")
 
         state.apply(.progress(.init(ModelPreparationProgress(fractionCompleted: 0.5, phase: .checkingCache))))
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Preparing Parakeet...")
-        XCTAssertEqual(state.modelRowProgressText, "Setting up")
+        XCTAssertEqual(state.statusText, "Loading Parakeet…")
+        XCTAssertEqual(state.modelRowProgressText, "Preparing")
 
         state.apply(.progress(.init(ModelPreparationProgress(fractionCompleted: 0.75, phase: .optimizing))))
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Preparing Parakeet: Optimizing for your Mac...")
-        XCTAssertEqual(state.modelRowProgressText, "Optimizing for your Mac...")
+        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac…")
+        XCTAssertEqual(state.modelRowProgressText, "Preparing")
 
         state.apply(.ready)
         XCTAssertFalse(state.isPreparing)
@@ -34,20 +34,20 @@ final class ParakeetPreparationStateTests: XCTestCase {
         state.apply(.started)
         state.apply(.progress(.init(fractionCompleted: 0.50, phase: .downloading)))
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Preparing Parakeet: Downloading Parakeet model 50%")
-        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model 50%")
+        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 50%")
+        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model — 50%")
 
         state.apply(.progress(.init(fractionCompleted: 0.25, phase: .downloading)))
-        XCTAssertEqual(state.statusText, "Preparing Parakeet: Downloading Parakeet model 50%")
-        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model 50%")
+        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 50%")
+        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model — 50%")
 
         state.apply(.progress(.init(fractionCompleted: 1.0, phase: .downloading)))
-        XCTAssertEqual(state.statusText, "Preparing Parakeet: Downloading Parakeet model 100%")
-        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model 100%")
+        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 100%")
+        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model — 100%")
 
         state.apply(.progress(.init(fractionCompleted: nil, phase: .optimizing)))
-        XCTAssertEqual(state.statusText, "Preparing Parakeet: Optimizing for your Mac...")
-        XCTAssertEqual(state.modelRowProgressText, "Optimizing for your Mac...")
+        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac…")
+        XCTAssertEqual(state.modelRowProgressText, "Preparing")
 
         state.apply(.ready)
         XCTAssertFalse(state.isPreparing)
@@ -64,32 +64,35 @@ final class ParakeetPreparationStateTests: XCTestCase {
             preparationState: state
         )
 
-        XCTAssertEqual(decision, .notReady(message: "Parakeet is still setting up — ready shortly"))
+        XCTAssertEqual(
+            decision,
+            .notReady(message: "Parakeet is still setting up. Pick another model to use now, or wait a moment.")
+        )
     }
 
     func testDuplicatePreparationStatusIsSuppressedOnlyWhenConsecutiveTextMatches() {
         XCTAssertTrue(
             PreparationStatusDeduper.shouldApply(
-                "Preparing Parakeet...",
-                latestStatusText: "Selected model: parakeet-v3"
+                "Setting up Parakeet (one-time)…",
+                latestStatusText: "Selected model: Parakeet v3"
             )
         )
         XCTAssertFalse(
             PreparationStatusDeduper.shouldApply(
-                "Preparing Parakeet...",
-                latestStatusText: "Preparing Parakeet..."
+                "Setting up Parakeet (one-time)…",
+                latestStatusText: "Setting up Parakeet (one-time)…"
             )
         )
         XCTAssertTrue(
             PreparationStatusDeduper.shouldApply(
-                "Preparing Parakeet: Downloading Parakeet model 44%",
-                latestStatusText: "Preparing Parakeet: Downloading Parakeet model 43%"
+                "Downloading Parakeet model — 44%",
+                latestStatusText: "Downloading Parakeet model — 43%"
             )
         )
         XCTAssertTrue(
             PreparationStatusDeduper.shouldApply(
-                "Downloading small.en: 10%",
-                latestStatusText: "Downloading small.en: 10%"
+                "Downloading Medium: 10%",
+                latestStatusText: "Downloading Medium: 10%"
             )
         )
     }

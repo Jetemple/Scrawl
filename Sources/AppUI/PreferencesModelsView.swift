@@ -189,16 +189,12 @@ final class PreferencesModelsView: NSView {
     }
 
     private func makeModelRow(_ row: PreferencesModelRow, isDownloadBlocked: Bool) -> NSView {
-        let displayParts = row.displayName.components(separatedBy: " — ")
-        let nameLabel = NSTextField(labelWithString: displayParts.first ?? row.displayName)
+        let nameLabel = NSTextField(labelWithString: row.displayName)
         nameLabel.font = .systemFont(ofSize: 13)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let detail = displayParts.dropFirst().joined(separator: " — ")
-        let baseDetailText = detail.isEmpty ? row.statusText : detail
-        let detailText = row.downloadProgressText.map { "\(baseDetailText) — \($0)" } ?? baseDetailText
-        let detailLabel = NSTextField(labelWithString: detailText)
+        let detailLabel = NSTextField(labelWithString: row.descriptionText)
         detailLabel.font = .systemFont(ofSize: 11)
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.lineBreakMode = .byTruncatingTail

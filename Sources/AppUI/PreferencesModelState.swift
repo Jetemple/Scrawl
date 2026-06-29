@@ -3,8 +3,10 @@ import Foundation
 struct PreferencesModelRow: Equatable, Sendable {
     let id: String
     let displayName: String
+    let descriptionText: String
     let isInstalled: Bool
     let isSelected: Bool
+    let isDefault: Bool
     let isDownloading: Bool
     let isPreparing: Bool
     let isCancelled: Bool
@@ -14,8 +16,10 @@ struct PreferencesModelRow: Equatable, Sendable {
     init(
         id: String,
         displayName: String,
+        descriptionText: String = "",
         isInstalled: Bool,
         isSelected: Bool,
+        isDefault: Bool = false,
         isDownloading: Bool,
         isPreparing: Bool = false,
         isCancelled: Bool,
@@ -23,8 +27,10 @@ struct PreferencesModelRow: Equatable, Sendable {
     ) {
         self.id = id
         self.displayName = displayName
+        self.descriptionText = descriptionText
         self.isInstalled = isInstalled
         self.isSelected = isSelected
+        self.isDefault = isDefault
         self.isDownloading = isDownloading
         self.isPreparing = isPreparing
         self.isCancelled = isCancelled
@@ -40,14 +46,17 @@ struct PreferencesModelRow: Equatable, Sendable {
     }
 
     var statusText: String {
-        if isPreparing { return "Preparing" }
-        if isDownloading { return "Downloading" }
+        if id == ModelCatalog.parakeetModelID {
+            if isPreparing { return Self.parakeetPreparingStateText(from: downloadProgressText) }
+            if isInstalled { return isDefault ? "Recommended" : "Installed" }
+            return "Removed"
+        }
+        if isDownloading { return downloadProgressText ?? "Downloading" }
         // Installed/selected truth wins over a stale cancelled flag: a model that is
         // actually on disk is never "cancelled", even if a cancel raced its install.
-        if isSelected { return "Selected" }
         if isInstalled { return "Installed" }
         if isCancelled { return "Download cancelled" }
-        return "Available"
+        return "Not installed"
     }
 
     var actionTitle: String {
@@ -57,17 +66,29 @@ struct PreferencesModelRow: Equatable, Sendable {
         if isInstalled { return "Use" }
         return "Download"
     }
+
+    private static func parakeetPreparingStateText(from progressText: String?) -> String {
+        guard
+            let progressText,
+            let range = progressText.range(of: #"\d+%"#, options: .regularExpression)
+        else {
+            return "Preparing"
+        }
+        return "Preparing \(progressText[range])"
+    }
 }
 
 enum PreferencesModelState {
     static func rows(
         models: [any ManagedModel],
         selectedModelID: String,
+        defaultModelID: String? = nil,
         downloadingModelID: String?,
         cancelledModelID: String? = nil,
         downloadProgressText: String? = nil
     ) -> [PreferencesModelRow] {
-        models.map { model in
+        let defaultModelID = defaultModelID ?? selectedModelID
+        return models.map { model in
             let isDownloading = model.id == downloadingModelID
             let isCancelled = model.id == cancelledModelID
             let isInstalled: Bool
@@ -91,9 +112,11 @@ enum PreferencesModelState {
 
             return PreferencesModelRow(
                 id: model.id,
-                displayName: model.displayName,
+                displayName: displayName(forModelID: model.id),
+                descriptionText: description(forModelID: model.id),
                 isInstalled: isInstalled,
                 isSelected: model.id == selectedModelID,
+                isDefault: model.id == defaultModelID,
                 isDownloading: isDownloading,
                 isPreparing: isPreparing,
                 isCancelled: !isInstalled && isCancelled,
@@ -106,10 +129,12 @@ enum PreferencesModelState {
         downloadableModels: [DownloadableModel],
         installedModelIDs: [String],
         selectedModelID: String,
+        defaultModelID: String? = nil,
         downloadingModelID: String?,
         cancelledModelID: String? = nil,
         downloadProgressText: String? = nil
     ) -> [PreferencesModelRow] {
+        let defaultModelID = defaultModelID ?? selectedModelID
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
             .sorted()
@@ -133,9 +158,11 @@ enum PreferencesModelState {
             let isDownloading = rowModelID == downloadingModelID || model.id == downloadingModelID
             return PreferencesModelRow(
                 id: rowModelID,
-                displayName: model.displayName,
+                displayName: displayName(forModelID: rowModelID),
+                descriptionText: description(forModelID: rowModelID),
                 isInstalled: isInstalled,
                 isSelected: rowModelID == selectedModelID || model.id == selectedModelID,
+                isDefault: rowModelID == defaultModelID || model.id == defaultModelID,
                 isDownloading: isDownloading,
                 isCancelled: isCancelled,
                 downloadProgressText: isDownloading ? downloadProgressText : nil
@@ -149,9 +176,11 @@ enum PreferencesModelState {
                 let isDownloading = modelID == downloadingModelID
                 return PreferencesModelRow(
                     id: modelID,
-                    displayName: displayName(forInstalledModelID: modelID),
+                    displayName: displayName(forModelID: modelID),
+                    descriptionText: description(forModelID: modelID),
                     isInstalled: true,
                     isSelected: modelID == selectedModelID,
+                    isDefault: modelID == defaultModelID,
                     isDownloading: isDownloading,
                     isCancelled: false,
                     downloadProgressText: isDownloading ? downloadProgressText : nil
@@ -162,11 +191,50 @@ enum PreferencesModelState {
         return rows
     }
 
-    static func displayName(forInstalledModelID modelID: String) -> String {
-        if modelID == ModelCatalog.parakeetModelID {
-            return "Parakeet v3"
+    static func displayName(forModelID modelID: String) -> String {
+        let normalized = modelID.hasSuffix(".bin") ? String(modelID.dropLast(4)) : modelID
+        switch normalized {
+        case ModelCatalog.parakeetModelID:
+            return LocalModelManager.parakeetDisplayName
+        case "ggml-tiny.en":
+            return "Tiny (English)"
+        case "ggml-small.en":
+            return "Small (English)"
+        case "ggml-medium":
+            return "Medium"
+        case "ggml-large-v3-turbo":
+            return "Large v3 Turbo"
+        default:
+            if normalized.hasPrefix("ggml-") {
+                return String(normalized.dropFirst(5))
+            }
+            return normalized
         }
-        return modelID.replacingOccurrences(of: "ggml-", with: "")
+    }
+
+    static func selectedModelStatusText(forModelID modelID: String) -> String {
+        "Selected model: \(displayName(forModelID: modelID))"
+    }
+
+    static func displayName(forInstalledModelID modelID: String) -> String {
+        displayName(forModelID: modelID)
+    }
+
+    static func description(forModelID modelID: String) -> String {
+        switch canonicalFamily(modelID) {
+        case canonicalFamily(ModelCatalog.parakeetModelID):
+            return "Fastest. On-device, Apple Silicon."
+        case "tiny.en":
+            return "Smallest, English only"
+        case "small.en":
+            return "Fast, English only"
+        case "medium":
+            return "Slower, many languages"
+        case "large-v3-turbo":
+            return "Most accurate, many languages"
+        default:
+            return "Custom Whisper model"
+        }
     }
 
     /// Strips the `ggml-` prefix and `.bin` extension so that files stored with

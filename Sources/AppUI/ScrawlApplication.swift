@@ -334,6 +334,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let modelRows = PreferencesModelState.rows(
             models: modelCatalog.availableModels,
             selectedModelID: settings.modelID,
+            defaultModelID: settings.defaultModelID,
             downloadingModelID: downloadingModelID,
             cancelledModelID: cancelledModelID,
             downloadProgressText: currentDownloadProgressText
@@ -772,13 +773,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         } else {
             cancelParakeetPreparation()
         }
-        setStatus("Selected model: \(plan.modelID)")
+        setStatus(PreferencesModelState.selectedModelStatusText(forModelID: plan.modelID))
     }
 
     private func confirmParakeetModelDownload() -> Bool {
         presentAlert(
             title: "Download Parakeet model?",
-            message: "Parakeet needs a one-time ~461 MB download (about 2-3 minutes). It runs fully on-device after that.",
+            message: "One-time ~461 MB download, about 2-3 minutes. Runs fully on-device after that.",
             primaryButton: "Download",
             secondaryButton: "Cancel",
             style: .informational
@@ -836,7 +837,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                                 settings.defaultModelID = fallback
                             }
                         }
-                        self.setStatus("Deleted model: \(selected)")
+                        self.setStatus("Deleted model: \(PreferencesModelState.displayName(forModelID: selected))")
                     } else {
                         // No models remain — clear the dangling selection so the menu
                         // shows a truthful "no model" state and transcription prereq
@@ -887,7 +888,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
         guard !modelManager.modelExists(downloadableModel: model) else {
-            setStatus("Model already installed: \(model.id)")
+            setStatus("Model already installed: \(PreferencesModelState.displayName(forModelID: model.id))")
             return
         }
 
@@ -899,7 +900,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         modelDownloadGeneration = downloadGeneration
         refreshModelMenu()
         refreshPreferencesWindow()
-        setStatus("Downloading \(model.displayName)...")
+        setStatus("Downloading \(PreferencesModelState.displayName(forModelID: model.id))...")
 
         modelDownloadTask = Task { [weak self] in
             guard let self else { return }
@@ -931,7 +932,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                             $0.defaultModelID = model.id
                         }
                     }
-                    self.setStatus("Downloaded \(model.id)")
+                    self.setStatus("Downloaded \(PreferencesModelState.displayName(forModelID: model.id))")
                 }
             } catch {
                 await MainActor.run {
@@ -944,7 +945,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     _ = self.presentAlert(
                         title: "Model download failed",
                         message: """
-                        Could not download \(model.displayName).
+                        Could not download \(PreferencesModelState.displayName(forModelID: model.id)).
 
                         \(details)
                         """
@@ -965,7 +966,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func downloadProgressText(for model: DownloadableModel, receivedBytes: Int64, totalBytes: Int64?) -> String {
-        let modelName = model.id.replacingOccurrences(of: "ggml-", with: "")
+        let modelName = PreferencesModelState.displayName(forModelID: model.id)
         let receivedMB = formatMegabytes(receivedBytes)
 
         guard let totalBytes, totalBytes > 0 else {
@@ -1153,8 +1154,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        let recommendedModelName = recommendedModel.id
-            .replacingOccurrences(of: "ggml-", with: "")
+        let recommendedModelName = PreferencesModelState.displayName(forModelID: recommendedModel.id)
 
         let alert = NSAlert()
         alert.messageText = "Set Up Speech Recognition"
@@ -1290,7 +1290,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     $0.defaultModelID = installed
                 }
             }
-            setStatus("Selected model: \(installed)")
+            setStatus(PreferencesModelState.selectedModelStatusText(forModelID: installed))
             return
         }
 
@@ -1869,8 +1869,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func refreshSettingsRows() {
         let settings = runtime.settingsStore.load()
-        let modelName = settings.modelID
-            .replacingOccurrences(of: "ggml-", with: "")
+        let modelName = PreferencesModelState.displayName(forModelID: settings.modelID)
         infoLineItem?.title = "Model: \(modelName)"
         hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input..." : "Hotkey: \(settings.hotkey.displayName)"
         setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey…"
@@ -1894,8 +1893,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             modelsSubmenu.addItem(empty)
         } else {
             for modelID in installedModelIDs {
-                let displayName = modelCatalog.model(id: modelID)?.displayName
-                    ?? PreferencesModelState.displayName(forInstalledModelID: modelID)
+                let displayName = PreferencesModelState.displayName(forModelID: modelID)
                 let item = NSMenuItem(title: displayName, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = modelID
@@ -1918,7 +1916,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             modelsSubmenu.addItem(allInstalled)
         } else {
             for model in downloadable {
-                let item = NSMenuItem(title: model.displayName, action: #selector(downloadModel(_:)), keyEquivalent: "")
+                let item = NSMenuItem(
+                    title: PreferencesModelState.displayName(forModelID: model.id),
+                    action: #selector(downloadModel(_:)),
+                    keyEquivalent: ""
+                )
                 item.target = self
                 item.representedObject = model.id
                 item.isEnabled = !isModelDownloadInProgress
@@ -2030,7 +2032,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let isOngoing = Self.ongoingStatuses.contains(text)
             || text.hasPrefix("Downloading ")
-            || text.hasPrefix("Preparing Parakeet")
+            || text.hasPrefix("Setting up Parakeet")
+            || text.hasPrefix("Loading Parakeet")
+            || text.hasPrefix("Downloading Parakeet model")
+            || text.hasPrefix("Optimizing Parakeet")
             || text.hasPrefix("Loading model:")
             || text.hasPrefix("Transcribing with ")
             || text.hasPrefix("Retrying on CPU")
@@ -2097,7 +2102,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func displayModelName(_ modelID: String) -> String {
-        modelID.replacingOccurrences(of: "ggml-", with: "")
+        PreferencesModelState.displayName(forModelID: modelID)
     }
 
     private func updateStatusIcon() {

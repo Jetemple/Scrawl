@@ -70,9 +70,9 @@ struct ParakeetPreparationState: Equatable, Sendable {
         case .idle, .ready:
             nil
         case .preparing(nil):
-            "Preparing Parakeet..."
+            "Setting up Parakeet (one-time)…"
         case let .preparing(.some(progress)):
-            "Preparing Parakeet: \(Self.label(for: progress, includePercent: true))"
+            Self.label(for: progress, includePercent: true)
         case let .failed(message):
             "Parakeet setup failed: \(message)"
         }
@@ -83,9 +83,14 @@ struct ParakeetPreparationState: Equatable, Sendable {
         case .idle, .ready:
             nil
         case .preparing(nil):
-            "Setting up"
+            "Preparing"
         case let .preparing(.some(progress)):
-            Self.label(for: progress, includePercent: true)
+            switch progress.phase {
+            case .downloading:
+                Self.label(for: progress, includePercent: true)
+            case .checkingCache, .optimizing:
+                "Preparing"
+            }
         case let .failed(message):
             "Setup failed: \(message)"
         }
@@ -111,7 +116,7 @@ struct ParakeetPreparationState: Equatable, Sendable {
     private mutating func apply(_ progress: ParakeetPreparationProgress) {
         switch progress.phase {
         case .checkingCache:
-            storage = .preparing(nil)
+            storage = .preparing(progress)
         case .downloading:
             guard let fraction = progress.fractionCompleted else {
                 storage = .preparing(nil)
@@ -144,15 +149,15 @@ struct ParakeetPreparationState: Equatable, Sendable {
     private static func label(for progress: ParakeetPreparationProgress, includePercent: Bool) -> String {
         switch progress.phase {
         case .checkingCache:
-            return "Preparing..."
+            return "Loading Parakeet…"
         case .downloading:
             guard includePercent, let fraction = progress.fractionCompleted else {
                 return "Downloading Parakeet model"
             }
             let percent = Int((max(0, min(1, fraction)) * 100).rounded())
-            return "Downloading Parakeet model \(percent)%"
+            return "Downloading Parakeet model — \(percent)%"
         case .optimizing:
-            return "Optimizing for your Mac..."
+            return "Optimizing Parakeet for your Mac…"
         }
     }
 }
@@ -167,6 +172,6 @@ enum ParakeetDictationReadiness: Equatable {
         if preparationState.isReady {
             return .ready
         }
-        return .notReady(message: "Parakeet is still setting up — ready shortly")
+        return .notReady(message: "Parakeet is still setting up. Pick another model to use now, or wait a moment.")
     }
 }

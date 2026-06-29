@@ -99,7 +99,7 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(rows.map(\.id), [TranscriptionModelID.parakeetV3, "ggml-small.en"])
         XCTAssertFalse(rows[0].isInstalled)
         XCTAssertTrue(rows[0].canDownload)
-        XCTAssertEqual(rows[0].statusText, "Available")
+        XCTAssertEqual(rows[0].statusText, "Removed")
         XCTAssertTrue(rows[1].isInstalled)
         XCTAssertTrue(rows[1].isSelected)
     }
