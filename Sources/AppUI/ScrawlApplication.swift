@@ -82,6 +82,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private let runtime: AppRuntime
     private let modelManager: LocalModelManager
+    private lazy var modelCatalog = ModelCatalog(
+        manager: modelManager,
+        retainingProvider: runtime.whisperProvider as? any ModelRetainingTranscriptionProvider,
+        languageProvider: { [weak self] in
+            self?.runtime.settingsStore.load().language ?? "en"
+        },
+        preparationProgressProvider: { [weak self] in
+            guard let self, let text = self.parakeetPreparationState.modelRowProgressText else {
+                return nil
+            }
+            return ManagedModelPreparationProgress(displayText: text)
+        }
+    )
     private let loginItem: LoginItemControlling = SMAppServiceLoginItem()
     private lazy var transcriptHistoryCoordinator = TranscriptHistoryCoordinator(
         settingsStore: runtime.settingsStore,
@@ -171,7 +184,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
         setStatus("Idle")
         updateStatusIcon()
-        startParakeetPreloadIfNeeded()
+        startSelectedModelPreparationIfNeeded()
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -318,18 +331,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
 
         let settings = runtime.settingsStore.load()
-        let installedModelIDs = modelManager.installedModelIDs()
-        let downloadableModels = LocalModelManager.downloadableModels
         let modelRows = PreferencesModelState.rows(
-            downloadableModels: downloadableModels,
-            installedModelIDs: installedModelIDs,
+            models: modelCatalog.availableModels,
             selectedModelID: settings.modelID,
             downloadingModelID: downloadingModelID,
             cancelledModelID: cancelledModelID,
-            downloadProgressText: currentDownloadProgressText,
-            includeParakeet: LocalModelManager.isParakeetAvailable,
-            parakeetPreparationProgressText: parakeetPreparationState.modelRowProgressText
+            downloadProgressText: currentDownloadProgressText
         )
+        let downloadableModels = LocalModelManager.downloadableModels
 
         preferencesWindowController.update(
             snapshot: PreferencesWindowController.Snapshot(
@@ -724,23 +733,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func selectModel(id modelID: String) {
         cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
-        let selectionEffect = ParakeetSelectionPolicy.effectForUserSelection(
-            modelID: modelID,
-            isParakeetAvailable: LocalModelManager.isParakeetAvailable
-        )
+        let shouldPrepareOnSelection = modelCatalog.preparesOnSelection(modelID: modelID)
         mutateSettings {
-            $0.selectedModelID = selectionEffect.selectedModelID
+            $0.selectedModelID = modelID
             if $0.defaultModelID.isEmpty {
-                $0.defaultModelID = selectionEffect.selectedModelID
+                $0.defaultModelID = modelID
             }
         }
-        if selectionEffect.shouldStartParakeetPreparation {
-            startParakeetPreloadIfNeeded()
-        }
-        if selectionEffect.shouldCancelParakeetPreparation {
+        if shouldPrepareOnSelection {
+            startSelectedModelPreparationIfNeeded()
+        } else {
             cancelParakeetPreparation()
         }
-        setStatus("Selected model: \(selectionEffect.selectedModelID)")
+        setStatus("Selected model: \(modelID)")
     }
 
     @objc private func downloadModel(_ sender: NSMenuItem) {
@@ -755,13 +760,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     @objc private func deleteSelectedModel(_: Any?) {
         let selected = runtime.settingsStore.load().selectedModelID
-        let parakeetCache = LiveParakeetModelCacheStore()
 
-        guard let target = ModelDeletionCoordinator.target(
-            selectedModelID: selected,
-            whisperStore: modelManager,
-            parakeetCache: parakeetCache
-        ) else {
+        guard let target = modelCatalog.deletionTarget(selectedModelID: selected) else {
             setStatus("No installed model to delete")
             return
         }
@@ -778,34 +778,49 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        do {
-            let result = try ModelDeletionCoordinator.deleteTarget(
-                target,
-                whisperStore: modelManager,
-                parakeetCache: parakeetCache
-            )
-            if result.resetParakeetPreparation {
-                cancelParakeetPreparation()
-            }
-            if let fallback = result.fallbackModelID {
-                mutateSettings { settings in
-                    settings.selectedModelID = fallback
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await self.modelCatalog.delete(target)
+                await MainActor.run {
+                    guard result.deletedModelID != nil else {
+                        self.setStatus("No installed model to delete")
+                        self.refreshModelMenu()
+                        self.refreshPreferencesWindow()
+                        return
+                    }
+                    if self.modelCatalog.preparesOnSelection(modelID: target.modelID) {
+                        self.cancelParakeetPreparation()
+                    }
+                    if let fallback = result.fallbackModelID {
+                        self.mutateSettings { settings in
+                            settings.selectedModelID = fallback
+                            if settings.defaultModelID.isEmpty || settings.defaultModelID == target.modelID {
+                                settings.defaultModelID = fallback
+                            }
+                        }
+                        self.setStatus("Deleted model: \(selected)")
+                    } else {
+                        // No models remain — clear the dangling selection so the menu
+                        // shows a truthful "no model" state and transcription prereq
+                        // checks prompt the user to download.
+                        self.mutateSettings { settings in
+                            settings.selectedModelID = ""
+                            if settings.defaultModelID == target.modelID {
+                                settings.defaultModelID = ""
+                            }
+                        }
+                        self.setStatus("No model installed — download one in Settings → Models")
+                        self.runtime.overlayController.showTransientMessage(
+                            "No model installed — download one in Settings → Models"
+                        )
+                    }
                 }
-                setStatus("Deleted model: \(selected)")
-            } else {
-                // No models remain — clear the dangling selection so the menu
-                // shows a truthful "no model" state and transcription prereq
-                // checks prompt the user to download.
-                mutateSettings { settings in
-                    settings.selectedModelID = ""
+            } catch {
+                await MainActor.run {
+                    self.setStatus("Delete failed: \(self.describe(error))")
                 }
-                setStatus("No model installed — download one in Settings → Models")
-                runtime.overlayController.showTransientMessage(
-                    "No model installed — download one in Settings → Models"
-                )
             }
-        } catch {
-            setStatus("Delete failed: \(describe(error))")
         }
     }
 
@@ -951,27 +966,25 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
         let settings = runtime.settingsStore.load()
-        if settings.modelID == LocalModelManager.parakeetModelID, LocalModelManager.isParakeetAvailable {
+        if modelCatalog.preparesOnSelection(modelID: settings.modelID) {
             if let failureMessage = parakeetPreparationState.failureMessage {
                 presentParakeetSetupFailure(details: failureMessage)
                 return false
             }
             switch ParakeetDictationReadiness.evaluate(
-                selectedModelID: settings.modelID,
-                isParakeetAvailable: LocalModelManager.isParakeetAvailable,
                 preparationState: parakeetPreparationState
             ) {
             case .ready:
                 return true
             case let .notReady(message):
-                startParakeetPreloadIfNeeded()
+                startSelectedModelPreparationIfNeeded()
                 runtime.overlayController.showTransientMessage(message)
                 setStatus(message)
                 return false
             }
         }
 
-        if modelManager.modelExists(id: settings.modelID) {
+        if modelCatalog.isInstalled(modelID: settings.modelID) {
             guard FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) else {
                 setStatus("whisper-cli missing")
                 presentWhisperMissingAlert()
@@ -980,9 +993,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return true
         }
 
-        let installed = modelManager.installedModelIDs()
+        let installed = modelCatalog.installedModelIDs()
         if let fallback = installed.first {
             mutateSettings { $0.selectedModelID = fallback }
+            if modelCatalog.preparesOnSelection(modelID: fallback) {
+                startSelectedModelPreparationIfNeeded()
+                return false
+            }
             guard FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) else {
                 setStatus("whisper-cli missing")
                 presentWhisperMissingAlert()
@@ -1139,18 +1156,15 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         return LocalModelManager.downloadableModels.first
     }
 
-    private func startParakeetPreloadIfNeeded() {
+    private func startSelectedModelPreparationIfNeeded() {
         let settings = runtime.settingsStore.load()
-        guard ParakeetPreloadPolicy.shouldPreload(
-            selectedModelID: settings.modelID,
-            isParakeetAvailable: LocalModelManager.isParakeetAvailable
-        ) else {
+        guard modelCatalog.preparesOnSelection(modelID: settings.modelID) else {
             return
         }
         guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
             return
         }
-        guard let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider else {
+        guard let model = modelCatalog.model(id: settings.modelID) else {
             return
         }
 
@@ -1161,9 +1175,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         parakeetPreparationTask = Task { [weak self] in
             do {
-                try await provider.prepareModel(
-                    modelID: settings.modelID,
-                    language: settings.language,
+                try await model.prepare(
                     progressHandler: { [weak self] progress in
                         Task { @MainActor [weak self] in
                             self?.applyParakeetPreparationEvent(
@@ -1233,10 +1245,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func switchToWhisperFallbackAfterParakeetFailure() {
-        if let installed = modelManager.installedModelIDs().first {
+        if let installed = modelCatalog.installedModelIDs().first(where: { !modelCatalog.preparesOnSelection(modelID: $0) }) {
             mutateSettings {
                 $0.selectedModelID = installed
-                if $0.defaultModelID.isEmpty || $0.defaultModelID == LocalModelManager.parakeetModelID {
+                if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
                     $0.defaultModelID = installed
                 }
             }
@@ -1250,7 +1262,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
         mutateSettings {
             $0.selectedModelID = recommendedModel.id
-            if $0.defaultModelID.isEmpty || $0.defaultModelID == LocalModelManager.parakeetModelID {
+            if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
                 $0.defaultModelID = recommendedModel.id
             }
         }
@@ -1259,7 +1271,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func applyRecommendedModelDefaultsIfNeeded() {
         let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
-        let recommendedID = runtime.recommendedDefaultModelID
+        let recommendedID = modelCatalog.resolveRecommendedDefaultModelID(
+            preferredModelID: runtime.recommendedDefaultModelID
+        )
 
         // Pre-check: skip the write entirely when nothing needs changing.
         // (There is a tiny TOCTOU between this read and the mutate below, but at startup
@@ -1835,17 +1849,15 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         modelsSubmenu.removeAllItems()
         let settings = runtime.settingsStore.load()
 
-        let installed = modelManager.installedModelIDs()
-        let installedMenuModelIDs = LocalModelManager.isParakeetAvailable
-            ? [LocalModelManager.parakeetModelID] + installed
-            : installed
-        if installedMenuModelIDs.isEmpty {
+        let installedModelIDs = modelCatalog.installedModelIDs()
+        if installedModelIDs.isEmpty {
             let empty = NSMenuItem(title: "No installed models", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             modelsSubmenu.addItem(empty)
         } else {
-            for modelID in installedMenuModelIDs {
-                let displayName = PreferencesModelState.displayName(forInstalledModelID: modelID)
+            for modelID in installedModelIDs {
+                let displayName = modelCatalog.model(id: modelID)?.displayName
+                    ?? PreferencesModelState.displayName(forInstalledModelID: modelID)
                 let item = NSMenuItem(title: displayName, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = modelID
@@ -1880,7 +1892,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let deleteItem = NSMenuItem(title: "Delete Selected Model", action: #selector(deleteSelectedModel(_:)), keyEquivalent: "")
         deleteItem.target = self
-        deleteItem.isEnabled = modelManager.modelExists(id: settings.modelID)
+        deleteItem.isEnabled = modelCatalog.deletionTarget(selectedModelID: settings.modelID) != nil
         modelsSubmenu.addItem(deleteItem)
     }
 
@@ -2155,7 +2167,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             {
                 Task {
                     if previousSettings.modelID != updatedSettings.modelID,
-                       previousSettings.modelID != LocalModelManager.parakeetModelID
+                       !self.modelCatalog.preparesOnSelection(modelID: previousSettings.modelID)
                     {
                         await provider.shutdown(modelID: previousSettings.modelID)
                     }

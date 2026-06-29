@@ -263,8 +263,12 @@ final class PreferencesModelsView: NSView {
     }
 
     @objc private func downloadModelAction(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue, let model = downloadableModelsByID[id] else { return }
-        downloadModel(model)
+        guard let id = sender.identifier?.rawValue else { return }
+        if let model = downloadableModelsByID[id] {
+            downloadModel(model)
+        } else {
+            selectModel(id)
+        }
     }
 
     @objc private func deleteSelected(_: NSButton) {

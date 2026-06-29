@@ -1,5 +1,4 @@
 import Foundation
-import ParakeetProvider
 import TranscriptionCore
 
 struct DownloadableModel: Equatable, Sendable {
@@ -220,11 +219,6 @@ final class LocalModelManager: @unchecked Sendable {
     }
 
     func modelExists(id: String) -> Bool {
-        #if arch(arm64)
-        if id == Self.parakeetModelID {
-            return ParakeetTranscriptionProvider.parakeetV3CacheExists()
-        }
-        #endif
         let path = modelsDirectoryURL.appendingPathComponent("\(id).bin")
         return FileManager.default.fileExists(atPath: path.path)
     }
@@ -247,27 +241,32 @@ final class LocalModelManager: @unchecked Sendable {
         return !targetFamilies.isDisjoint(with: installedFamilies)
     }
 
+    func resolvedInstalledModelID(for downloadableModel: DownloadableModel) -> String? {
+        let installedIDs = installedModelIDs()
+        if installedIDs.contains(downloadableModel.id) {
+            return downloadableModel.id
+        }
+
+        let targetFamilies: Set<String> = [
+            canonicalFamily(from: downloadableModel.id),
+            canonicalFamily(from: downloadableModel.fileName),
+        ]
+
+        return installedIDs
+            .sorted()
+            .first { targetFamilies.contains(canonicalFamily(from: $0)) }
+    }
+
     func modelURL(id: String) -> URL {
         modelsDirectoryURL.appendingPathComponent("\(id).bin")
     }
 
     func modelSizeBytes(id: String) -> Int64? {
-        #if arch(arm64)
-        if id == Self.parakeetModelID {
-            return ParakeetTranscriptionProvider.parakeetV3CacheSizeBytes()
-        }
-        #endif
         let url = modelURL(id: id)
         return Self.fileSizeBytes(at: url)
     }
 
     func deleteModel(id: String) throws {
-        #if arch(arm64)
-        if id == Self.parakeetModelID {
-            _ = try ParakeetTranscriptionProvider.deleteParakeetV3Cache()
-            return
-        }
-        #endif
         let url = modelURL(id: id)
         guard FileManager.default.fileExists(atPath: url.path) else {
             return
@@ -600,29 +599,6 @@ final class LocalModelManager: @unchecked Sendable {
     }
 }
 
-extension LocalModelManager: WhisperModelDeletionStore {
-    func whisperModelExists(id: String) -> Bool {
-        let path = modelsDirectoryURL.appendingPathComponent("\(id).bin")
-        return FileManager.default.fileExists(atPath: path.path)
-    }
-
-    func whisperModelSizeBytes(id: String) -> Int64? {
-        Self.fileSizeBytes(at: modelURL(id: id))
-    }
-
-    func installedWhisperModelIDs() -> [String] {
-        installedModelIDs()
-    }
-
-    func deleteWhisperModel(id: String) throws {
-        let url = modelURL(id: id)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            return
-        }
-        try FileManager.default.removeItem(at: url)
-    }
-}
-
 private extension LocalModelManager {
     static func fileSizeBytes(at url: URL) -> Int64? {
         guard let rawSize = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] else {
@@ -647,17 +623,6 @@ private extension NSLock {
 }
 
 extension LocalModelManager {
-    static let parakeetModelID = TranscriptionModelID.parakeetV3
-    static let parakeetDisplayName = "Parakeet v3 — recommended"
-
-    static var isParakeetAvailable: Bool {
-        #if arch(arm64)
-        return true
-        #else
-        return false
-        #endif
-    }
-
     static let downloadableModels: [DownloadableModel] = [
         DownloadableModel(
             id: "ggml-tiny.en",

@@ -61,14 +61,54 @@ struct PreferencesModelRow: Equatable, Sendable {
 
 enum PreferencesModelState {
     static func rows(
+        models: [any ManagedModel],
+        selectedModelID: String,
+        downloadingModelID: String?,
+        cancelledModelID: String? = nil,
+        downloadProgressText: String? = nil
+    ) -> [PreferencesModelRow] {
+        models.map { model in
+            let isDownloading = model.id == downloadingModelID
+            let isCancelled = model.id == cancelledModelID
+            let isInstalled: Bool
+            let isPreparing: Bool
+            let rowProgressText: String?
+
+            switch model.installState {
+            case .notInstalled:
+                isInstalled = false
+                isPreparing = false
+                rowProgressText = isDownloading ? downloadProgressText : nil
+            case let .preparing(progress):
+                isInstalled = false
+                isPreparing = true
+                rowProgressText = progress?.displayText
+            case .installed:
+                isInstalled = true
+                isPreparing = false
+                rowProgressText = isDownloading ? downloadProgressText : nil
+            }
+
+            return PreferencesModelRow(
+                id: model.id,
+                displayName: model.displayName,
+                isInstalled: isInstalled,
+                isSelected: model.id == selectedModelID,
+                isDownloading: isDownloading,
+                isPreparing: isPreparing,
+                isCancelled: !isInstalled && isCancelled,
+                downloadProgressText: rowProgressText
+            )
+        }
+    }
+
+    static func rows(
         downloadableModels: [DownloadableModel],
         installedModelIDs: [String],
         selectedModelID: String,
         downloadingModelID: String?,
         cancelledModelID: String? = nil,
-        downloadProgressText: String? = nil,
-        includeParakeet: Bool = false,
-        parakeetPreparationProgressText: String? = nil
+        downloadProgressText: String? = nil
     ) -> [PreferencesModelRow] {
         let installedIDs = Set(installedModelIDs)
         let installedIDByFamily = installedModelIDs
@@ -83,21 +123,6 @@ enum PreferencesModelState {
         let downloadableFamilies = Set(downloadableModels.map { canonicalFamily($0.id) })
 
         var rows: [PreferencesModelRow] = []
-        if includeParakeet {
-            rows.append(
-                PreferencesModelRow(
-                    id: LocalModelManager.parakeetModelID,
-                    displayName: LocalModelManager.parakeetDisplayName,
-                    isInstalled: true,
-                    isSelected: selectedModelID == LocalModelManager.parakeetModelID,
-                    isDownloading: false,
-                    isPreparing: parakeetPreparationProgressText != nil,
-                    isCancelled: false,
-                    downloadProgressText: parakeetPreparationProgressText
-                )
-            )
-        }
-
         rows.append(contentsOf: downloadableModels.map { model in
             let installedModelID = installedIDs.contains(model.id) ? model.id : installedIDByFamily[canonicalFamily(model.id)]
             let rowModelID = installedModelID ?? model.id
@@ -138,7 +163,7 @@ enum PreferencesModelState {
     }
 
     static func displayName(forInstalledModelID modelID: String) -> String {
-        if modelID == LocalModelManager.parakeetModelID {
+        if modelID == ModelCatalog.parakeetModelID {
             return "Parakeet v3"
         }
         return modelID.replacingOccurrences(of: "ggml-", with: "")

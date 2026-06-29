@@ -1,12 +1,6 @@
 import Foundation
 import TranscriptionCore
 
-enum ParakeetPreloadPolicy {
-    static func shouldPreload(selectedModelID: String, isParakeetAvailable: Bool) -> Bool {
-        isParakeetAvailable && selectedModelID == TranscriptionModelID.parakeetV3
-    }
-}
-
 enum ParakeetPreparationPhase: Equatable, Sendable {
     case downloading
     case optimizing
@@ -151,43 +145,13 @@ struct ParakeetPreparationState: Equatable, Sendable {
     }
 }
 
-struct ParakeetSelectionEffect: Equatable, Sendable {
-    var selectedModelID: String
-    var shouldStartParakeetPreparation: Bool
-    var shouldCancelParakeetPreparation: Bool
-}
-
-enum ParakeetSelectionPolicy {
-    static func effectForUserSelection(
-        modelID: String,
-        isParakeetAvailable: Bool
-    ) -> ParakeetSelectionEffect {
-        ParakeetSelectionEffect(
-            selectedModelID: modelID,
-            shouldStartParakeetPreparation: ParakeetPreloadPolicy.shouldPreload(
-                selectedModelID: modelID,
-                isParakeetAvailable: isParakeetAvailable
-            ),
-            shouldCancelParakeetPreparation: false
-        )
-    }
-}
-
 enum ParakeetDictationReadiness: Equatable {
     case ready
     case notReady(message: String)
 
     static func evaluate(
-        selectedModelID: String,
-        isParakeetAvailable: Bool,
         preparationState: ParakeetPreparationState
     ) -> ParakeetDictationReadiness {
-        guard ParakeetPreloadPolicy.shouldPreload(
-            selectedModelID: selectedModelID,
-            isParakeetAvailable: isParakeetAvailable
-        ) else {
-            return .ready
-        }
         if preparationState.isReady {
             return .ready
         }

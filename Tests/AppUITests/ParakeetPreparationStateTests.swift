@@ -3,12 +3,6 @@ import TranscriptionCore
 import XCTest
 
 final class ParakeetPreparationStateTests: XCTestCase {
-    func testLaunchPreloadRunsOnlyForSelectedParakeetWhenAvailable() {
-        XCTAssertTrue(ParakeetPreloadPolicy.shouldPreload(selectedModelID: TranscriptionModelID.parakeetV3, isParakeetAvailable: true))
-        XCTAssertFalse(ParakeetPreloadPolicy.shouldPreload(selectedModelID: "ggml-small.en", isParakeetAvailable: true))
-        XCTAssertFalse(ParakeetPreloadPolicy.shouldPreload(selectedModelID: TranscriptionModelID.parakeetV3, isParakeetAvailable: false))
-    }
-
     func testPreparationProgressMapsCachedPlaceholderAndCompileToIndeterminatePreparing() {
         var state = ParakeetPreparationState()
 
@@ -62,24 +56,11 @@ final class ParakeetPreparationStateTests: XCTestCase {
         XCTAssertNil(state.modelRowProgressText)
     }
 
-    func testSelectingWhisperDuringParakeetPreparationKeepsSelectionAndDoesNotCancelPreparation() {
-        let effect = ParakeetSelectionPolicy.effectForUserSelection(
-            modelID: "ggml-large-v3-turbo",
-            isParakeetAvailable: true
-        )
-
-        XCTAssertEqual(effect.selectedModelID, "ggml-large-v3-turbo")
-        XCTAssertFalse(effect.shouldStartParakeetPreparation)
-        XCTAssertFalse(effect.shouldCancelParakeetPreparation)
-    }
-
     func testEarlyDictationWhenPreparingShowsNotReadyMessage() {
         var state = ParakeetPreparationState()
         state.apply(.started)
 
         let decision = ParakeetDictationReadiness.evaluate(
-            selectedModelID: TranscriptionModelID.parakeetV3,
-            isParakeetAvailable: true,
             preparationState: state
         )
 

@@ -1,14 +1,19 @@
 @testable import AppUI
+import TranscriptionCore
 import XCTest
 
 final class PreferencesModelStateTests: XCTestCase {
     func testRowsIncludeParakeetModelWhenAvailable() throws {
         let rows = PreferencesModelState.rows(
-            downloadableModels: [],
-            installedModelIDs: [],
+            models: [
+                StubPreferenceManagedModel(
+                    id: "parakeet-v3",
+                    displayName: "Parakeet v3 — recommended",
+                    state: .installed(sizeBytes: 461 * 1024 * 1024)
+                ),
+            ],
             selectedModelID: "parakeet-v3",
-            downloadingModelID: nil,
-            includeParakeet: true
+            downloadingModelID: nil
         )
 
         XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
@@ -20,16 +25,19 @@ final class PreferencesModelStateTests: XCTestCase {
 
     func testRowsShowParakeetPreparationProgressWhenPreparing() throws {
         let rows = PreferencesModelState.rows(
-            downloadableModels: [],
-            installedModelIDs: [],
+            models: [
+                StubPreferenceManagedModel(
+                    id: "parakeet-v3",
+                    displayName: "Parakeet v3 — recommended",
+                    state: .preparing(ManagedModelPreparationProgress(displayText: "Downloading Parakeet model 37%"))
+                ),
+            ],
             selectedModelID: "parakeet-v3",
-            downloadingModelID: nil,
-            includeParakeet: true,
-            parakeetPreparationProgressText: "Downloading Parakeet model 37%"
+            downloadingModelID: nil
         )
 
         XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
-        XCTAssertTrue(rows[0].isInstalled)
+        XCTAssertFalse(rows[0].isInstalled)
         XCTAssertTrue(rows[0].isSelected)
         XCTAssertTrue(rows[0].isPreparing)
         XCTAssertEqual(rows[0].statusText, "Preparing")
@@ -38,11 +46,16 @@ final class PreferencesModelStateTests: XCTestCase {
 
     func testRowsHideParakeetModelWhenUnavailable() {
         let rows = PreferencesModelState.rows(
-            downloadableModels: [],
-            installedModelIDs: [],
+            models: ModelCatalog(models: [
+                StubPreferenceManagedModel(
+                    id: "parakeet-v3",
+                    displayName: "Parakeet v3 — recommended",
+                    isAvailable: false,
+                    state: .notInstalled
+                ),
+            ]).availableModels,
             selectedModelID: "parakeet-v3",
-            downloadingModelID: nil,
-            includeParakeet: false
+            downloadingModelID: nil
         )
 
         XCTAssertTrue(rows.isEmpty)
@@ -318,4 +331,26 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(mediumEnRow?.isInstalled), "ggml-medium.en must not be considered installed when only ggml-medium is present")
         XCTAssertTrue(try XCTUnwrap(mediumEnRow?.canDownload), "ggml-medium.en must remain downloadable")
     }
+}
+
+private final class StubPreferenceManagedModel: ManagedModel, @unchecked Sendable {
+    let id: String
+    let displayName: String
+    let isAvailable: Bool
+    let installState: ManagedModelInstallState
+
+    init(
+        id: String,
+        displayName: String,
+        isAvailable: Bool = true,
+        state: ManagedModelInstallState
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.isAvailable = isAvailable
+        installState = state
+    }
+
+    func prepare(progressHandler _: ModelPreparationProgressHandler?) async throws {}
+    func delete() async throws {}
 }
