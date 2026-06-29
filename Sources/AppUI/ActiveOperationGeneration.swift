@@ -2,6 +2,10 @@ struct ActiveOperationGeneration {
     private(set) var current: UInt64 = 0
     private var currentStatus: UInt64 = 0
 
+    var currentStatusToken: UInt64 {
+        currentStatus
+    }
+
     mutating func beginActiveOperation() {
         current &+= 1
     }

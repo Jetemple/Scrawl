@@ -732,20 +732,57 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func selectModel(id modelID: String) {
-        cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
         let shouldPrepareOnSelection = modelCatalog.preparesOnSelection(modelID: modelID)
+        let settings = runtime.settingsStore.load()
+        let confirmation: ModelSelectionConfirmation
+        if ModelSelectionPlanner.requiresDownloadConfirmation(
+            preparesOnSelection: shouldPrepareOnSelection,
+            isInstalled: modelCatalog.isInstalled(modelID: modelID)
+        ) {
+            confirmation = confirmParakeetModelDownload() ? .download : .cancel
+        } else {
+            confirmation = .notRequired
+        }
+
+        switch ModelSelectionPlanner.outcome(
+            currentModelID: settings.modelID,
+            requestedModelID: modelID,
+            preparesOnSelection: shouldPrepareOnSelection,
+            isInstalled: modelCatalog.isInstalled(modelID: modelID),
+            confirmation: confirmation
+        ) {
+        case .cancelled:
+            refreshPreferencesWindow()
+            return
+        case let .selected(plan):
+            cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
+            completeModelSelection(plan)
+        }
+    }
+
+    private func completeModelSelection(_ plan: ModelSelectionPlan) {
         mutateSettings {
-            $0.selectedModelID = modelID
+            $0.selectedModelID = plan.modelID
             if $0.defaultModelID.isEmpty {
-                $0.defaultModelID = modelID
+                $0.defaultModelID = plan.modelID
             }
         }
-        if shouldPrepareOnSelection {
+        if plan.shouldPrepareOnSelection {
             startSelectedModelPreparationIfNeeded()
         } else {
             cancelParakeetPreparation()
         }
-        setStatus("Selected model: \(modelID)")
+        setStatus("Selected model: \(plan.modelID)")
+    }
+
+    private func confirmParakeetModelDownload() -> Bool {
+        presentAlert(
+            title: "Download Parakeet model?",
+            message: "Parakeet needs a one-time ~461 MB download (about 2-3 minutes). It runs fully on-device after that.",
+            primaryButton: "Download",
+            secondaryButton: "Cancel",
+            style: .informational
+        ) == .alertFirstButtonReturn
     }
 
     @objc private func downloadModel(_ sender: NSMenuItem) {
@@ -1018,12 +1055,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         title: String,
         message: String,
         primaryButton: String = "OK",
-        secondaryButton: String? = nil
+        secondaryButton: String? = nil,
+        style: NSAlert.Style = .warning
     ) -> NSApplication.ModalResponse {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.alertStyle = .warning
+        alert.alertStyle = style
         alert.addButton(withTitle: primaryButton)
         if let secondaryButton {
             alert.addButton(withTitle: secondaryButton)
@@ -1970,6 +2008,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     @MainActor
     @discardableResult
     private func applyStatus(_ text: String, autoClear: Bool = true) -> UInt64 {
+        guard PreparationStatusDeduper.shouldApply(text, latestStatusText: latestStatusText) else {
+            return activeOperationGeneration.currentStatusToken
+        }
         let statusGeneration = activeOperationGeneration.applyStatus()
         statusAutoClearTimer?.invalidate()
         statusAutoClearTimer = nil

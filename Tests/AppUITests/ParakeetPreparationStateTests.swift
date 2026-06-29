@@ -18,8 +18,8 @@ final class ParakeetPreparationStateTests: XCTestCase {
 
         state.apply(.progress(.init(ModelPreparationProgress(fractionCompleted: 0.75, phase: .optimizing))))
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Preparing Parakeet...")
-        XCTAssertEqual(state.modelRowProgressText, "Setting up")
+        XCTAssertEqual(state.statusText, "Preparing Parakeet: Optimizing for your Mac...")
+        XCTAssertEqual(state.modelRowProgressText, "Optimizing for your Mac...")
 
         state.apply(.ready)
         XCTAssertFalse(state.isPreparing)
@@ -46,8 +46,8 @@ final class ParakeetPreparationStateTests: XCTestCase {
         XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model 100%")
 
         state.apply(.progress(.init(fractionCompleted: nil, phase: .optimizing)))
-        XCTAssertEqual(state.statusText, "Preparing Parakeet...")
-        XCTAssertEqual(state.modelRowProgressText, "Setting up")
+        XCTAssertEqual(state.statusText, "Preparing Parakeet: Optimizing for your Mac...")
+        XCTAssertEqual(state.modelRowProgressText, "Optimizing for your Mac...")
 
         state.apply(.ready)
         XCTAssertFalse(state.isPreparing)
@@ -65,5 +65,32 @@ final class ParakeetPreparationStateTests: XCTestCase {
         )
 
         XCTAssertEqual(decision, .notReady(message: "Parakeet is still setting up — ready shortly"))
+    }
+
+    func testDuplicatePreparationStatusIsSuppressedOnlyWhenConsecutiveTextMatches() {
+        XCTAssertTrue(
+            PreparationStatusDeduper.shouldApply(
+                "Preparing Parakeet...",
+                latestStatusText: "Selected model: parakeet-v3"
+            )
+        )
+        XCTAssertFalse(
+            PreparationStatusDeduper.shouldApply(
+                "Preparing Parakeet...",
+                latestStatusText: "Preparing Parakeet..."
+            )
+        )
+        XCTAssertTrue(
+            PreparationStatusDeduper.shouldApply(
+                "Preparing Parakeet: Downloading Parakeet model 44%",
+                latestStatusText: "Preparing Parakeet: Downloading Parakeet model 43%"
+            )
+        )
+        XCTAssertTrue(
+            PreparationStatusDeduper.shouldApply(
+                "Downloading small.en: 10%",
+                latestStatusText: "Downloading small.en: 10%"
+            )
+        )
     }
 }

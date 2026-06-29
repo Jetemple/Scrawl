@@ -17,16 +17,31 @@ final class ParakeetProviderTests: XCTestCase {
         let mappedPlaceholder = ParakeetDownloadProgressMapper.map(cachedPlaceholder)
 
         XCTAssertEqual(mappedPlaceholder, ModelPreparationProgress(fractionCompleted: nil, phase: .checkingCache))
+    }
 
-        let realDownload = DownloadUtils.DownloadProgress(
-            fractionCompleted: 0.25,
-            phase: .downloading(completedFiles: 2, totalFiles: 4)
-        )
-        let mappedDownload = ParakeetDownloadProgressMapper.map(realDownload)
+    func testDownloadProgressMapperUsesOverallFileCompletionAndOnlyHitsOneAtCompletion() {
+        let mappedFractions = [10, 20, 23].map { completedFiles in
+            let progress = DownloadUtils.DownloadProgress(
+                fractionCompleted: completedFiles == 23 ? 0.5 : 0.485,
+                phase: .downloading(completedFiles: completedFiles, totalFiles: 23)
+            )
+            return ParakeetDownloadProgressMapper.map(progress)
+        }
+
+        let mappedDownload = mappedFractions[1]
 
         XCTAssertEqual(mappedDownload.phase, .downloading)
-        XCTAssertEqual(mappedDownload.fractionCompleted ?? -1, 0.5, accuracy: 0.001)
+        XCTAssertEqual(mappedDownload.fractionCompleted ?? -1, 20.0 / 23.0, accuracy: 0.001)
+        XCTAssertLessThan(mappedDownload.fractionCompleted ?? 1, 1.0)
 
+        XCTAssertEqual(mappedFractions.map(\.phase), [.downloading, .downloading, .downloading])
+        XCTAssertEqual(mappedFractions[0].fractionCompleted ?? -1, 10.0 / 23.0, accuracy: 0.001)
+        XCTAssertEqual(mappedFractions[2].fractionCompleted ?? -1, 1.0, accuracy: 0.001)
+        XCTAssertLessThan(mappedFractions[0].fractionCompleted ?? 1, mappedFractions[1].fractionCompleted ?? 0)
+        XCTAssertLessThan(mappedFractions[1].fractionCompleted ?? 1, mappedFractions[2].fractionCompleted ?? 0)
+    }
+
+    func testDownloadProgressMapperTreatsCompileAsOptimizing() {
         let compile = DownloadUtils.DownloadProgress(
             fractionCompleted: 0.75,
             phase: .compiling(modelName: "Encoder.mlmodelc")

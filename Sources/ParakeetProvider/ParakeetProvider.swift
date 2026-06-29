@@ -282,10 +282,9 @@ enum ParakeetDownloadProgressMapper {
             guard totalFiles > 0 else {
                 return ModelPreparationProgress(fractionCompleted: nil, phase: .checkingCache)
             }
-            let byteWeightedDownloadFraction = progress.fractionCompleted * 2
             let fileFraction = Double(completedFiles) / Double(totalFiles)
             return ModelPreparationProgress(
-                fractionCompleted: max(fileFraction, byteWeightedDownloadFraction).clampedToUnitInterval,
+                fractionCompleted: fileFraction.clampedToUnitInterval,
                 phase: .downloading
             )
         case .compiling:

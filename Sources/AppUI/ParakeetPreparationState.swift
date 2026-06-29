@@ -2,6 +2,7 @@ import Foundation
 import TranscriptionCore
 
 enum ParakeetPreparationPhase: Equatable, Sendable {
+    case checkingCache
     case downloading
     case optimizing
 }
@@ -17,9 +18,11 @@ struct ParakeetPreparationProgress: Equatable, Sendable {
 
     init(_ progress: ModelPreparationProgress) {
         phase = switch progress.phase {
+        case .checkingCache:
+            .checkingCache
         case .downloading:
             .downloading
-        case .checkingCache, .optimizing:
+        case .optimizing:
             .optimizing
         }
         fractionCompleted = phase == .downloading
@@ -107,6 +110,8 @@ struct ParakeetPreparationState: Equatable, Sendable {
 
     private mutating func apply(_ progress: ParakeetPreparationProgress) {
         switch progress.phase {
+        case .checkingCache:
+            storage = .preparing(nil)
         case .downloading:
             guard let fraction = progress.fractionCompleted else {
                 storage = .preparing(nil)
@@ -127,12 +132,19 @@ struct ParakeetPreparationState: Equatable, Sendable {
             if maxDownloadFraction != nil {
                 hasMovedPastDownload = true
             }
-            storage = .preparing(nil)
+            storage = .preparing(
+                ParakeetPreparationProgress(
+                    fractionCompleted: nil,
+                    phase: .optimizing
+                )
+            )
         }
     }
 
     private static func label(for progress: ParakeetPreparationProgress, includePercent: Bool) -> String {
         switch progress.phase {
+        case .checkingCache:
+            return "Preparing..."
         case .downloading:
             guard includePercent, let fraction = progress.fractionCompleted else {
                 return "Downloading Parakeet model"
@@ -140,7 +152,7 @@ struct ParakeetPreparationState: Equatable, Sendable {
             let percent = Int((max(0, min(1, fraction)) * 100).rounded())
             return "Downloading Parakeet model \(percent)%"
         case .optimizing:
-            return "Preparing..."
+            return "Optimizing for your Mac..."
         }
     }
 }
