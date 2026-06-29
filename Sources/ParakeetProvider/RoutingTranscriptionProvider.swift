@@ -29,9 +29,29 @@ public final class RoutingTranscriptionProvider: ModelRetainingTranscriptionProv
         await whisperRetainingProvider?.warmUp(modelID: modelID, language: language)
     }
 
+    public func prepareModel(
+        modelID: String,
+        language: String,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws {
+        if modelID == TranscriptionModelID.parakeetV3, let parakeetRetainingProvider {
+            try await parakeetRetainingProvider.prepareModel(
+                modelID: modelID,
+                language: language,
+                progressHandler: progressHandler
+            )
+            return
+        }
+        try await whisperRetainingProvider?.prepareModel(
+            modelID: modelID,
+            language: language,
+            progressHandler: progressHandler
+        )
+    }
+
     public func setIdleOffloadSeconds(_ seconds: TimeInterval?) async {
         await whisperRetainingProvider?.setIdleOffloadSeconds(seconds)
-        await parakeetRetainingProvider?.setIdleOffloadSeconds(seconds)
+        await parakeetRetainingProvider?.setIdleOffloadSeconds(nil)
     }
 
     public func shutdown() async {

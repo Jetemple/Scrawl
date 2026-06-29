@@ -47,7 +47,7 @@ final class RoutingTranscriptionProviderTests: XCTestCase {
         XCTAssertEqual(whisper.transcribeModelIDs, [TranscriptionModelID.parakeetV3])
     }
 
-    func testWarmUpRoutesToSelectedEngineAndShutdownCoversBothEngines() async {
+    func testWarmUpRoutesToSelectedEngineKeepsParakeetWarmAndShutdownCoversBothEngines() async {
         let whisper = SpyModelRetainingProvider(resultText: "whisper")
         let parakeet = SpyModelRetainingProvider(resultText: "parakeet")
         let router = RoutingTranscriptionProvider(
@@ -62,10 +62,36 @@ final class RoutingTranscriptionProviderTests: XCTestCase {
 
         XCTAssertEqual(parakeet.warmUpModelIDs, [TranscriptionModelID.parakeetV3])
         XCTAssertEqual(whisper.warmUpModelIDs, ["ggml-small.en"])
-        XCTAssertEqual(parakeet.idleOffloadSeconds, 7)
+        XCTAssertNil(parakeet.idleOffloadSeconds)
         XCTAssertEqual(whisper.idleOffloadSeconds, 7)
         XCTAssertEqual(parakeet.shutdownCount, 1)
         XCTAssertEqual(whisper.shutdownCount, 1)
+    }
+
+    func testPrepareModelRoutesParakeetProgress() async throws {
+        let whisper = SpyModelRetainingProvider(resultText: "whisper")
+        let parakeet = SpyModelRetainingProvider(resultText: "parakeet")
+        parakeet.preparationProgress = ModelPreparationProgress(
+            fractionCompleted: 0.42,
+            phase: .downloading
+        )
+        let router = RoutingTranscriptionProvider(
+            whisperProvider: whisper,
+            parakeetProvider: parakeet
+        )
+
+        let progressRecorder = ProgressRecorder()
+        try await router.prepareModel(
+            modelID: TranscriptionModelID.parakeetV3,
+            language: "en",
+            progressHandler: { progress in
+                progressRecorder.append(progress)
+            }
+        )
+
+        XCTAssertEqual(parakeet.prepareModelIDs, [TranscriptionModelID.parakeetV3])
+        XCTAssertEqual(whisper.prepareModelIDs, [])
+        XCTAssertEqual(progressRecorder.events, [ModelPreparationProgress(fractionCompleted: 0.42, phase: .downloading)])
     }
 
     private func request(modelID: String) -> TranscriptionRequest {
@@ -82,8 +108,10 @@ private final class SpyModelRetainingProvider: ModelRetainingTranscriptionProvid
     private let resultText: String
     private var _transcribeModelIDs: [String] = []
     private var _warmUpModelIDs: [String] = []
+    private var _prepareModelIDs: [String] = []
     private var _idleOffloadSeconds: TimeInterval?
     private var _shutdownCount = 0
+    var preparationProgress: ModelPreparationProgress?
 
     init(resultText: String) {
         self.resultText = resultText
@@ -95,6 +123,10 @@ private final class SpyModelRetainingProvider: ModelRetainingTranscriptionProvid
 
     var warmUpModelIDs: [String] {
         lock.withLock { _warmUpModelIDs }
+    }
+
+    var prepareModelIDs: [String] {
+        lock.withLock { _prepareModelIDs }
     }
 
     var idleOffloadSeconds: TimeInterval? {
@@ -118,6 +150,19 @@ private final class SpyModelRetainingProvider: ModelRetainingTranscriptionProvid
         }
     }
 
+    func prepareModel(
+        modelID: String,
+        language _: String,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws {
+        lock.withLock {
+            _prepareModelIDs.append(modelID)
+        }
+        if let preparationProgress {
+            progressHandler?(preparationProgress)
+        }
+    }
+
     func setIdleOffloadSeconds(_ seconds: TimeInterval?) async {
         lock.withLock {
             _idleOffloadSeconds = seconds
@@ -127,6 +172,21 @@ private final class SpyModelRetainingProvider: ModelRetainingTranscriptionProvid
     func shutdown() async {
         lock.withLock {
             _shutdownCount += 1
+        }
+    }
+}
+
+private final class ProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [ModelPreparationProgress] = []
+
+    var events: [ModelPreparationProgress] {
+        lock.withLock { _events }
+    }
+
+    func append(_ event: ModelPreparationProgress) {
+        lock.withLock {
+            _events.append(event)
         }
     }
 }

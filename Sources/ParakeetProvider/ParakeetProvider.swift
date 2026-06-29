@@ -47,7 +47,20 @@ public final class ParakeetTranscriptionProvider: ModelRetainingTranscriptionPro
     public func warmUp(modelID: String, language _: String) async {
         #if arch(arm64)
         guard modelID == TranscriptionModelID.parakeetV3 else { return }
-        try? await session.warmUp()
+        try? await session.warmUp(progressHandler: nil)
+        #endif
+    }
+
+    public func prepareModel(
+        modelID: String,
+        language _: String,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws {
+        #if arch(arm64)
+        guard modelID == TranscriptionModelID.parakeetV3 else { return }
+        try await session.warmUp(progressHandler: progressHandler)
+        #else
+        throw TranscriptionError.providerUnavailable
         #endif
     }
 
@@ -67,18 +80,18 @@ public final class ParakeetTranscriptionProvider: ModelRetainingTranscriptionPro
 #if arch(arm64)
 private actor ParakeetModelSession {
     private var asrManager: AsrManager?
-    private var idleOffloadSeconds: TimeInterval? = 300
+    private var idleOffloadSeconds: TimeInterval?
     private var idleTask: Task<Void, Never>?
     private var activityGeneration: UInt64 = 0
     private var inFlightTranscriptions = 0
 
-    func warmUp() async throws {
-        _ = try await loadManager()
+    func warmUp(progressHandler: ModelPreparationProgressHandler?) async throws {
+        _ = try await loadManager(progressHandler: progressHandler)
         scheduleOffload()
     }
 
     func transcribe(samples: [Float], didLoadModel: @Sendable () -> Void) async throws -> String {
-        let manager = try await loadManager()
+        let manager = try await loadManager(progressHandler: nil)
         didLoadModel()
 
         inFlightTranscriptions += 1
@@ -109,16 +122,39 @@ private actor ParakeetModelSession {
         activityGeneration &+= 1
     }
 
-    private func loadManager() async throws -> AsrManager {
+    private func loadManager(progressHandler: ModelPreparationProgressHandler?) async throws -> AsrManager {
         if let asrManager {
             return asrManager
         }
 
-        let models = try await AsrModels.downloadAndLoad(version: .v3)
+        let fluidProgressHandler: DownloadUtils.ProgressHandler?
+        if let progressHandler {
+            fluidProgressHandler = { @Sendable progress in
+                progressHandler(Self.mapDownloadProgress(progress))
+            }
+        } else {
+            fluidProgressHandler = nil
+        }
+
+        let models = try await AsrModels.downloadAndLoad(
+            version: .v3,
+            progressHandler: fluidProgressHandler
+        )
         let manager = AsrManager(config: .default)
         try await manager.loadModels(models)
         asrManager = manager
         return manager
+    }
+
+    private static func mapDownloadProgress(_ progress: DownloadUtils.DownloadProgress) -> ModelPreparationProgress {
+        switch progress.phase {
+        case .listing:
+            ModelPreparationProgress(fractionCompleted: progress.fractionCompleted, phase: .checkingCache)
+        case .downloading:
+            ModelPreparationProgress(fractionCompleted: progress.fractionCompleted, phase: .downloading)
+        case .compiling:
+            ModelPreparationProgress(fractionCompleted: progress.fractionCompleted, phase: .optimizing)
+        }
     }
 
     private func scheduleOffload() {
