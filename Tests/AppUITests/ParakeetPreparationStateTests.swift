@@ -9,7 +9,7 @@ final class ParakeetPreparationStateTests: XCTestCase {
         XCTAssertFalse(ParakeetPreloadPolicy.shouldPreload(selectedModelID: TranscriptionModelID.parakeetV3, isParakeetAvailable: false))
     }
 
-    func testPreparingStateRendersDeterminateDownloadProgressThenReady() {
+    func testPreparationProgressMapsCachedPlaceholderAndCompileToIndeterminatePreparing() {
         var state = ParakeetPreparationState()
 
         state.apply(.started)
@@ -17,20 +17,60 @@ final class ParakeetPreparationStateTests: XCTestCase {
         XCTAssertEqual(state.statusText, "Preparing Parakeet...")
         XCTAssertEqual(state.modelRowProgressText, "Setting up")
 
-        state.apply(.progress(.init(fractionCompleted: 0.37, phase: .downloading)))
+        state.apply(.progress(.init(ModelPreparationProgress(fractionCompleted: 0.5, phase: .checkingCache))))
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Preparing Parakeet: Downloading model 37%")
-        XCTAssertEqual(state.modelRowProgressText, "Downloading model 37%")
+        XCTAssertEqual(state.statusText, "Preparing Parakeet...")
+        XCTAssertEqual(state.modelRowProgressText, "Setting up")
 
-        state.apply(.progress(.init(fractionCompleted: 1.0, phase: .optimizing)))
-        XCTAssertEqual(state.statusText, "Preparing Parakeet: Optimizing for your Mac")
-        XCTAssertEqual(state.modelRowProgressText, "Optimizing for your Mac")
+        state.apply(.progress(.init(ModelPreparationProgress(fractionCompleted: 0.75, phase: .optimizing))))
+        XCTAssertTrue(state.isPreparing)
+        XCTAssertEqual(state.statusText, "Preparing Parakeet...")
+        XCTAssertEqual(state.modelRowProgressText, "Setting up")
 
         state.apply(.ready)
         XCTAssertFalse(state.isPreparing)
         XCTAssertTrue(state.isReady)
         XCTAssertNil(state.statusText)
         XCTAssertNil(state.modelRowProgressText)
+    }
+
+    func testPreparingStateRendersRealDownloadProgressMonotonicallyThenReady() {
+        var state = ParakeetPreparationState()
+
+        state.apply(.started)
+        state.apply(.progress(.init(fractionCompleted: 0.50, phase: .downloading)))
+        XCTAssertTrue(state.isPreparing)
+        XCTAssertEqual(state.statusText, "Preparing Parakeet: Downloading Parakeet model 50%")
+        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model 50%")
+
+        state.apply(.progress(.init(fractionCompleted: 0.25, phase: .downloading)))
+        XCTAssertEqual(state.statusText, "Preparing Parakeet: Downloading Parakeet model 50%")
+        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model 50%")
+
+        state.apply(.progress(.init(fractionCompleted: 1.0, phase: .downloading)))
+        XCTAssertEqual(state.statusText, "Preparing Parakeet: Downloading Parakeet model 100%")
+        XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model 100%")
+
+        state.apply(.progress(.init(fractionCompleted: nil, phase: .optimizing)))
+        XCTAssertEqual(state.statusText, "Preparing Parakeet...")
+        XCTAssertEqual(state.modelRowProgressText, "Setting up")
+
+        state.apply(.ready)
+        XCTAssertFalse(state.isPreparing)
+        XCTAssertTrue(state.isReady)
+        XCTAssertNil(state.statusText)
+        XCTAssertNil(state.modelRowProgressText)
+    }
+
+    func testSelectingWhisperDuringParakeetPreparationKeepsSelectionAndDoesNotCancelPreparation() {
+        let effect = ParakeetSelectionPolicy.effectForUserSelection(
+            modelID: "ggml-large-v3-turbo",
+            isParakeetAvailable: true
+        )
+
+        XCTAssertEqual(effect.selectedModelID, "ggml-large-v3-turbo")
+        XCTAssertFalse(effect.shouldStartParakeetPreparation)
+        XCTAssertFalse(effect.shouldCancelParakeetPreparation)
     }
 
     func testEarlyDictationWhenPreparingShowsNotReadyMessage() {

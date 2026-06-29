@@ -724,18 +724,23 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func selectModel(id modelID: String) {
         cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
+        let selectionEffect = ParakeetSelectionPolicy.effectForUserSelection(
+            modelID: modelID,
+            isParakeetAvailable: LocalModelManager.isParakeetAvailable
+        )
         mutateSettings {
-            $0.selectedModelID = modelID
+            $0.selectedModelID = selectionEffect.selectedModelID
             if $0.defaultModelID.isEmpty {
-                $0.defaultModelID = modelID
+                $0.defaultModelID = selectionEffect.selectedModelID
             }
         }
-        if modelID == LocalModelManager.parakeetModelID {
+        if selectionEffect.shouldStartParakeetPreparation {
             startParakeetPreloadIfNeeded()
-        } else {
+        }
+        if selectionEffect.shouldCancelParakeetPreparation {
             cancelParakeetPreparation()
         }
-        setStatus("Selected model: \(modelID)")
+        setStatus("Selected model: \(selectionEffect.selectedModelID)")
     }
 
     @objc private func downloadModel(_ sender: NSMenuItem) {
@@ -2149,8 +2154,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider
             {
                 Task {
-                    if previousSettings.modelID != updatedSettings.modelID {
-                        await provider.shutdown()
+                    if previousSettings.modelID != updatedSettings.modelID,
+                       previousSettings.modelID != LocalModelManager.parakeetModelID
+                    {
+                        await provider.shutdown(modelID: previousSettings.modelID)
                     }
                     if previousSettings.modelOffloadPolicy != updatedSettings.modelOffloadPolicy {
                         await provider.setIdleOffloadSeconds(updatedSettings.modelOffloadPolicy.idleSeconds)

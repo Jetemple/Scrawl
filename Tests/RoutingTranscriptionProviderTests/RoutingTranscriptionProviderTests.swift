@@ -68,6 +68,20 @@ final class RoutingTranscriptionProviderTests: XCTestCase {
         XCTAssertEqual(whisper.shutdownCount, 1)
     }
 
+    func testTargetedShutdownForWhisperModelDoesNotShutdownParakeet() async {
+        let whisper = SpyModelRetainingProvider(resultText: "whisper")
+        let parakeet = SpyModelRetainingProvider(resultText: "parakeet")
+        let router = RoutingTranscriptionProvider(
+            whisperProvider: whisper,
+            parakeetProvider: parakeet
+        )
+
+        await router.shutdown(modelID: "ggml-large-v3-turbo")
+
+        XCTAssertEqual(whisper.shutdownCount, 1)
+        XCTAssertEqual(parakeet.shutdownCount, 0)
+    }
+
     func testPrepareModelRoutesParakeetProgress() async throws {
         let whisper = SpyModelRetainingProvider(resultText: "whisper")
         let parakeet = SpyModelRetainingProvider(resultText: "parakeet")

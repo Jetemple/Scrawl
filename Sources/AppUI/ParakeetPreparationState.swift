@@ -17,18 +17,20 @@ struct ParakeetPreparationProgress: Equatable, Sendable {
     var phase: ParakeetPreparationPhase
 
     init(fractionCompleted: Double?, phase: ParakeetPreparationPhase) {
-        self.fractionCompleted = fractionCompleted
+        self.fractionCompleted = fractionCompleted.map { max(0, min(1, $0)) }
         self.phase = phase
     }
 
     init(_ progress: ModelPreparationProgress) {
-        fractionCompleted = progress.fractionCompleted
         phase = switch progress.phase {
-        case .checkingCache, .downloading:
+        case .downloading:
             .downloading
-        case .optimizing:
+        case .checkingCache, .optimizing:
             .optimizing
         }
+        fractionCompleted = phase == .downloading
+            ? progress.fractionCompleted.map { max(0, min(1, $0)) }
+            : nil
     }
 }
 
@@ -48,6 +50,8 @@ struct ParakeetPreparationState: Equatable, Sendable {
     }
 
     private var storage: Storage = .idle
+    private var maxDownloadFraction: Double?
+    private var hasMovedPastDownload = false
 
     var isPreparing: Bool {
         if case .preparing = storage { return true }
@@ -93,13 +97,43 @@ struct ParakeetPreparationState: Equatable, Sendable {
     mutating func apply(_ event: ParakeetPreparationEvent) {
         switch event {
         case .started:
+            maxDownloadFraction = nil
+            hasMovedPastDownload = false
             storage = .preparing(nil)
         case let .progress(progress):
-            storage = .preparing(progress)
+            apply(progress)
         case .ready:
+            maxDownloadFraction = 1
+            hasMovedPastDownload = true
             storage = .ready
         case let .failed(message):
             storage = .failed(message)
+        }
+    }
+
+    private mutating func apply(_ progress: ParakeetPreparationProgress) {
+        switch progress.phase {
+        case .downloading:
+            guard let fraction = progress.fractionCompleted else {
+                storage = .preparing(nil)
+                return
+            }
+            guard !hasMovedPastDownload else {
+                return
+            }
+            let monotonicFraction = max(maxDownloadFraction ?? 0, fraction)
+            maxDownloadFraction = monotonicFraction
+            storage = .preparing(
+                ParakeetPreparationProgress(
+                    fractionCompleted: monotonicFraction,
+                    phase: .downloading
+                )
+            )
+        case .optimizing:
+            if maxDownloadFraction != nil {
+                hasMovedPastDownload = true
+            }
+            storage = .preparing(nil)
         }
     }
 
@@ -107,13 +141,35 @@ struct ParakeetPreparationState: Equatable, Sendable {
         switch progress.phase {
         case .downloading:
             guard includePercent, let fraction = progress.fractionCompleted else {
-                return "Downloading model"
+                return "Downloading Parakeet model"
             }
             let percent = Int((max(0, min(1, fraction)) * 100).rounded())
-            return "Downloading model \(percent)%"
+            return "Downloading Parakeet model \(percent)%"
         case .optimizing:
-            return "Optimizing for your Mac"
+            return "Preparing..."
         }
+    }
+}
+
+struct ParakeetSelectionEffect: Equatable, Sendable {
+    var selectedModelID: String
+    var shouldStartParakeetPreparation: Bool
+    var shouldCancelParakeetPreparation: Bool
+}
+
+enum ParakeetSelectionPolicy {
+    static func effectForUserSelection(
+        modelID: String,
+        isParakeetAvailable: Bool
+    ) -> ParakeetSelectionEffect {
+        ParakeetSelectionEffect(
+            selectedModelID: modelID,
+            shouldStartParakeetPreparation: ParakeetPreloadPolicy.shouldPreload(
+                selectedModelID: modelID,
+                isParakeetAvailable: isParakeetAvailable
+            ),
+            shouldCancelParakeetPreparation: false
+        )
     }
 }
 

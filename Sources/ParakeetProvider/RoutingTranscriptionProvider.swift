@@ -54,6 +54,14 @@ public final class RoutingTranscriptionProvider: ModelRetainingTranscriptionProv
         await parakeetRetainingProvider?.setIdleOffloadSeconds(nil)
     }
 
+    public func shutdown(modelID: String) async {
+        if modelID == TranscriptionModelID.parakeetV3 {
+            await parakeetRetainingProvider?.shutdown()
+            return
+        }
+        await whisperRetainingProvider?.shutdown(modelID: modelID)
+    }
+
     public func shutdown() async {
         await whisperRetainingProvider?.shutdown()
         await parakeetRetainingProvider?.shutdown()

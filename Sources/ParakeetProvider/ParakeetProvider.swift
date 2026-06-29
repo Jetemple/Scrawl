@@ -70,6 +70,11 @@ public final class ParakeetTranscriptionProvider: ModelRetainingTranscriptionPro
         #endif
     }
 
+    public func shutdown(modelID: String) async {
+        guard modelID == TranscriptionModelID.parakeetV3 else { return }
+        await shutdown()
+    }
+
     public func shutdown() async {
         #if arch(arm64)
         await session.shutdown()
@@ -229,7 +234,7 @@ private actor ParakeetModelSession {
         let fluidProgressHandler: DownloadUtils.ProgressHandler?
         if let progressHandler {
             fluidProgressHandler = { @Sendable progress in
-                progressHandler(Self.mapDownloadProgress(progress))
+                progressHandler(ParakeetDownloadProgressMapper.map(progress))
             }
         } else {
             fluidProgressHandler = nil
@@ -243,17 +248,6 @@ private actor ParakeetModelSession {
         try await manager.loadModels(models)
         asrManager = manager
         return manager
-    }
-
-    private static func mapDownloadProgress(_ progress: DownloadUtils.DownloadProgress) -> ModelPreparationProgress {
-        switch progress.phase {
-        case .listing:
-            ModelPreparationProgress(fractionCompleted: progress.fractionCompleted, phase: .checkingCache)
-        case .downloading:
-            ModelPreparationProgress(fractionCompleted: progress.fractionCompleted, phase: .downloading)
-        case .compiling:
-            ModelPreparationProgress(fractionCompleted: progress.fractionCompleted, phase: .optimizing)
-        }
     }
 
     private func scheduleOffload() {
@@ -276,6 +270,33 @@ private actor ParakeetModelSession {
             return
         }
         shutdown()
+    }
+}
+
+enum ParakeetDownloadProgressMapper {
+    static func map(_ progress: DownloadUtils.DownloadProgress) -> ModelPreparationProgress {
+        switch progress.phase {
+        case .listing:
+            return ModelPreparationProgress(fractionCompleted: nil, phase: .checkingCache)
+        case let .downloading(completedFiles, totalFiles):
+            guard totalFiles > 0 else {
+                return ModelPreparationProgress(fractionCompleted: nil, phase: .checkingCache)
+            }
+            let byteWeightedDownloadFraction = progress.fractionCompleted * 2
+            let fileFraction = Double(completedFiles) / Double(totalFiles)
+            return ModelPreparationProgress(
+                fractionCompleted: max(fileFraction, byteWeightedDownloadFraction).clampedToUnitInterval,
+                phase: .downloading
+            )
+        case .compiling:
+            return ModelPreparationProgress(fractionCompleted: nil, phase: .optimizing)
+        }
+    }
+}
+
+private extension Double {
+    var clampedToUnitInterval: Double {
+        max(0, min(1, self))
     }
 }
 #endif

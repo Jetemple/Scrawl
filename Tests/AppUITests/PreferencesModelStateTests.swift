@@ -25,7 +25,7 @@ final class PreferencesModelStateTests: XCTestCase {
             selectedModelID: "parakeet-v3",
             downloadingModelID: nil,
             includeParakeet: true,
-            parakeetPreparationProgressText: "Downloading model 37%"
+            parakeetPreparationProgressText: "Downloading Parakeet model 37%"
         )
 
         XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
@@ -33,7 +33,7 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertTrue(rows[0].isSelected)
         XCTAssertTrue(rows[0].isPreparing)
         XCTAssertEqual(rows[0].statusText, "Preparing")
-        XCTAssertEqual(rows[0].downloadProgressText, "Downloading model 37%")
+        XCTAssertEqual(rows[0].downloadProgressText, "Downloading Parakeet model 37%")
     }
 
     func testRowsHideParakeetModelWhenUnavailable() {

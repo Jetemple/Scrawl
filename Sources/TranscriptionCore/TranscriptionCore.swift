@@ -109,6 +109,7 @@ public protocol ModelRetainingTranscriptionProvider: TranscriptionProvider {
         progressHandler: ModelPreparationProgressHandler?
     ) async throws
     func setIdleOffloadSeconds(_ seconds: TimeInterval?) async
+    func shutdown(modelID: String) async
     func shutdown() async
 }
 
@@ -119,5 +120,9 @@ public extension ModelRetainingTranscriptionProvider {
         progressHandler _: ModelPreparationProgressHandler? = nil
     ) async throws {
         await warmUp(modelID: modelID, language: language)
+    }
+
+    func shutdown(modelID _: String) async {
+        await shutdown()
     }
 }
