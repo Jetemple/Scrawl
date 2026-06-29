@@ -1196,9 +1196,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private func applyParakeetPreparationEvent(_ event: ParakeetPreparationEvent, generation: UUID) {
         guard parakeetPreparationGeneration == generation else { return }
         parakeetPreparationState.apply(event)
-        if event == .ready {
+        if event == .ready || parakeetPreparationState.failureMessage != nil {
             parakeetPreparationGeneration = nil
             parakeetPreparationTask = nil
+        }
+        if event == .ready {
             setStatus("Parakeet ready")
         } else {
             publishParakeetPreparationState()
