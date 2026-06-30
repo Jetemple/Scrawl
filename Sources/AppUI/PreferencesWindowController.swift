@@ -244,7 +244,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             setEnabled: actions.setTranscriptHistoryEnabled,
             copy: actions.copyTranscript,
             repaste: actions.repasteTranscript,
-            delete: actions.deleteTranscripts
+            delete: actions.deleteTranscripts,
+            addTerm: { term, completion in
+                actions.saveDictionaryEntry(nil, term, term, completion)
+            }
         ))
         dictionaryView = PreferencesDictionaryView(actions: .init(
             save: actions.saveDictionaryEntry,
@@ -363,6 +366,14 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     func setHistorySearchQuery(_ query: String) {
         historyView.setSearchQuery(query)
+    }
+
+    func setHistoryPreferredTermDraft(_ value: String) {
+        historyView.setPreferredTermDraft(value)
+    }
+
+    func saveHistoryPreferredTermDraft() {
+        historyView.savePreferredTermDraft()
     }
 
     func setDictionarySearchQuery(_ query: String) {

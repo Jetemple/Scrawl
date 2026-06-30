@@ -280,6 +280,27 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryAddTermPopoverSavesPreferredTerm() throws {
+        let record = TranscriptRecord(id: UUID(), createdAt: .now, text: "Anduril was mentioned")
+        var savedValue: String?
+        let controller = PreferencesWindowController(actions: makeActions(
+            saveDictionaryEntry: { _, _, correct, completion in
+                savedValue = correct
+                completion(.success(()))
+            }
+        ))
+        controller.update(snapshot: makeSnapshot(records: [record]))
+        controller.selectSection(.history)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        try XCTUnwrap(contentView.button(titled: "Add Term...")).performClick(nil)
+        controller.setHistoryPreferredTermDraft("Anduril")
+        controller.saveHistoryPreferredTermDraft()
+
+        XCTAssertEqual(savedValue, "Anduril")
+    }
+
+    @MainActor
     func testHistoryToggleDispatchesAction() throws {
         var enabledValue: Bool?
         let controller = PreferencesWindowController(actions: makeActions(
