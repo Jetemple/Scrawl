@@ -13,16 +13,21 @@ for app_path in "$HOME/Applications/Scrawl.app" "/Applications/Scrawl.app"; do
     executable="$app_path/Contents/MacOS/Scrawl"
     pkill -f "^${executable}$" 2>/dev/null || true
 done
+pkill -f '(^|.*/)\.build/.*/debug/ScrawlApp$' 2>/dev/null || true
 
 for _ in {1..30}; do
-    if ! pgrep -f '/Scrawl.app/Contents/MacOS/Scrawl$' >/dev/null; then
+    if ! pgrep -f '/Scrawl.app/Contents/MacOS/Scrawl$' >/dev/null \
+        && ! pgrep -f '(^|.*/)\.build/.*/debug/ScrawlApp$' >/dev/null
+    then
         break
     fi
     sleep 0.1
 done
 
-if pgrep -f '/Scrawl.app/Contents/MacOS/Scrawl$' >/dev/null; then
-    echo "Could not stop the installed Scrawl app. Quit it and retry." >&2
+if pgrep -f '/Scrawl.app/Contents/MacOS/Scrawl$' >/dev/null \
+    || pgrep -f '(^|.*/)\.build/.*/debug/ScrawlApp$' >/dev/null
+then
+    echo "Could not stop the running Scrawl app. Quit it and retry." >&2
     exit 1
 fi
 
