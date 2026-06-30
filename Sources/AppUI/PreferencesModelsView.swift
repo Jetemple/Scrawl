@@ -6,6 +6,41 @@ private final class FlippedModelsDocumentView: NSView {
     }
 }
 
+private final class ModelRowBackgroundView: NSView {
+    private let isSelectedRow: Bool
+
+    init(content: NSView, isSelected: Bool) {
+        isSelectedRow = isSelected
+        super.init(frame: .zero)
+        wantsLayer = true
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var wantsUpdateLayer: Bool {
+        true
+    }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = isSelectedRow
+                ? NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+                : NSColor.clear.cgColor
+        }
+    }
+}
+
 final class PreferencesModelsView: NSView {
     private let selectModel: (String) -> Void
     private let downloadModel: (DownloadableModel) -> Void
@@ -29,6 +64,7 @@ final class PreferencesModelsView: NSView {
     private var selectedIndicatorView: NSView?
     private let rowActionWidth: CGFloat = 86
     private let selectedIndicatorWidth: CGFloat = 28
+    private let estimatedRowHeight: CGFloat = 55
 
     var listIsTopAnchored: Bool {
         modelsStack.superview?.isFlipped == true
@@ -52,6 +88,10 @@ final class PreferencesModelsView: NSView {
 
     var visibleSelectedIndicatorWidth: CGFloat? {
         selectedIndicatorView?.frame.width
+    }
+
+    var visibleModelListHeight: CGFloat {
+        listHeightConstraint?.constant ?? 0
     }
 
     var isCriticalContentWithinBounds: Bool {
@@ -145,20 +185,20 @@ final class PreferencesModelsView: NSView {
         findModelsButton.action = #selector(openModelSourceAction(_:))
         findModelsButton.toolTip = "Open the whisper.cpp model repository in your browser."
 
-        let buttonRow = NSStackView(views: [addButton, revealButton, NSView(), deleteButton, cancelButton])
+        let buttonRow = NSStackView(views: [addButton, revealButton, findModelsButton, NSView(), deleteButton, cancelButton])
         buttonRow.orientation = .horizontal
         buttonRow.alignment = .centerY
-        buttonRow.spacing = 6
+        buttonRow.spacing = 8
 
         let helpLabel = NSTextField(labelWithString: "Bring your own: any whisper.cpp ggml .bin.")
         helpLabel.font = .systemFont(ofSize: 11)
         helpLabel.textColor = .secondaryLabelColor
         helpLabel.lineBreakMode = .byTruncatingTail
         helpLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let helpRow = NSStackView(views: [helpLabel, findModelsButton, NSView()])
+        let helpRow = NSStackView(views: [helpLabel, NSView()])
         helpRow.orientation = .horizontal
         helpRow.alignment = .centerY
-        helpRow.spacing = 5
+        helpRow.spacing = 0
 
         let page = PreferencesPageSupport.makePage(
             title: "Models",
@@ -180,10 +220,11 @@ final class PreferencesModelsView: NSView {
         deleteButton.isHidden = isDownloadInProgress
         cancelButton.isEnabled = isDownloadInProgress
         cancelButton.isHidden = !isDownloadInProgress
+        findModelsButton.isHidden = isDownloadInProgress
         twoLineRowCount = rows.count
         selectedRowHasAction = false
         selectedIndicatorView = nil
-        listHeightConstraint?.constant = min(300, max(140, CGFloat(rows.count) * 64))
+        listHeightConstraint?.constant = modelListHeight(rowCount: rows.count)
 
         for arrangedSubview in modelsStack.arrangedSubviews {
             modelsStack.removeArrangedSubview(arrangedSubview)
@@ -210,7 +251,7 @@ final class PreferencesModelsView: NSView {
 
     private func makeModelRow(_ row: PreferencesModelRow, isDownloadBlocked: Bool) -> NSView {
         let nameLabel = NSTextField(labelWithString: row.displayName)
-        nameLabel.font = .systemFont(ofSize: 13)
+        nameLabel.font = .systemFont(ofSize: 13, weight: row.isSelected ? .medium : .regular)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -223,7 +264,7 @@ final class PreferencesModelsView: NSView {
 
         let statusLabel = NSTextField(labelWithString: row.statusText)
         statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.textColor = row.isSelected ? .systemBlue : .secondaryLabelColor
+        statusLabel.textColor = statusColor(for: row)
         statusLabel.alignment = .right
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         // Size to the status text so longer strings like "Download cancelled" render in
@@ -276,7 +317,19 @@ final class PreferencesModelsView: NSView {
         rowStack.alignment = .width
         rowStack.spacing = 2
         rowStack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 12)
-        return rowStack
+        return ModelRowBackgroundView(content: rowStack, isSelected: row.isSelected)
+    }
+
+    private func modelListHeight(rowCount: Int) -> CGFloat {
+        guard rowCount > 0 else { return 128 }
+        let separatorHeight = CGFloat(max(0, rowCount - 1))
+        return min(300, max(128, CGFloat(rowCount) * estimatedRowHeight + separatorHeight))
+    }
+
+    private func statusColor(for row: PreferencesModelRow) -> NSColor {
+        if row.isCancelled { return .systemOrange }
+        if row.isSelected || row.isDownloading || row.isPreparing { return .systemBlue }
+        return .secondaryLabelColor
     }
 
     @objc private func selectModelAction(_ sender: NSButton) {

@@ -94,6 +94,29 @@ final class PreferencesModelsViewTests: XCTestCase {
 
         XCTAssertEqual(try XCTUnwrap(view.visibleSelectedIndicatorWidth), 28, accuracy: 0.5)
     }
+
+    @MainActor
+    func testFourModelRowsDoNotLeaveLargeEmptyListTail() {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 520, height: 360)
+        view.update(rows: [
+            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+            modelRow(id: "ggml-medium", installed: false, selected: false),
+            modelRow(id: "ggml-large-v3-turbo", installed: false, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThanOrEqual(view.visibleModelListHeight, 228)
+    }
 }
 
 private extension NSView {
@@ -103,4 +126,18 @@ private extension NSView {
         }
         return subviews.lazy.compactMap { $0.firstTextField(withValue: value) }.first
     }
+}
+
+private func modelRow(id: String, installed: Bool, selected: Bool) -> PreferencesModelRow {
+    PreferencesModelRow(
+        id: id,
+        displayName: PreferencesModelState.displayName(forModelID: id),
+        descriptionText: PreferencesModelState.description(forModelID: id),
+        isInstalled: installed,
+        isSelected: selected,
+        isDefault: selected,
+        isDownloading: false,
+        isCancelled: false,
+        downloadProgressText: nil
+    )
 }
