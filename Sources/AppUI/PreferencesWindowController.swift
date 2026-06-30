@@ -49,7 +49,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     enum Section: Int, CaseIterable {
         case general
         case models
-        case keyboard
+        case input
         case history
         case dictionary
         case about
@@ -58,9 +58,9 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             switch self {
             case .general: "General"
             case .models: "Models"
-            case .keyboard: "Keyboard"
+            case .input: "Input"
             case .history: "History"
-            case .dictionary: "Vocabulary"
+            case .dictionary: "Dictionary"
             case .about: "About"
             }
         }
@@ -69,7 +69,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             switch self {
             case .general: "gearshape"
             case .models: "cpu"
-            case .keyboard: "keyboard"
+            case .input: "keyboard"
             case .history: "clock.arrow.circlepath"
             case .dictionary: "text.book.closed"
             case .about: "info.circle"
@@ -235,6 +235,9 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         window.identifier = NSUserInterfaceItemIdentifier("ScrawlPreferencesWindow")
 
         super.init(window: window)
+        generalView.changeModel = { [weak self] in
+            self?.selectSection(.models)
+        }
         window.contentView = makeContentView()
     }
 
@@ -334,7 +337,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         sectionViews = [
             .general: generalView,
             .models: modelsView,
-            .keyboard: keyboardView,
+            .input: keyboardView,
             .history: historyView,
             .dictionary: dictionaryView,
             .about: aboutView,

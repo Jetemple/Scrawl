@@ -7,10 +7,10 @@ import XCTest
 
 final class PreferencesWindowControllerTests: XCTestCase {
     @MainActor
-    func testSidebarContainsExpectedSections() {
+    func testSidebarContainsGraphiteWorkbenchSections() {
         XCTAssertEqual(
             PreferencesWindowController.Section.allCases.map(\.title),
-            ["General", "Models", "Keyboard", "History", "Vocabulary", "About"]
+            ["General", "Models", "Input", "History", "Dictionary", "About"]
         )
     }
 
@@ -278,7 +278,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testGeneralKeyboardAndAboutButtonsDispatchActions() throws {
+    func testGeneralInputAndAboutButtonsDispatchActions() throws {
         var requestedMicrophone = false
         var requestedAccessibility = false
         var requestedHotkey = false
@@ -293,7 +293,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         try XCTUnwrap(contentView.button(titled: "Request")).performClick(nil)
         try XCTUnwrap(contentView.button(titled: "Open Prompt")).performClick(nil)
-        controller.selectSection(.keyboard)
+        controller.selectSection(.input)
         try XCTUnwrap(contentView.button(titled: "Set Hotkey…")).performClick(nil)
         controller.selectSection(.about)
         try XCTUnwrap(contentView.button(titled: "Open Project Page")).performClick(nil)
@@ -302,6 +302,30 @@ final class PreferencesWindowControllerTests: XCTestCase {
         XCTAssertTrue(requestedAccessibility)
         XCTAssertTrue(requestedHotkey)
         XCTAssertTrue(openedProjectPage)
+    }
+
+    @MainActor
+    func testGeneralChangeModelButtonSelectsModels() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        XCTAssertEqual(controller.visibleSection, .general)
+        try XCTUnwrap(contentView.button(titled: "Change...")).performClick(nil)
+
+        XCTAssertEqual(controller.visibleSection, .models)
+    }
+
+    @MainActor
+    func testInputAndDictionaryVisibleCopyUseNewNames() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        controller.selectSection(.input)
+        XCTAssertNotNil(contentView.textField(withValue: "Input"))
+
+        controller.selectSection(.dictionary)
+        XCTAssertNotNil(contentView.textField(withValue: "Dictionary"))
+        XCTAssertNil(contentView.textField(withValue: "Vocabulary"))
     }
 
     @MainActor
@@ -392,7 +416,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testVocabularyPageFiltersPreferredTermsAndFallsBackToFirstSelection() {
+    func testDictionaryPageFiltersPreferredTermsAndFallsBackToFirstSelection() {
         let first = DictionaryEntry(wrong: "post grass", correct: "Postgres")
         let second = DictionaryEntry(wrong: "cube", correct: "Kubernetes")
         let controller = PreferencesWindowController(actions: makeActions())
@@ -438,7 +462,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
         XCTAssertEqual(controller.dictionaryState, .unavailable)
-        try XCTUnwrap(contentView.button(titled: "Reset Vocabulary")).performClick(nil)
+        try XCTUnwrap(contentView.button(titled: "Reset Dictionary")).performClick(nil)
         XCTAssertTrue(didRecover)
     }
 
@@ -501,7 +525,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testVocabularyAddButtonDispatchesAction() throws {
+    func testDictionaryAddButtonDispatchesAction() throws {
         var savedValue: String?
         let controller = PreferencesWindowController(actions: makeActions(
             saveDictionaryEntry: { _, _, correct, completion in
@@ -520,7 +544,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testVocabularyEditAndDeleteButtonsDispatchActions() throws {
+    func testDictionaryEditAndDeleteButtonsDispatchActions() throws {
         var editedOriginal: String?
         var editedValue: String?
         var deletedValues: Set<String> = []
@@ -659,6 +683,13 @@ private extension NSView {
             return field
         }
         return subviews.lazy.compactMap { $0.editableTextField(withValue: value) }.first
+    }
+
+    func textField(withValue value: String) -> NSTextField? {
+        if let field = self as? NSTextField, field.stringValue == value, !field.isEffectivelyHidden {
+            return field
+        }
+        return subviews.lazy.compactMap { $0.textField(withValue: value) }.first
     }
 
     var isEffectivelyHidden: Bool {

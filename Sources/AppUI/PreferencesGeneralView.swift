@@ -10,6 +10,7 @@ final class PreferencesGeneralView: NSView {
     private let accessibilityLabel = NSTextField(labelWithString: "")
     private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
     private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
+    private let changeModelButton = NSButton(title: "Change...", target: nil, action: nil)
     private let offloadPopup = NSPopUpButton()
     private let clipboardHistoryCheckbox = NSButton(checkboxWithTitle: "Keep transcripts in clipboard history", target: nil, action: nil)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
@@ -18,6 +19,7 @@ final class PreferencesGeneralView: NSView {
     private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
     private let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
     private let setLaunchAtLogin: (Bool) -> Void
+    var changeModel: () -> Void = {}
 
     var modelOffloadChoices: [String] {
         offloadPopup.itemTitles
@@ -44,11 +46,14 @@ final class PreferencesGeneralView: NSView {
 
         PreferencesPageSupport.configureSecondaryButton(microphoneButton)
         PreferencesPageSupport.configureSecondaryButton(accessibilityButton)
+        PreferencesPageSupport.configureSecondaryButton(changeModelButton)
 
         microphoneButton.target = self
         microphoneButton.action = #selector(requestMicrophoneAccess(_:))
         accessibilityButton.target = self
         accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
+        changeModelButton.target = self
+        changeModelButton.action = #selector(changeModelAction(_:))
         offloadPopup.addItems(withTitles: ModelOffloadPolicy.allCases.map(\.displayName))
         offloadPopup.controlSize = .small
         offloadPopup.target = self
@@ -86,7 +91,7 @@ final class PreferencesGeneralView: NSView {
             content: [
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Readiness", detail: readinessLabel),
-                    PreferencesPageSupport.makeSettingRow(title: "Model", detail: modelLabel),
+                    PreferencesPageSupport.makeSettingRow(title: "Model", detail: modelLabel, action: changeModelButton),
                     PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel),
                     PreferencesPageSupport.makeSettingRow(
                         title: "Offload model",
@@ -169,6 +174,10 @@ final class PreferencesGeneralView: NSView {
 
     @objc private func requestAccessibilityAccess(_: NSButton) {
         requestAccessibility()
+    }
+
+    @objc private func changeModelAction(_: NSButton) {
+        changeModel()
     }
 
     @objc private func modelOffloadChanged(_ sender: NSPopUpButton) {

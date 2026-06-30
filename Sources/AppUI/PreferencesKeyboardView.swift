@@ -23,7 +23,7 @@ final class PreferencesKeyboardView: NSView {
         instructions.font = .systemFont(ofSize: 12)
 
         let page = PreferencesPageSupport.makePage(
-            title: "Keyboard",
+            title: "Input",
             description: "Choose how you start and stop transcription.",
             content: [
                 PreferencesPageSupport.makeGroup(rows: [

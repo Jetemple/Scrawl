@@ -19,7 +19,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private var workspaceGroup: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
-    private let resetButton = NSButton(title: "Reset Vocabulary", target: nil, action: nil)
+    private let resetButton = NSButton(title: "Reset Dictionary", target: nil, action: nil)
     private let editButton = NSButton(title: "Edit", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
     private var terms: [VocabularyTerm] = []
@@ -110,7 +110,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         addRow.orientation = .horizontal
         addRow.spacing = 8
 
-        searchField.placeholderString = "Search vocabulary"
+        searchField.placeholderString = "Search dictionary"
         searchField.delegate = self
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("term"))
         column.title = "Preferred Terms"
@@ -160,7 +160,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected(_:))
         let page = PreferencesPageSupport.makePage(
-            title: "Vocabulary",
+            title: "Dictionary",
             description: "Preferred names, terms, and phrases that help Whisper recognize your language.",
             content: [
                 addRow,
@@ -198,8 +198,8 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private func updateState() {
         if loadErrorDescription != nil {
             state = .unavailable
-            stateTitle.stringValue = "Vocabulary unavailable"
-            stateDetail.stringValue = "Scrawl could not read the saved vocabulary file."
+            stateTitle.stringValue = "Dictionary unavailable"
+            stateDetail.stringValue = "Scrawl could not read the saved dictionary file."
         } else if terms.isEmpty {
             state = .empty
             stateTitle.stringValue = "No preferred terms yet"
@@ -246,7 +246,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private func showEditor(original: String) {
         guard let window else { return }
         let field = NSTextField(string: original)
-        field.bezelStyle = .roundedBezel // Match the rounded input on the Vocabulary page.
+        field.bezelStyle = .roundedBezel
         let cancel = NSButton(title: "Cancel", target: nil, action: nil)
         let save = NSButton(title: "Save", target: nil, action: nil)
         save.keyEquivalent = "\r"
