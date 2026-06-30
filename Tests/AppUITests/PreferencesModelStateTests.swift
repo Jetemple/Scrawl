@@ -33,7 +33,7 @@ final class PreferencesModelStateTests: XCTestCase {
 
         XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
         XCTAssertEqual(rows[0].displayName, "Parakeet v3")
-        XCTAssertEqual(rows[0].descriptionText, "Fastest. On-device, Apple Silicon.")
+        XCTAssertEqual(rows[0].descriptionText, "Fastest on-device")
         XCTAssertEqual(rows[0].statusText, "Recommended")
         XCTAssertTrue(rows[0].isInstalled)
         XCTAssertTrue(rows[0].isSelected)
@@ -120,7 +120,7 @@ final class PreferencesModelStateTests: XCTestCase {
 
         XCTAssertEqual(rows.map(\.id), ["ggml-small.en", "ggml-medium"])
         XCTAssertEqual(rows[0].displayName, "Small (English)")
-        XCTAssertEqual(rows[0].descriptionText, "Fast, English only")
+        XCTAssertEqual(rows[0].descriptionText, "Fast English")
         XCTAssertEqual(rows[0].statusText, "Installed")
         XCTAssertTrue(rows[0].isInstalled)
         XCTAssertTrue(rows[0].isSelected)
@@ -129,7 +129,7 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(rows[0].canSelect)
 
         XCTAssertEqual(rows[1].displayName, "Medium")
-        XCTAssertEqual(rows[1].descriptionText, "Slower, many languages")
+        XCTAssertEqual(rows[1].descriptionText, "Multilingual")
         XCTAssertFalse(rows[1].isInstalled)
         XCTAssertFalse(rows[1].isSelected)
         XCTAssertTrue(rows[1].isDownloading)

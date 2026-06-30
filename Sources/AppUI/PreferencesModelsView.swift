@@ -63,6 +63,8 @@ final class PreferencesModelsView: NSView {
     private var selectedRowHasAction = false
     private var selectedIndicatorView: NSView?
     private var selectedActionSlotView: NSView?
+    private var firstActionView: NSView?
+    private var firstActionRowView: NSView?
     private let rowActionWidth: CGFloat = 86
     private let selectedIndicatorWidth: CGFloat = 28
     private let estimatedRowHeight: CGFloat = 55
@@ -97,6 +99,13 @@ final class PreferencesModelsView: NSView {
 
     var visibleModelListHeight: CGFloat {
         listHeightConstraint?.constant ?? 0
+    }
+
+    var visibleFirstActionCenterYOffset: CGFloat? {
+        guard let firstActionView, let firstActionRowView else { return nil }
+        let actionFrame = convert(firstActionView.bounds, from: firstActionView)
+        let rowFrame = convert(firstActionRowView.bounds, from: firstActionRowView)
+        return actionFrame.midY - rowFrame.midY
     }
 
     var isCriticalContentWithinBounds: Bool {
@@ -230,6 +239,8 @@ final class PreferencesModelsView: NSView {
         selectedRowHasAction = false
         selectedIndicatorView = nil
         selectedActionSlotView = nil
+        firstActionView = nil
+        firstActionRowView = nil
         listHeightConstraint?.constant = modelListHeight(rowCount: rows.count)
 
         for arrangedSubview in modelsStack.arrangedSubviews {
@@ -296,6 +307,7 @@ final class PreferencesModelsView: NSView {
             selectedSlot.addSubview(checkmark)
             NSLayoutConstraint.activate([
                 selectedSlot.widthAnchor.constraint(equalToConstant: rowActionWidth),
+                selectedSlot.heightAnchor.constraint(equalToConstant: 20),
                 checkmark.centerXAnchor.constraint(equalTo: selectedSlot.centerXAnchor),
                 checkmark.centerYAnchor.constraint(equalTo: selectedSlot.centerYAnchor),
             ])
@@ -319,21 +331,23 @@ final class PreferencesModelsView: NSView {
             actionArea = actionButton
         }
 
-        let topLine = NSStackView(views: [nameLabel, NSView(), statusLabel, actionArea])
-        topLine.orientation = .horizontal
-        topLine.alignment = .centerY
-        topLine.spacing = 8
+        let textStack = NSStackView(views: [nameLabel, detailLabel])
+        textStack.orientation = .vertical
+        textStack.alignment = .width
+        textStack.spacing = 2
+        textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let detailLine = NSStackView(views: [detailLabel, NSView()])
-        detailLine.orientation = .horizontal
-        detailLine.alignment = .centerY
-
-        let rowStack = NSStackView(views: [topLine, detailLine])
-        rowStack.orientation = .vertical
-        rowStack.alignment = .width
-        rowStack.spacing = 2
+        let rowStack = NSStackView(views: [textStack, NSView(), statusLabel, actionArea])
+        rowStack.orientation = .horizontal
+        rowStack.alignment = .centerY
+        rowStack.spacing = 8
         rowStack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 12)
-        return ModelRowBackgroundView(content: rowStack, isSelected: row.isSelected)
+        let rowContainer = ModelRowBackgroundView(content: rowStack, isSelected: row.isSelected)
+        if !row.isSelected, firstActionView == nil {
+            firstActionView = actionArea
+            firstActionRowView = rowContainer
+        }
+        return rowContainer
     }
 
     private func modelListHeight(rowCount: Int) -> CGFloat {

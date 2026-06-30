@@ -117,6 +117,27 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
+    func testInstalledRowActionIsVerticallyCenteredInFullRow() throws {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+        view.update(rows: [
+            modelRow(id: "parakeet-v3", installed: true, selected: false),
+            modelRow(id: "ggml-small.en", installed: true, selected: true),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertLessThanOrEqual(abs(try XCTUnwrap(view.visibleFirstActionCenterYOffset)), 2.0)
+    }
+
+    @MainActor
     func testFourModelRowsDoNotLeaveLargeEmptyListTail() {
         let view = PreferencesModelsView(
             selectModel: { _ in },
