@@ -361,7 +361,7 @@ final class PreferencesModelsView: NSView {
 
         let textStack = NSStackView(views: [nameLabel, detailLabel])
         textStack.orientation = .vertical
-        textStack.alignment = .width
+        textStack.alignment = .leading
         textStack.spacing = 2
         textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         if firstTextStackView == nil {

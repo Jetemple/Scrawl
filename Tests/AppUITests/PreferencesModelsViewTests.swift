@@ -180,6 +180,30 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
+    func testModelRowTitleAndSubtitleShareLeadingEdge() throws {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+        view.update(rows: [
+            modelRow(id: "parakeet-v3", installed: true, selected: true),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        let title = try XCTUnwrap(view.firstTextField(withValue: "Parakeet v3"))
+        let subtitle = try XCTUnwrap(view.firstTextField(withValue: "Fastest on-device"))
+        let titleMinX = view.convert(title.bounds, from: title).minX
+        let subtitleMinX = view.convert(subtitle.bounds, from: subtitle).minX
+        XCTAssertEqual(titleMinX, subtitleMinX, accuracy: 0.5)
+    }
+
+    @MainActor
     func testFourModelRowsDoNotLeaveLargeEmptyListTail() {
         let view = PreferencesModelsView(
             selectModel: { _ in },
