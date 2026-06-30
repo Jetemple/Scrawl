@@ -26,6 +26,34 @@ final class PreferencesSidebarBackgroundView: NSView {
     }
 }
 
+final class PreferencesSidebarRowBackgroundView: NSView {
+    private let isSelectedRow: Bool
+
+    init(isSelected: Bool) {
+        isSelectedRow = isSelected
+        super.init(frame: .zero)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var wantsUpdateLayer: Bool {
+        true
+    }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = isSelectedRow
+                ? NSColor.white.withAlphaComponent(0.10).cgColor
+                : NSColor.clear.cgColor
+            layer?.cornerRadius = 7
+        }
+    }
+}
+
 final class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     struct Actions {
         let selectModel: (String) -> Void
@@ -108,6 +136,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     private let sidebarTable = NSTableView()
     private let contentContainer = PreferencesPageSupport.makeContentBackground()
     private weak var sidebarBackgroundView: PreferencesSidebarBackgroundView?
+    private var hasSelectedSidebarPillHighlight = false
     private var sectionViews: [Section: NSView] = [:]
     private var selectedSection = Section.general
     private var didCenterWindow = false
@@ -150,6 +179,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         sidebarBackgroundView != nil
     }
 
+    var selectedSidebarRowUsesPillHighlight: Bool {
+        hasSelectedSidebarPillHighlight
+    }
+
     var historyState: PreferencesHistoryView.State {
         historyView.state
     }
@@ -176,6 +209,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     var historyUsesGroupedWorkspace: Bool {
         historyView.usesGroupedWorkspace
+    }
+
+    var historyUsesPinnedActionBar: Bool {
+        historyView.usesPinnedActionBar
     }
 
     var historyRowsAreTranscriptFirst: Bool {
@@ -329,8 +366,9 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard let section = Section(rawValue: row) else { return nil }
-        let isSelected = sidebarTable.selectedRow == row
+        let isSelected = section == selectedSection
         let cell = NSTableCellView()
+        let background = PreferencesSidebarRowBackgroundView(isSelected: isSelected)
         let imageView = NSImageView(image: NSImage(systemSymbolName: section.symbolName, accessibilityDescription: nil) ?? NSImage())
         let label = NSTextField(labelWithString: section.title)
         label.font = .systemFont(ofSize: 13)
@@ -343,13 +381,22 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
+        background.translatesAutoresizingMaskIntoConstraints = false
         stack.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(stack)
+        cell.addSubview(background)
+        background.addSubview(stack)
+        if isSelected {
+            hasSelectedSidebarPillHighlight = true
+        }
         NSLayoutConstraint.activate([
             imageView.widthAnchor.constraint(equalToConstant: 16),
-            stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8),
-            stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            background.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            background.topAnchor.constraint(equalTo: cell.topAnchor, constant: 2),
+            background.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -2),
+            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: background.trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: background.centerYAnchor),
         ])
         return cell
     }
@@ -363,8 +410,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     func selectSection(_ section: Section) {
         selectedSection = section
+        hasSelectedSidebarPillHighlight = false
         sidebarTable.selectRowIndexes(IndexSet(integer: section.rawValue), byExtendingSelection: false)
         sidebarTable.reloadData()
+        _ = sidebarTable.view(atColumn: 0, row: section.rawValue, makeIfNecessary: true)
         showSelectedSection()
     }
 

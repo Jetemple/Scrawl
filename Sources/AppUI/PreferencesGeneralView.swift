@@ -87,7 +87,7 @@ final class PreferencesGeneralView: NSView {
 
         let page = PreferencesPageSupport.makePage(
             title: "General",
-            description: "Scrawl readiness and current transcription setup.",
+            description: "Readiness and defaults.",
             content: [
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Readiness", detail: readinessLabel),

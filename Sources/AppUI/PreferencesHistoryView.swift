@@ -20,6 +20,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private let tableView = NSTableView()
     private let stateView = NSView()
     private var workspaceGroup: NSView?
+    private var actionBarView: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
@@ -48,6 +49,10 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
 
     var usesGroupedWorkspace: Bool {
         workspaceGroup is PreferencesBackgroundView
+    }
+
+    var usesPinnedActionBar: Bool {
+        actionBarView is PreferencesPinnedActionBarView
     }
 
     var visibleRowsAreTranscriptFirst: Bool {
@@ -206,14 +211,19 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
 
         let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
         workspaceGroup = workspace
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(
+            leading: [copyButton, repasteButton, addTermButton],
+            trailing: [deleteButton]
+        )
+        actionBarView = actionBar
         let page = PreferencesPageSupport.makePage(
             title: "History",
-            description: "Recent transcripts stored only on this Mac.",
+            description: "Recent transcripts stored on this Mac.",
             content: [
                 toggle,
                 searchField,
                 workspace,
-                PreferencesPageSupport.makeActionRow(buttons: [copyButton, repasteButton, addTermButton, deleteButton]),
+                actionBar,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)

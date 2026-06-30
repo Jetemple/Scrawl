@@ -168,7 +168,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         actionBarView = actionBar
         let page = PreferencesPageSupport.makePage(
             title: "Dictionary",
-            description: "Preferred names, terms, and phrases that help Whisper recognize your language.",
+            description: "Preferred terms for names and phrases.",
             content: [
                 addRow,
                 searchField,

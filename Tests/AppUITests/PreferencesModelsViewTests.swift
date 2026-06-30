@@ -229,6 +229,60 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
+    func testModelsUsePinnedWorkbenchActionBar() {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
+        view.update(rows: [
+            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: "ggml-medium", installed: false, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(view.usesPinnedActionBar)
+    }
+
+    @MainActor
+    func testModelStatusTextStaysNeutralWhenStateHasOtherVisualIndicator() throws {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
+        view.update(rows: [
+            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            PreferencesModelRow(
+                id: "ggml-medium",
+                displayName: PreferencesModelState.displayName(forModelID: "ggml-medium"),
+                descriptionText: PreferencesModelState.description(forModelID: "ggml-medium"),
+                isInstalled: false,
+                isSelected: false,
+                isDownloading: true,
+                isCancelled: false,
+                downloadProgressText: "42% (630/1500 MB)"
+            ),
+        ], downloadableModels: [], isDownloadInProgress: true)
+        view.layoutSubtreeIfNeeded()
+
+        let recommended = try XCTUnwrap(view.firstTextField(withValue: "Recommended"))
+        let progress = try XCTUnwrap(view.firstTextField(withValue: "42% (630/1500 MB)"))
+        XCTAssertFalse(recommended.textColor?.isEqual(NSColor.systemBlue) ?? false)
+        XCTAssertFalse(progress.textColor?.isEqual(NSColor.systemBlue) ?? false)
+    }
+
+    @MainActor
     func testFourModelRowsDoNotLeaveLargeEmptyListTail() {
         let view = PreferencesModelsView(
             selectModel: { _ in },
@@ -248,6 +302,7 @@ final class PreferencesModelsViewTests: XCTestCase {
         ], downloadableModels: [], isDownloadInProgress: false)
         view.layoutSubtreeIfNeeded()
 
+        XCTAssertGreaterThanOrEqual(view.visibleModelListHeight, 198)
         XCTAssertLessThanOrEqual(view.visibleModelListHeight, 228)
     }
 }

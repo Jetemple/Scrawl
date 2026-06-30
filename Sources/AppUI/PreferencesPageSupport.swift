@@ -31,8 +31,8 @@ final class PreferencesBackgroundView: NSView {
                 layer?.borderWidth = 0
             case .group:
                 layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-                layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.55).cgColor
-                layer?.borderWidth = 1
+                layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+                layer?.borderWidth = 0.5
                 layer?.cornerRadius = 8
             }
         }
@@ -217,7 +217,7 @@ enum PreferencesPageSupport {
         return row
     }
 
-    static func makePinnedActionBar(leading: [NSButton], trailing: [NSButton]) -> NSView {
+    static func makePinnedActionBar(leading: [NSButton], trailing: [NSButton], leadingInset: CGFloat = 0) -> NSView {
         let leadingStack = NSStackView(views: leading)
         leadingStack.orientation = .horizontal
         leadingStack.alignment = .centerY
@@ -232,7 +232,7 @@ enum PreferencesPageSupport {
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 0, right: 0)
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: leadingInset, bottom: 0, right: 0)
 
         let row = PreferencesPinnedActionBarView()
         stack.translatesAutoresizingMaskIntoConstraints = false

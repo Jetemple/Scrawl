@@ -59,6 +59,15 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testSidebarShowsSelectedRowPillHighlight() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        controller.selectSection(.models)
+
+        XCTAssertTrue(controller.selectedSidebarRowUsesPillHighlight)
+    }
+
+    @MainActor
     func testModelsPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
@@ -133,6 +142,15 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
             XCTAssertNotEqual(lightComponents, darkComponents)
         }
+    }
+
+    @MainActor
+    func testGroupedPreferencesSurfacesUseSubtleBorders() {
+        let view = PreferencesPageSupport.makeRoundedBackground()
+
+        view.updateLayer()
+
+        XCTAssertLessThanOrEqual(view.layer?.borderWidth ?? 0, 0.5)
     }
 
     @MainActor
@@ -354,6 +372,21 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testGeneralSettingTitlesShareLeadingEdge() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
+
+        let titleMinXs = try ["Readiness", "Model", "Hotkey", "Offload model"].map { title -> CGFloat in
+            let field = try XCTUnwrap(contentView.textField(withValue: title))
+            return contentView.convert(field.bounds, from: field).minX.rounded()
+        }
+
+        XCTAssertEqual(Set(titleMinXs).count, 1)
+    }
+
+    @MainActor
     func testInputAndDictionaryVisibleCopyUseNewNames() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let contentView = try XCTUnwrap(controller.window?.contentView)
@@ -557,6 +590,27 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         XCTAssertTrue(controller.historyUsesGroupedWorkspace)
         XCTAssertTrue(controller.dictionaryUsesGroupedWorkspace)
+    }
+
+    @MainActor
+    func testHistoryUsesPinnedWorkbenchActionBar() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        XCTAssertTrue(controller.historyUsesPinnedActionBar)
+    }
+
+    @MainActor
+    func testWorkbenchPageDescriptionsAreCompact() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        controller.selectSection(.models)
+        XCTAssertNotNil(contentView.textField(withValue: "Manage local transcription models."))
+        XCTAssertNil(contentView.textField(withValue: "Select an installed model, download another, or add your own."))
+
+        controller.selectSection(.dictionary)
+        XCTAssertNotNil(contentView.textField(withValue: "Preferred terms for names and phrases."))
+        XCTAssertNil(contentView.textField(withValue: "Preferred names, terms, and phrases that help Whisper recognize your language."))
     }
 
     @MainActor

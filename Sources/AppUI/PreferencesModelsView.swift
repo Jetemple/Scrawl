@@ -59,6 +59,7 @@ final class PreferencesModelsView: NSView {
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel Download", target: nil, action: nil)
     private var footerHelpLabel: NSTextField?
+    private var actionBarView: NSView?
     private var listHeightConstraint: NSLayoutConstraint?
     private var twoLineRowCount = 0
     private var modelInfoButtonCount = 0
@@ -75,7 +76,7 @@ final class PreferencesModelsView: NSView {
     private let selectedIndicatorWidth: CGFloat = 28
     private let rowContentLeftInset: CGFloat = 18
     private let rowContentRightInset: CGFloat = 12
-    private let estimatedRowHeight: CGFloat = 55
+    private let estimatedRowHeight: CGFloat = 49
 
     var listIsTopAnchored: Bool {
         modelsStack.superview?.isFlipped == true
@@ -99,6 +100,10 @@ final class PreferencesModelsView: NSView {
 
     var visibleModelInfoButtonCount: Int {
         modelInfoButtonCount
+    }
+
+    var usesPinnedActionBar: Bool {
+        actionBarView is PreferencesPinnedActionBarView
     }
 
     var visibleSelectedRowHasAction: Bool {
@@ -244,11 +249,12 @@ final class PreferencesModelsView: NSView {
         findModelsButton.toolTip = "Open the whisper.cpp model repository in your browser."
         findModelsButton.isHidden = true
 
-        let buttonRow = NSStackView(views: [addButton, revealButton, findModelsButton, NSView(), deleteButton, cancelButton])
-        buttonRow.orientation = .horizontal
-        buttonRow.alignment = .centerY
-        buttonRow.spacing = 8
-        buttonRow.edgeInsets = NSEdgeInsets(top: 0, left: 24, bottom: 0, right: 0)
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(
+            leading: [addButton, revealButton],
+            trailing: [deleteButton, cancelButton],
+            leadingInset: 24
+        )
+        actionBarView = actionBar
 
         let helpLabel = NSTextField(labelWithString: "Bring your own: any whisper.cpp ggml .bin.")
         helpLabel.font = .systemFont(ofSize: 11)
@@ -264,8 +270,8 @@ final class PreferencesModelsView: NSView {
 
         let page = PreferencesPageSupport.makePage(
             title: "Models",
-            description: "Select an installed model, download another, or add your own.",
-            content: [listView, buttonRow, helpRow]
+            description: "Manage local transcription models.",
+            content: [listView, actionBar, helpRow]
         )
         PreferencesPageSupport.fill(self, with: page)
         update(rows: [], downloadableModels: [], isDownloadInProgress: false)
@@ -361,13 +367,39 @@ final class PreferencesModelsView: NSView {
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        let statusView: NSView
+        if row.isDownloading, let progress = progressPercent(from: row.downloadProgressText) {
+            let progressIndicator = NSProgressIndicator()
+            progressIndicator.isIndeterminate = false
+            progressIndicator.minValue = 0
+            progressIndicator.maxValue = 100
+            progressIndicator.doubleValue = progress
+            progressIndicator.style = .bar
+            progressIndicator.controlSize = .small
+            progressIndicator.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                progressIndicator.widthAnchor.constraint(equalToConstant: 132),
+                progressIndicator.heightAnchor.constraint(equalToConstant: 4),
+            ])
+
+            let statusStack = NSStackView(views: [statusLabel, progressIndicator])
+            statusStack.orientation = .vertical
+            statusStack.alignment = .trailing
+            statusStack.spacing = 4
+            statusStack.setContentHuggingPriority(.required, for: .horizontal)
+            statusStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+            statusView = statusStack
+        } else {
+            statusView = statusLabel
+        }
+
         let actionArea: NSView
         if row.isSelected {
             let checkmark = NSImageView(image: NSImage(
                 systemSymbolName: "checkmark.circle.fill",
                 accessibilityDescription: "Selected"
             ) ?? NSImage())
-            checkmark.contentTintColor = .systemBlue
+            checkmark.contentTintColor = .systemOrange
             checkmark.symbolConfiguration = .init(pointSize: 13, weight: .medium)
             checkmark.setContentHuggingPriority(.required, for: .horizontal)
             checkmark.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -426,7 +458,7 @@ final class PreferencesModelsView: NSView {
         infoButton.widthAnchor.constraint(equalToConstant: 22).isActive = true
         modelInfoButtonCount += 1
 
-        let rowStack = NSStackView(views: [textStack, NSView(), statusLabel, infoButton, actionArea])
+        let rowStack = NSStackView(views: [textStack, NSView(), statusView, infoButton, actionArea])
         rowStack.orientation = .horizontal
         rowStack.alignment = .centerY
         rowStack.spacing = 8
@@ -452,8 +484,18 @@ final class PreferencesModelsView: NSView {
 
     private func statusColor(for row: PreferencesModelRow) -> NSColor {
         if row.isCancelled { return .systemOrange }
-        if row.isSelected || row.isDownloading || row.isPreparing { return .systemBlue }
         return .secondaryLabelColor
+    }
+
+    private func progressPercent(from text: String?) -> Double? {
+        guard
+            let text,
+            let range = text.range(of: #"\d+(?=%)"#, options: .regularExpression),
+            let value = Double(text[range])
+        else {
+            return nil
+        }
+        return min(100, max(0, value))
     }
 
     @objc private func selectModelAction(_ sender: NSButton) {

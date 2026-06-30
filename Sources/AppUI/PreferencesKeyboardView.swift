@@ -24,7 +24,7 @@ final class PreferencesKeyboardView: NSView {
 
         let page = PreferencesPageSupport.makePage(
             title: "Input",
-            description: "Choose how you start and stop transcription.",
+            description: "Hotkey and recording behavior.",
             content: [
                 PreferencesPageSupport.makeGroup(rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Current Hotkey", detail: hotkeyLabel, action: captureButton),
