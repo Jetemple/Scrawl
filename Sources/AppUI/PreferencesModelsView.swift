@@ -58,6 +58,7 @@ final class PreferencesModelsView: NSView {
     private let findModelsButton = NSButton(title: "Find Models", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel Download", target: nil, action: nil)
+    private var footerHelpLabel: NSTextField?
     private var listHeightConstraint: NSLayoutConstraint?
     private var twoLineRowCount = 0
     private var selectedRowHasAction = false
@@ -65,8 +66,11 @@ final class PreferencesModelsView: NSView {
     private var selectedActionSlotView: NSView?
     private var firstActionView: NSView?
     private var firstActionRowView: NSView?
+    private var firstTextStackView: NSView?
     private let rowActionWidth: CGFloat = 86
     private let selectedIndicatorWidth: CGFloat = 28
+    private let rowContentLeftInset: CGFloat = 18
+    private let rowContentRightInset: CGFloat = 12
     private let estimatedRowHeight: CGFloat = 55
 
     var listIsTopAnchored: Bool {
@@ -106,6 +110,26 @@ final class PreferencesModelsView: NSView {
         let actionFrame = convert(firstActionView.bounds, from: firstActionView)
         let rowFrame = convert(firstActionRowView.bounds, from: firstActionRowView)
         return actionFrame.midY - rowFrame.midY
+    }
+
+    var visibleFirstRowTextMinX: CGFloat? {
+        guard let firstTextStackView else { return nil }
+        return convert(firstTextStackView.bounds, from: firstTextStackView).minX
+    }
+
+    var visibleFirstRowTextLeftInset: CGFloat? {
+        guard let visibleFirstRowTextMinX else { return nil }
+        let listFrame = convert(listView.bounds, from: listView)
+        return visibleFirstRowTextMinX - listFrame.minX
+    }
+
+    var visibleFooterControlsMinX: CGFloat? {
+        convert(addButton.bounds, from: addButton).minX
+    }
+
+    var visibleFooterHelpMinX: CGFloat? {
+        guard let footerHelpLabel else { return nil }
+        return convert(footerHelpLabel.bounds, from: footerHelpLabel).minX
     }
 
     var isCriticalContentWithinBounds: Bool {
@@ -203,16 +227,19 @@ final class PreferencesModelsView: NSView {
         buttonRow.orientation = .horizontal
         buttonRow.alignment = .centerY
         buttonRow.spacing = 8
+        buttonRow.edgeInsets = NSEdgeInsets(top: 0, left: 24, bottom: 0, right: 0)
 
         let helpLabel = NSTextField(labelWithString: "Bring your own: any whisper.cpp ggml .bin.")
         helpLabel.font = .systemFont(ofSize: 11)
         helpLabel.textColor = .secondaryLabelColor
         helpLabel.lineBreakMode = .byTruncatingTail
         helpLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        footerHelpLabel = helpLabel
         let helpRow = NSStackView(views: [helpLabel, NSView()])
         helpRow.orientation = .horizontal
         helpRow.alignment = .centerY
         helpRow.spacing = 0
+        helpRow.edgeInsets = NSEdgeInsets(top: 0, left: 20, bottom: 0, right: 0)
 
         let page = PreferencesPageSupport.makePage(
             title: "Models",
@@ -241,6 +268,7 @@ final class PreferencesModelsView: NSView {
         selectedActionSlotView = nil
         firstActionView = nil
         firstActionRowView = nil
+        firstTextStackView = nil
         listHeightConstraint?.constant = modelListHeight(rowCount: rows.count)
 
         for arrangedSubview in modelsStack.arrangedSubviews {
@@ -336,12 +364,20 @@ final class PreferencesModelsView: NSView {
         textStack.alignment = .width
         textStack.spacing = 2
         textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if firstTextStackView == nil {
+            firstTextStackView = textStack
+        }
 
         let rowStack = NSStackView(views: [textStack, NSView(), statusLabel, actionArea])
         rowStack.orientation = .horizontal
         rowStack.alignment = .centerY
         rowStack.spacing = 8
-        rowStack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 12)
+        rowStack.edgeInsets = NSEdgeInsets(
+            top: 8,
+            left: rowContentLeftInset,
+            bottom: 8,
+            right: rowContentRightInset
+        )
         let rowContainer = ModelRowBackgroundView(content: rowStack, isSelected: row.isSelected)
         if !row.isSelected, firstActionView == nil {
             firstActionView = actionArea
