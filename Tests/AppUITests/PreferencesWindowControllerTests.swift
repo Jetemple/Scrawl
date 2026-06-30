@@ -42,6 +42,23 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testSidebarUsesOnlyApprovedSFSymbolNames() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        XCTAssertEqual(
+            controller.sidebarSymbolNames,
+            ["gearshape", "cpu", "keyboard", "clock.arrow.circlepath", "text.book.closed", "info.circle"]
+        )
+    }
+
+    @MainActor
+    func testSidebarUsesGraphiteTreatment() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        XCTAssertTrue(controller.usesGraphiteSidebar)
+    }
+
+    @MainActor
     func testModelsPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)

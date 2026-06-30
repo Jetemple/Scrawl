@@ -4,6 +4,28 @@ import Permissions
 import SettingsStore
 import TranscriptHistoryStore
 
+final class PreferencesSidebarBackgroundView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var wantsUpdateLayer: Bool {
+        true
+    }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor(calibratedRed: 0.13, green: 0.15, blue: 0.16, alpha: 1).cgColor
+        }
+    }
+}
+
 final class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
     struct Actions {
         let selectModel: (String) -> Void
@@ -85,6 +107,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     private let aboutView: PreferencesAboutView
     private let sidebarTable = NSTableView()
     private let contentContainer = PreferencesPageSupport.makeContentBackground()
+    private weak var sidebarBackgroundView: PreferencesSidebarBackgroundView?
     private var sectionViews: [Section: NSView] = [:]
     private var selectedSection = Section.general
     private var didCenterWindow = false
@@ -117,6 +140,14 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     var hasDraggableSidebarDivider: Bool {
         window?.contentView?.containsSplitView ?? false
+    }
+
+    var sidebarSymbolNames: [String] {
+        Section.allCases.map(\.symbolName)
+    }
+
+    var usesGraphiteSidebar: Bool {
+        sidebarBackgroundView != nil
     }
 
     var historyState: PreferencesHistoryView.State {
@@ -291,12 +322,15 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard let section = Section(rawValue: row) else { return nil }
+        let isSelected = sidebarTable.selectedRow == row
         let cell = NSTableCellView()
         let imageView = NSImageView(image: NSImage(systemSymbolName: section.symbolName, accessibilityDescription: nil) ?? NSImage())
         let label = NSTextField(labelWithString: section.title)
         label.font = .systemFont(ofSize: 13)
         imageView.symbolConfiguration = .init(pointSize: 13, weight: .regular)
-        imageView.contentTintColor = .secondaryLabelColor
+        let tint = isSelected ? NSColor.systemOrange : NSColor.white.withAlphaComponent(0.78)
+        imageView.contentTintColor = tint
+        label.textColor = tint
 
         let stack = NSStackView(views: [imageView, label])
         stack.orientation = .horizontal
@@ -316,12 +350,14 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     func tableViewSelectionDidChange(_: Notification) {
         guard let section = Section(rawValue: sidebarTable.selectedRow) else { return }
         selectedSection = section
+        sidebarTable.reloadData()
         showSelectedSection()
     }
 
     func selectSection(_ section: Section) {
         selectedSection = section
         sidebarTable.selectRowIndexes(IndexSet(integer: section.rawValue), byExtendingSelection: false)
+        sidebarTable.reloadData()
         showSelectedSection()
     }
 
@@ -389,9 +425,11 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         sidebarTable.addTableColumn(column)
         sidebarTable.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         sidebarTable.headerView = nil
-        sidebarTable.rowHeight = 30
-        sidebarTable.style = .sourceList
+        sidebarTable.rowHeight = 34
+        sidebarTable.style = .plain
         sidebarTable.backgroundColor = .clear
+        sidebarTable.selectionHighlightStyle = .none
+        sidebarTable.usesAlternatingRowBackgroundColors = false
         sidebarTable.dataSource = self
         sidebarTable.delegate = self
 
@@ -401,19 +439,18 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         scrollView.documentView = sidebarTable
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        let sidebar = NSVisualEffectView()
-        sidebar.material = .sidebar
-        sidebar.blendingMode = .behindWindow
-        sidebar.state = .active
+        let sidebar = PreferencesSidebarBackgroundView()
+        sidebarBackgroundView = sidebar
         sidebar.addSubview(scrollView)
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 12),
-            scrollView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
+            scrollView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
+            scrollView.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 14),
+            scrollView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -10),
         ])
 
         sidebarTable.selectRowIndexes(IndexSet(integer: selectedSection.rawValue), byExtendingSelection: false)
+        sidebarTable.reloadData()
         return sidebar
     }
 

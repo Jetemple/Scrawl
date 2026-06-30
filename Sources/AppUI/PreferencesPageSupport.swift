@@ -189,11 +189,48 @@ enum PreferencesPageSupport {
         makeActionRow(buttons: [button])
     }
 
+    static func makeSectionLabel(_ title: String) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        return label
+    }
+
     static func makeActionRow(buttons: [NSButton]) -> NSView {
         let stack = NSStackView(views: buttons + [NSView()])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
+
+        let row = NSView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: row.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        return row
+    }
+
+    static func makePinnedActionBar(leading: [NSButton], trailing: [NSButton]) -> NSView {
+        let leadingStack = NSStackView(views: leading)
+        leadingStack.orientation = .horizontal
+        leadingStack.alignment = .centerY
+        leadingStack.spacing = 8
+
+        let trailingStack = NSStackView(views: trailing)
+        trailingStack.orientation = .horizontal
+        trailingStack.alignment = .centerY
+        trailingStack.spacing = 8
+
+        let stack = NSStackView(views: [leadingStack, NSView(), trailingStack])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 12
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 0, right: 0)
 
         let row = NSView()
         stack.translatesAutoresizingMaskIntoConstraints = false
