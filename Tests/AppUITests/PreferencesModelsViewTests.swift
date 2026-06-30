@@ -204,6 +204,31 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
+    func testModelsSplitInstalledAndAvailableSections() {
+        let view = PreferencesModelsView(
+            selectModel: { _ in },
+            downloadModel: { _ in },
+            deleteSelectedModel: {},
+            cancelDownload: {},
+            addModel: {},
+            revealModelsFolder: {},
+            openModelSource: {}
+        )
+        view.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
+        view.update(rows: [
+            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+            modelRow(id: "ggml-medium", installed: false, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(view.visibleInstalledSectionTitle, "Installed Models")
+        XCTAssertEqual(view.visibleAvailableSectionTitle, "Available Downloads")
+        XCTAssertEqual(view.visibleModelSearchFieldCount, 0)
+        XCTAssertEqual(view.visibleModelInfoButtonCount, 3)
+    }
+
+    @MainActor
     func testFourModelRowsDoNotLeaveLargeEmptyListTail() {
         let view = PreferencesModelsView(
             selectModel: { _ in },

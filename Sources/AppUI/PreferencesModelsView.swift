@@ -61,12 +61,16 @@ final class PreferencesModelsView: NSView {
     private var footerHelpLabel: NSTextField?
     private var listHeightConstraint: NSLayoutConstraint?
     private var twoLineRowCount = 0
+    private var modelInfoButtonCount = 0
     private var selectedRowHasAction = false
     private var selectedIndicatorView: NSView?
     private var selectedActionSlotView: NSView?
     private var firstActionView: NSView?
     private var firstActionRowView: NSView?
     private var firstTextStackView: NSView?
+    private weak var installedSectionLabel: NSTextField?
+    private weak var availableSectionLabel: NSTextField?
+    private var modelInfoPopover: NSPopover?
     private let rowActionWidth: CGFloat = 86
     private let selectedIndicatorWidth: CGFloat = 28
     private let rowContentLeftInset: CGFloat = 18
@@ -79,6 +83,22 @@ final class PreferencesModelsView: NSView {
 
     var visibleTwoLineRowCount: Int {
         twoLineRowCount
+    }
+
+    var visibleInstalledSectionTitle: String? {
+        installedSectionLabel?.stringValue
+    }
+
+    var visibleAvailableSectionTitle: String? {
+        availableSectionLabel?.stringValue
+    }
+
+    var visibleModelSearchFieldCount: Int {
+        countDescendants(ofType: NSSearchField.self)
+    }
+
+    var visibleModelInfoButtonCount: Int {
+        modelInfoButtonCount
     }
 
     var visibleSelectedRowHasAction: Bool {
@@ -222,6 +242,7 @@ final class PreferencesModelsView: NSView {
         findModelsButton.target = self
         findModelsButton.action = #selector(openModelSourceAction(_:))
         findModelsButton.toolTip = "Open the whisper.cpp model repository in your browser."
+        findModelsButton.isHidden = true
 
         let buttonRow = NSStackView(views: [addButton, revealButton, findModelsButton, NSView(), deleteButton, cancelButton])
         buttonRow.orientation = .horizontal
@@ -261,14 +282,17 @@ final class PreferencesModelsView: NSView {
         deleteButton.isHidden = isDownloadInProgress
         cancelButton.isEnabled = isDownloadInProgress
         cancelButton.isHidden = !isDownloadInProgress
-        findModelsButton.isHidden = isDownloadInProgress
+        findModelsButton.isHidden = true
         twoLineRowCount = rows.count
+        modelInfoButtonCount = 0
         selectedRowHasAction = false
         selectedIndicatorView = nil
         selectedActionSlotView = nil
         firstActionView = nil
         firstActionRowView = nil
         firstTextStackView = nil
+        installedSectionLabel = nil
+        availableSectionLabel = nil
         listHeightConstraint?.constant = modelListHeight(rowCount: rows.count)
 
         for arrangedSubview in modelsStack.arrangedSubviews {
@@ -286,12 +310,32 @@ final class PreferencesModelsView: NSView {
             return
         }
 
+        let installedRows = rows.filter(\.isInstalled)
+        let availableRows = rows.filter { !$0.isInstalled }
+        if !installedRows.isEmpty {
+            installedSectionLabel = addSection(title: "Installed Models", rows: installedRows, isDownloadBlocked: isDownloadInProgress)
+        }
+        if !availableRows.isEmpty {
+            availableSectionLabel = addSection(title: "Available Downloads", rows: availableRows, isDownloadBlocked: isDownloadInProgress)
+        }
+    }
+
+    @discardableResult
+    private func addSection(title: String, rows: [PreferencesModelRow], isDownloadBlocked: Bool) -> NSTextField {
+        let label = PreferencesPageSupport.makeSectionLabel(title)
+        let header = NSStackView(views: [label, NSView()])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.edgeInsets = NSEdgeInsets(top: modelsStack.arrangedSubviews.isEmpty ? 10 : 14, left: rowContentLeftInset, bottom: 6, right: rowContentRightInset)
+        modelsStack.addArrangedSubview(header)
+
         for (index, row) in rows.enumerated() {
-            modelsStack.addArrangedSubview(makeModelRow(row, isDownloadBlocked: isDownloadInProgress))
+            modelsStack.addArrangedSubview(makeModelRow(row, isDownloadBlocked: isDownloadBlocked))
             if index < rows.count - 1 {
                 modelsStack.addArrangedSubview(PreferencesPageSupport.makeSeparator())
             }
         }
+        return label
     }
 
     private func makeModelRow(_ row: PreferencesModelRow, isDownloadBlocked: Bool) -> NSView {
@@ -368,7 +412,21 @@ final class PreferencesModelsView: NSView {
             firstTextStackView = textStack
         }
 
-        let rowStack = NSStackView(views: [textStack, NSView(), statusLabel, actionArea])
+        let infoButton = NSButton(image: NSImage(
+            systemSymbolName: "info.circle",
+            accessibilityDescription: "Model details"
+        ) ?? NSImage(), target: self, action: #selector(showModelInfoAction(_:)))
+        infoButton.identifier = NSUserInterfaceItemIdentifier(row.id)
+        infoButton.isBordered = false
+        infoButton.controlSize = .small
+        infoButton.imagePosition = .imageOnly
+        infoButton.contentTintColor = .secondaryLabelColor
+        infoButton.toolTip = "Show model details"
+        infoButton.translatesAutoresizingMaskIntoConstraints = false
+        infoButton.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        modelInfoButtonCount += 1
+
+        let rowStack = NSStackView(views: [textStack, NSView(), statusLabel, infoButton, actionArea])
         rowStack.orientation = .horizontal
         rowStack.alignment = .centerY
         rowStack.spacing = 8
@@ -430,5 +488,35 @@ final class PreferencesModelsView: NSView {
 
     @objc private func openModelSourceAction(_: NSButton) {
         openModelSource()
+    }
+
+    @objc private func showModelInfoAction(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        let name = PreferencesModelState.displayName(forModelID: id)
+        let detail = PreferencesModelState.description(forModelID: id)
+        let content = NSStackView(views: [
+            NSTextField(labelWithString: name),
+            NSTextField(wrappingLabelWithString: detail),
+        ])
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 6
+        content.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+
+        let popover = NSPopover()
+        let controller = NSViewController()
+        controller.view = content
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        modelInfoPopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
+}
+
+private extension NSView {
+    func countDescendants<T: NSView>(ofType type: T.Type) -> Int {
+        subviews.reduce(self is T ? 1 : 0) { count, subview in
+            count + subview.countDescendants(ofType: type)
+        }
     }
 }
