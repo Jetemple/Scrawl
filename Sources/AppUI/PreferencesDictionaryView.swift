@@ -17,6 +17,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private let tableView = DeleteKeyTableView()
     private let stateView = NSView()
     private var workspaceGroup: NSView?
+    private var actionBarView: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
     private let resetButton = NSButton(title: "Reset Dictionary", target: nil, action: nil)
@@ -41,6 +42,10 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 
     var usesGroupedWorkspace: Bool {
         workspaceGroup is PreferencesBackgroundView
+    }
+
+    var usesPinnedActionBar: Bool {
+        actionBarView is PreferencesPinnedActionBarView
     }
 
     init(actions: Actions) {
@@ -159,6 +164,8 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         editButton.action = #selector(editSelected(_:))
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected(_:))
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(leading: [editButton], trailing: [deleteButton])
+        actionBarView = actionBar
         let page = PreferencesPageSupport.makePage(
             title: "Dictionary",
             description: "Preferred names, terms, and phrases that help Whisper recognize your language.",
@@ -166,7 +173,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
                 addRow,
                 searchField,
                 workspace,
-                PreferencesPageSupport.makeActionRow(buttons: [editButton, deleteButton]),
+                actionBar,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)

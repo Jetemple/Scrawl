@@ -194,6 +194,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         dictionaryView.usesGroupedWorkspace
     }
 
+    var dictionaryUsesPinnedActionBar: Bool {
+        dictionaryView.usesPinnedActionBar
+    }
+
     var modelsListIsTopAnchored: Bool {
         modelsView.listIsTopAnchored
     }

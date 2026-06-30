@@ -560,6 +560,20 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testDictionaryUsesPinnedActionBarAndNewSearchPlaceholder() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: [
+            DictionaryEntry(wrong: "Anduril", correct: "Anduril"),
+        ]))
+        controller.selectSection(.dictionary)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        XCTAssertTrue(controller.dictionaryUsesPinnedActionBar)
+        XCTAssertNotNil(contentView.textField(withPlaceholder: "Search dictionary"))
+        XCTAssertNil(contentView.textField(withPlaceholder: "Search vocabulary"))
+    }
+
+    @MainActor
     func testDictionaryAddButtonDispatchesAction() throws {
         var savedValue: String?
         let controller = PreferencesWindowController(actions: makeActions(

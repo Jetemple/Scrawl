@@ -44,6 +44,8 @@ final class PreferencesBackgroundView: NSView {
     }
 }
 
+final class PreferencesPinnedActionBarView: NSView {}
+
 enum PreferencesPageSupport {
     static let pageHorizontalInset: CGFloat = 28
     static let pageVerticalInset: CGFloat = 24
@@ -232,7 +234,7 @@ enum PreferencesPageSupport {
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 0, right: 0)
 
-        let row = NSView()
+        let row = PreferencesPinnedActionBarView()
         stack.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(stack)
         NSLayoutConstraint.activate([
