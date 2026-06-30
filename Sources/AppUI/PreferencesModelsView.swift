@@ -62,6 +62,7 @@ final class PreferencesModelsView: NSView {
     private var twoLineRowCount = 0
     private var selectedRowHasAction = false
     private var selectedIndicatorView: NSView?
+    private var selectedActionSlotView: NSView?
     private let rowActionWidth: CGFloat = 86
     private let selectedIndicatorWidth: CGFloat = 28
     private let estimatedRowHeight: CGFloat = 55
@@ -88,6 +89,10 @@ final class PreferencesModelsView: NSView {
 
     var visibleSelectedIndicatorWidth: CGFloat? {
         selectedIndicatorView?.frame.width
+    }
+
+    var visibleSelectedActionSlotWidth: CGFloat? {
+        selectedActionSlotView?.frame.width
     }
 
     var visibleModelListHeight: CGFloat {
@@ -224,6 +229,7 @@ final class PreferencesModelsView: NSView {
         twoLineRowCount = rows.count
         selectedRowHasAction = false
         selectedIndicatorView = nil
+        selectedActionSlotView = nil
         listHeightConstraint?.constant = modelListHeight(rowCount: rows.count)
 
         for arrangedSubview in modelsStack.arrangedSubviews {
@@ -284,8 +290,18 @@ final class PreferencesModelsView: NSView {
             checkmark.setContentCompressionResistancePriority(.required, for: .horizontal)
             checkmark.translatesAutoresizingMaskIntoConstraints = false
             checkmark.widthAnchor.constraint(equalToConstant: selectedIndicatorWidth).isActive = true
-            actionArea = checkmark
+
+            let selectedSlot = NSView()
+            selectedSlot.translatesAutoresizingMaskIntoConstraints = false
+            selectedSlot.addSubview(checkmark)
+            NSLayoutConstraint.activate([
+                selectedSlot.widthAnchor.constraint(equalToConstant: rowActionWidth),
+                checkmark.centerXAnchor.constraint(equalTo: selectedSlot.centerXAnchor),
+                checkmark.centerYAnchor.constraint(equalTo: selectedSlot.centerYAnchor),
+            ])
+            actionArea = selectedSlot
             selectedIndicatorView = checkmark
+            selectedActionSlotView = selectedSlot
         } else {
             let actionButton = NSButton(title: row.actionTitle, target: self, action: nil)
             actionButton.identifier = NSUserInterfaceItemIdentifier(row.id)
