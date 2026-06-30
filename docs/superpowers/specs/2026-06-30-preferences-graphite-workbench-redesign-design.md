@@ -81,6 +81,15 @@ Sidebar requirements:
 - Restrained selected state: subtle rounded selection fill or sidebar accent, plus coral tint.
 - No row glow, oversized icons, decorative meters, or generated-looking row art.
 
+Iconography requirements:
+
+- Use native SF Symbols through AppKit only.
+- Treat the selected mockup's icons as placeholders, not source assets.
+- Do not use generated line icons, custom cube icons, or decorative per-row model icons.
+- Keep sidebar symbols close to the current app vocabulary: `gearshape` for General, `cpu` for Models, `keyboard` for Input, `clock.arrow.circlepath` for History, `text.book.closed` for Dictionary, and `info.circle` for About.
+- Use `info.circle` only for details affordances, such as model details popovers.
+- Icons should be secondary to labels, with subdued tint unless the row is selected.
+
 Content requirements:
 
 - Light native background.
