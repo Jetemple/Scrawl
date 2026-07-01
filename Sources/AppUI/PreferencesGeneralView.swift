@@ -4,22 +4,21 @@ import SettingsStore
 
 final class PreferencesGeneralView: NSView {
     private let readinessLabel = NSTextField(labelWithString: "")
-    private let modelLabel = NSTextField(labelWithString: "")
     private let hotkeyLabel = NSTextField(labelWithString: "")
     private let microphoneLabel = NSTextField(labelWithString: "")
     private let accessibilityLabel = NSTextField(labelWithString: "")
     private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
     private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
-    private let changeModelButton = NSButton(title: "Change...", target: nil, action: nil)
+    private let hotkeyButton = NSButton(title: "Set Hotkey…", target: nil, action: nil)
     private let offloadPopup = NSPopUpButton()
     private let clipboardHistoryCheckbox = NSButton(checkboxWithTitle: "Keep transcripts in clipboard history", target: nil, action: nil)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
+    private let setHotkey: () -> Void
     private let requestMicrophone: () -> Void
     private let requestAccessibility: () -> Void
     private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
     private let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
     private let setLaunchAtLogin: (Bool) -> Void
-    var changeModel: () -> Void = {}
 
     var modelOffloadChoices: [String] {
         offloadPopup.itemTitles
@@ -31,12 +30,14 @@ final class PreferencesGeneralView: NSView {
     }
 
     init(
+        setHotkey: @escaping () -> Void,
         requestMicrophone: @escaping () -> Void,
         requestAccessibility: @escaping () -> Void,
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void,
         setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
         setLaunchAtLogin: @escaping (Bool) -> Void = { _ in }
     ) {
+        self.setHotkey = setHotkey
         self.requestMicrophone = requestMicrophone
         self.requestAccessibility = requestAccessibility
         self.setModelOffloadPolicy = setModelOffloadPolicy
@@ -46,14 +47,14 @@ final class PreferencesGeneralView: NSView {
 
         PreferencesPageSupport.configureSecondaryButton(microphoneButton)
         PreferencesPageSupport.configureSecondaryButton(accessibilityButton)
-        PreferencesPageSupport.configureSecondaryButton(changeModelButton)
+        PreferencesPageSupport.configureSecondaryButton(hotkeyButton)
 
         microphoneButton.target = self
         microphoneButton.action = #selector(requestMicrophoneAccess(_:))
         accessibilityButton.target = self
         accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
-        changeModelButton.target = self
-        changeModelButton.action = #selector(changeModelAction(_:))
+        hotkeyButton.target = self
+        hotkeyButton.action = #selector(setHotkeyAction(_:))
         offloadPopup.addItems(withTitles: ModelOffloadPolicy.allCases.map(\.displayName))
         offloadPopup.controlSize = .small
         offloadPopup.target = self
@@ -71,6 +72,19 @@ final class PreferencesGeneralView: NSView {
         clipboardGroup.orientation = .vertical
         clipboardGroup.alignment = .leading
         clipboardGroup.spacing = 3
+        clipboardGroup.edgeInsets = NSEdgeInsets(
+            top: 11,
+            left: PreferencesPageSupport.rowInset,
+            bottom: 11,
+            right: PreferencesPageSupport.rowInset
+        )
+        // A vertical stack won't stretch under the group's `.width` alignment, so pin it left
+        // inside a full-width horizontal row (the trailing spacer absorbs the slack), matching
+        // how the key/value rows and section headers lay out.
+        let clipboardRow = NSStackView(views: [clipboardGroup, NSView()])
+        clipboardRow.orientation = .horizontal
+        clipboardRow.alignment = .top
+        clipboardRow.spacing = 0
 
         launchAtLoginCheckbox.target = self
         launchAtLoginCheckbox.action = #selector(launchAtLoginChanged(_:))
@@ -84,15 +98,41 @@ final class PreferencesGeneralView: NSView {
         launchAtLoginGroup.orientation = .vertical
         launchAtLoginGroup.alignment = .leading
         launchAtLoginGroup.spacing = 3
+        launchAtLoginGroup.edgeInsets = NSEdgeInsets(
+            top: 11,
+            left: PreferencesPageSupport.rowInset,
+            bottom: 11,
+            right: PreferencesPageSupport.rowInset
+        )
+        let launchAtLoginRow = NSStackView(views: [launchAtLoginGroup, NSView()])
+        launchAtLoginRow.orientation = .horizontal
+        launchAtLoginRow.alignment = .top
+        launchAtLoginRow.spacing = 0
+
+        let hotkeyInstructions = NSTextField(wrappingLabelWithString: """
+        Hold the hotkey while speaking, then release to transcribe. \
+        Double-tap to keep recording hands-free, then tap again to stop.
+        """)
+        hotkeyInstructions.font = .systemFont(ofSize: 11)
+        hotkeyInstructions.textColor = .secondaryLabelColor
+        let hotkeyInstructionsRow = NSStackView(views: [hotkeyInstructions, NSView()])
+        hotkeyInstructionsRow.orientation = .horizontal
+        hotkeyInstructionsRow.alignment = .top
+        hotkeyInstructionsRow.spacing = 0
+        hotkeyInstructionsRow.edgeInsets = NSEdgeInsets(
+            top: 0,
+            left: PreferencesPageSupport.rowInset,
+            bottom: 0,
+            right: PreferencesPageSupport.rowInset
+        )
 
         let page = PreferencesPageSupport.makePage(
             title: "General",
             description: "Readiness and defaults.",
             content: [
-                PreferencesPageSupport.makeGroup(rows: [
+                PreferencesPageSupport.makeGroup(header: "Transcription", rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Readiness", detail: readinessLabel),
-                    PreferencesPageSupport.makeSettingRow(title: "Model", detail: modelLabel, action: changeModelButton),
-                    PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel),
+                    PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel, action: hotkeyButton),
                     PreferencesPageSupport.makeSettingRow(
                         title: "Offload model",
                         // The popup value (Immediately / 1 minute / … / Never) already states
@@ -102,12 +142,15 @@ final class PreferencesGeneralView: NSView {
                         action: offloadPopup
                     ),
                 ]),
-                PreferencesPageSupport.makeGroup(rows: [
+                hotkeyInstructionsRow,
+                PreferencesPageSupport.makeGroup(header: "Permissions", rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
                     PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton),
                 ]),
-                clipboardGroup,
-                launchAtLoginGroup,
+                PreferencesPageSupport.makeGroup(header: "Options", rows: [
+                    clipboardRow,
+                    launchAtLoginRow,
+                ]),
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
@@ -125,8 +168,8 @@ final class PreferencesGeneralView: NSView {
         isCapturingHotkey: Bool,
         launchAtLoginEnabled: Bool
     ) {
-        modelLabel.stringValue = PreferencesModelState.displayName(forModelID: settings.modelID)
         hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input..." : settings.hotkey.displayName
+        hotkeyButton.title = isCapturingHotkey ? "Cancel Capture" : "Set Hotkey…"
         updatePermissionLabel(microphoneLabel, status: microphoneStatus)
         updatePermissionLabel(accessibilityLabel, status: accessibilityStatus)
 
@@ -168,16 +211,16 @@ final class PreferencesGeneralView: NSView {
         launchAtLoginCheckbox.state == .on
     }
 
+    @objc private func setHotkeyAction(_: NSButton) {
+        setHotkey()
+    }
+
     @objc private func requestMicrophoneAccess(_: NSButton) {
         requestMicrophone()
     }
 
     @objc private func requestAccessibilityAccess(_: NSButton) {
         requestAccessibility()
-    }
-
-    @objc private func changeModelAction(_: NSButton) {
-        changeModel()
     }
 
     @objc private func modelOffloadChanged(_ sender: NSPopUpButton) {

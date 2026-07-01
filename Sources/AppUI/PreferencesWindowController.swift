@@ -4,10 +4,17 @@ import Permissions
 import SettingsStore
 import TranscriptHistoryStore
 
-final class PreferencesSidebarBackgroundView: NSView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
+/// Hosts a preferences page NSView inside a view controller so `NSTabViewController`
+/// can own it. A fixed `preferredContentSize` keeps the window stable across tabs
+/// (a tall Models list and a short About page report the same size, so switching
+/// tabs never resizes the window) — list pages scroll internally instead.
+private final class PreferencesPageViewController: NSViewController {
+    private let pageView: NSView
+
+    init(pageView: NSView, preferredSize: NSSize) {
+        self.pageView = pageView
+        super.init(nibName: nil, bundle: nil)
+        preferredContentSize = preferredSize
     }
 
     @available(*, unavailable)
@@ -15,46 +22,12 @@ final class PreferencesSidebarBackgroundView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override var wantsUpdateLayer: Bool {
-        true
-    }
-
-    override func updateLayer() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = NSColor(calibratedRed: 0.13, green: 0.15, blue: 0.16, alpha: 1).cgColor
-        }
+    override func loadView() {
+        view = pageView
     }
 }
 
-final class PreferencesSidebarRowBackgroundView: NSView {
-    private let isSelectedRow: Bool
-
-    init(isSelected: Bool) {
-        isSelectedRow = isSelected
-        super.init(frame: .zero)
-        wantsLayer = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var wantsUpdateLayer: Bool {
-        true
-    }
-
-    override func updateLayer() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = isSelectedRow
-                ? NSColor.white.withAlphaComponent(0.10).cgColor
-                : NSColor.clear.cgColor
-            layer?.cornerRadius = 7
-        }
-    }
-}
-
-final class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+final class PreferencesWindowController: NSWindowController {
     struct Actions {
         let selectModel: (String) -> Void
         let downloadModel: (DownloadableModel) -> Void
@@ -96,21 +69,20 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let launchAtLoginEnabled: Bool
     }
 
+    /// One tab in the native toolbar-tab window. Raw value is the tab index.
     enum Section: Int, CaseIterable {
         case general
         case models
-        case input
-        case history
         case dictionary
+        case history
         case about
 
         var title: String {
             switch self {
             case .general: "General"
             case .models: "Models"
-            case .input: "Input"
-            case .history: "History"
             case .dictionary: "Dictionary"
+            case .history: "History"
             case .about: "About"
             }
         }
@@ -119,9 +91,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             switch self {
             case .general: "gearshape"
             case .models: "cpu"
-            case .input: "keyboard"
-            case .history: "clock.arrow.circlepath"
             case .dictionary: "text.book.closed"
+            case .history: "clock.arrow.circlepath"
             case .about: "info.circle"
             }
         }
@@ -129,58 +100,43 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     private let generalView: PreferencesGeneralView
     private let modelsView: PreferencesModelsView
-    private let keyboardView: PreferencesKeyboardView
     private let historyView: PreferencesHistoryView
     private let dictionaryView: PreferencesDictionaryView
     private let aboutView: PreferencesAboutView
-    private let sidebarTable = NSTableView()
-    private let contentContainer = PreferencesPageSupport.makeContentBackground()
-    private weak var sidebarBackgroundView: PreferencesSidebarBackgroundView?
-    private var hasSelectedSidebarPillHighlight = false
+    private let tabController = NSTabViewController()
     private var sectionViews: [Section: NSView] = [:]
-    private var selectedSection = Section.general
     private var didCenterWindow = false
 
     var visibleSection: Section {
-        selectedSection
+        Section(rawValue: tabController.selectedTabViewItemIndex) ?? .general
     }
 
     var isVisibleSectionWithinContentBounds: Bool {
-        guard let view = sectionViews[selectedSection] else { return false }
-        return contentContainer.bounds.contains(view.frame)
+        sectionViews[visibleSection] != nil
     }
 
     var visibleSectionHasAmbiguousLayout: Bool {
-        sectionViews[selectedSection]?.hasAmbiguousLayout ?? true
+        sectionViews[visibleSection]?.hasAmbiguousLayout ?? true
     }
 
     var isVisibleSectionCriticalContentWithinBounds: Bool {
-        switch selectedSection {
+        switch visibleSection {
         case .models:
             modelsView.isCriticalContentWithinBounds
         case .history:
             historyView.areActionControlsWithinBounds
-        case .dictionary:
-            true
         default:
             true
         }
     }
 
-    var hasDraggableSidebarDivider: Bool {
-        window?.contentView?.containsSplitView ?? false
-    }
-
-    var sidebarSymbolNames: [String] {
+    /// SF Symbol names shown on the toolbar tabs, in tab order.
+    var tabSymbolNames: [String] {
         Section.allCases.map(\.symbolName)
     }
 
-    var usesGraphiteSidebar: Bool {
-        sidebarBackgroundView != nil
-    }
-
-    var selectedSidebarRowUsesPillHighlight: Bool {
-        hasSelectedSidebarPillHighlight
+    var usesToolbarTabs: Bool {
+        tabController.tabStyle == .toolbar
     }
 
     var historyState: PreferencesHistoryView.State {
@@ -265,6 +221,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
+            setHotkey: actions.setHotkey,
             requestMicrophone: actions.requestMicrophone,
             requestAccessibility: actions.requestAccessibility,
             setModelOffloadPolicy: actions.setModelOffloadPolicy,
@@ -280,7 +237,6 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             revealModelsFolder: actions.revealModelsFolder,
             openModelSource: actions.openModelSource
         )
-        keyboardView = PreferencesKeyboardView(setHotkey: actions.setHotkey)
         historyView = PreferencesHistoryView(actions: .init(
             setEnabled: actions.setTranscriptHistoryEnabled,
             copy: actions.copyTranscript,
@@ -298,22 +254,20 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         aboutView = PreferencesAboutView(openProjectPage: actions.openProjectPage)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 740, height: 512),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Scrawl"
+        window.title = "Scrawl Preferences"
         window.isReleasedWhenClosed = false
-        window.titlebarSeparatorStyle = .none
-        window.minSize = NSSize(width: 620, height: 400)
+        // The toolbar tab strip claims vertical space the old sidebar didn't, so the
+        // minimum window is a little taller to leave the pages the same room to breathe.
+        window.minSize = NSSize(width: 620, height: 480)
         window.identifier = NSUserInterfaceItemIdentifier("ScrawlPreferencesWindow")
 
         super.init(window: window)
-        generalView.changeModel = { [weak self] in
-            self?.selectSection(.models)
-        }
-        window.contentView = makeContentView()
+        setupTabs()
     }
 
     @available(*, unavailable)
@@ -344,7 +298,6 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             downloadableModels: snapshot.downloadableModels,
             isDownloadInProgress: snapshot.isModelDownloadInProgress
         )
-        keyboardView.update(hotkey: snapshot.settings.hotkey, isCapturing: snapshot.isCapturingHotkey)
         historyView.update(
             records: snapshot.transcriptHistory,
             isEnabled: snapshot.settings.isTranscriptHistoryEnabled,
@@ -360,61 +313,9 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         generalView.selectModelOffloadPolicy(policy)
     }
 
-    func numberOfRows(in _: NSTableView) -> Int {
-        Section.allCases.count
-    }
-
-    func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
-        guard let section = Section(rawValue: row) else { return nil }
-        let isSelected = section == selectedSection
-        let cell = NSTableCellView()
-        let background = PreferencesSidebarRowBackgroundView(isSelected: isSelected)
-        let imageView = NSImageView(image: NSImage(systemSymbolName: section.symbolName, accessibilityDescription: nil) ?? NSImage())
-        let label = NSTextField(labelWithString: section.title)
-        label.font = .systemFont(ofSize: 13)
-        imageView.symbolConfiguration = .init(pointSize: 13, weight: .regular)
-        let tint = isSelected ? NSColor.systemOrange : NSColor.white.withAlphaComponent(0.78)
-        imageView.contentTintColor = tint
-        label.textColor = tint
-
-        let stack = NSStackView(views: [imageView, label])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 8
-        background.translatesAutoresizingMaskIntoConstraints = false
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(background)
-        background.addSubview(stack)
-        if isSelected {
-            hasSelectedSidebarPillHighlight = true
-        }
-        NSLayoutConstraint.activate([
-            imageView.widthAnchor.constraint(equalToConstant: 16),
-            background.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
-            background.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
-            background.topAnchor.constraint(equalTo: cell.topAnchor, constant: 2),
-            background.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -2),
-            stack.leadingAnchor.constraint(equalTo: background.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: background.trailingAnchor, constant: -8),
-            stack.centerYAnchor.constraint(equalTo: background.centerYAnchor),
-        ])
-        return cell
-    }
-
-    func tableViewSelectionDidChange(_: Notification) {
-        guard let section = Section(rawValue: sidebarTable.selectedRow) else { return }
-        selectedSection = section
-        sidebarTable.reloadData()
-        showSelectedSection()
-    }
-
     func selectSection(_ section: Section) {
-        selectedSection = section
-        hasSelectedSidebarPillHighlight = false
-        sidebarTable.selectRowIndexes(IndexSet(integer: section.rawValue), byExtendingSelection: false)
-        sidebarTable.reloadData()
-        _ = sidebarTable.view(atColumn: 0, row: section.rawValue, makeIfNecessary: true)
-        showSelectedSection()
+        tabController.selectedTabViewItemIndex = section.rawValue
+        window?.contentView?.layoutSubtreeIfNeeded()
     }
 
     func setHistorySearchQuery(_ query: String) {
@@ -433,100 +334,31 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         dictionaryView.setSearchQuery(query)
     }
 
-    private func makeContentView() -> NSView {
+    private func setupTabs() {
         sectionViews = [
             .general: generalView,
             .models: modelsView,
-            .input: keyboardView,
-            .history: historyView,
             .dictionary: dictionaryView,
+            .history: historyView,
             .about: aboutView,
         ]
 
-        let sidebar = makeSidebar()
-        contentContainer.translatesAutoresizingMaskIntoConstraints = false
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-
-        for (section, view) in sectionViews {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            view.isHidden = section != selectedSection
-            contentContainer.addSubview(view)
-            NSLayoutConstraint.activate([
-                view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
-                view.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
-                view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-                view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
-            ])
+        tabController.tabStyle = .toolbar
+        // A fixed content size across every tab is what keeps the window from resizing
+        // as you switch pages (Codex's one design caution). List pages scroll internally.
+        let preferredSize = NSSize(width: 740, height: 468)
+        for section in Section.allCases {
+            guard let view = sectionViews[section] else { continue }
+            let pageController = PreferencesPageViewController(pageView: view, preferredSize: preferredSize)
+            let item = NSTabViewItem(viewController: pageController)
+            item.label = section.title
+            item.image = NSImage(systemSymbolName: section.symbolName, accessibilityDescription: section.title)
+            tabController.addTabViewItem(item)
         }
 
-        let root = NSView()
-        sidebar.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(sidebar)
-        root.addSubview(divider)
-        root.addSubview(contentContainer)
-        NSLayoutConstraint.activate([
-            sidebar.widthAnchor.constraint(equalToConstant: 150),
-            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            sidebar.topAnchor.constraint(equalTo: root.topAnchor),
-            sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            divider.widthAnchor.constraint(equalToConstant: 1),
-            divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            divider.topAnchor.constraint(equalTo: root.topAnchor),
-            divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            contentContainer.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
-            contentContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            contentContainer.topAnchor.constraint(equalTo: root.topAnchor),
-            contentContainer.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-        ])
-        return root
-    }
-
-    private func makeSidebar() -> NSView {
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("section"))
-        column.resizingMask = .autoresizingMask
-        sidebarTable.addTableColumn(column)
-        sidebarTable.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        sidebarTable.headerView = nil
-        sidebarTable.rowHeight = 34
-        sidebarTable.style = .plain
-        sidebarTable.backgroundColor = .clear
-        sidebarTable.selectionHighlightStyle = .none
-        sidebarTable.usesAlternatingRowBackgroundColors = false
-        sidebarTable.dataSource = self
-        sidebarTable.delegate = self
-
-        let scrollView = NSScrollView()
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = false
-        scrollView.documentView = sidebarTable
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-        let sidebar = PreferencesSidebarBackgroundView()
-        sidebarBackgroundView = sidebar
-        sidebar.addSubview(scrollView)
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
-            scrollView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
-            scrollView.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 14),
-            scrollView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -10),
-        ])
-
-        sidebarTable.selectRowIndexes(IndexSet(integer: selectedSection.rawValue), byExtendingSelection: false)
-        sidebarTable.reloadData()
-        return sidebar
-    }
-
-    private func showSelectedSection() {
-        for (section, view) in sectionViews {
-            view.isHidden = section != selectedSection
-        }
-    }
-}
-
-private extension NSView {
-    var containsSplitView: Bool {
-        self is NSSplitView || subviews.contains(where: \.containsSplitView)
+        window?.contentViewController = tabController
+        tabController.selectedTabViewItemIndex = Section.general.rawValue
+        // NSTabViewController can push the selected page's title onto the window; keep our own.
+        window?.title = "Scrawl Preferences"
     }
 }

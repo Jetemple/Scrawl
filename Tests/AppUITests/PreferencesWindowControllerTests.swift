@@ -7,32 +7,31 @@ import XCTest
 
 final class PreferencesWindowControllerTests: XCTestCase {
     @MainActor
-    func testSidebarContainsGraphiteWorkbenchSections() {
+    func testToolbarContainsFiveConsolidatedSections() {
         XCTAssertEqual(
             PreferencesWindowController.Section.allCases.map(\.title),
-            ["General", "Models", "Input", "History", "Dictionary", "About"]
+            ["General", "Models", "Dictionary", "History", "About"]
         )
     }
 
     @MainActor
-    func testWindowUsesCompactResizableConfiguration() throws {
+    func testWindowUsesNativeToolbarTabConfiguration() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
-        let contentView = try XCTUnwrap(window.contentView)
 
-        XCTAssertEqual(window.title, "Scrawl")
-        XCTAssertEqual(contentView.frame.size, NSSize(width: 680, height: 460))
-        XCTAssertEqual(window.minSize, NSSize(width: 620, height: 400))
+        XCTAssertEqual(window.title, "Scrawl Preferences")
         XCTAssertTrue(window.styleMask.contains(.titled))
         XCTAssertTrue(window.styleMask.contains(.closable))
         XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertTrue(controller.usesToolbarTabs)
+        XCTAssertEqual(controller.tabSymbolNames.count, 5)
     }
 
     @MainActor
-    func testSidebarSelectionSwitchesPagesAndPersists() {
+    func testTabSelectionSwitchesPagesAndPersists() {
         let controller = PreferencesWindowController(actions: makeActions())
 
-        XCTAssertFalse(controller.hasDraggableSidebarDivider)
+        XCTAssertEqual(controller.visibleSection, .general)
         controller.selectSection(.models)
         XCTAssertEqual(controller.visibleSection, .models)
 
@@ -42,29 +41,20 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testSidebarUsesOnlyApprovedSFSymbolNames() {
+    func testToolbarTabsUseOnlyApprovedSFSymbolNames() {
         let controller = PreferencesWindowController(actions: makeActions())
 
         XCTAssertEqual(
-            controller.sidebarSymbolNames,
-            ["gearshape", "cpu", "keyboard", "clock.arrow.circlepath", "text.book.closed", "info.circle"]
+            controller.tabSymbolNames,
+            ["gearshape", "cpu", "text.book.closed", "clock.arrow.circlepath", "info.circle"]
         )
     }
 
     @MainActor
-    func testSidebarUsesGraphiteTreatment() {
+    func testWindowUsesNativeToolbarTabs() {
         let controller = PreferencesWindowController(actions: makeActions())
 
-        XCTAssertTrue(controller.usesGraphiteSidebar)
-    }
-
-    @MainActor
-    func testSidebarShowsSelectedRowPillHighlight() {
-        let controller = PreferencesWindowController(actions: makeActions())
-
-        controller.selectSection(.models)
-
-        XCTAssertTrue(controller.selectedSidebarRowUsesPillHighlight)
+        XCTAssertTrue(controller.usesToolbarTabs)
     }
 
     @MainActor
@@ -81,7 +71,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testModelsPageUsesTopAnchoredTwoLineRowsWithoutSelectedAction() {
+    func testModelsPageUsesTopAnchoredTwoLineRowsWithSelectedAction() {
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot(modelRows: [
             PreferencesModelRow(
@@ -108,7 +98,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         XCTAssertTrue(controller.modelsListIsTopAnchored)
         XCTAssertEqual(controller.modelsTwoLineRowCount, 2)
-        XCTAssertFalse(controller.modelsSelectedRowHasAction)
+        // The mockup keeps a "Use" button on every installed row, including the selected one.
+        XCTAssertTrue(controller.modelsSelectedRowHasAction)
     }
 
     @MainActor
@@ -170,6 +161,29 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         XCTAssertEqual(header.frame.minX, content.frame.minX, accuracy: 0.5)
         XCTAssertEqual(header.frame.width, content.frame.width, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testPreferencePagesPaintNativeWindowBackground() {
+        let page = PreferencesPageSupport.makePage(
+            title: "General",
+            description: "Readiness and defaults.",
+            content: []
+        )
+
+        XCTAssertTrue(page is PreferencesBackgroundView)
+    }
+
+    @MainActor
+    func testPinnedActionBarsDefaultToSharedRowGrid() {
+        let button = NSButton(title: "Edit", target: nil, action: nil)
+        PreferencesPageSupport.configureSecondaryButton(button)
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(leading: [button], trailing: [])
+        actionBar.frame = NSRect(x: 0, y: 0, width: 360, height: 44)
+        actionBar.layoutSubtreeIfNeeded()
+
+        let contentMinX = actionBar.subviews.first?.subviews.first?.frame.minX ?? -1
+        XCTAssertEqual(contentMinX, PreferencesPageSupport.rowInset, accuracy: 0.5)
     }
 
     @MainActor
@@ -334,7 +348,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testGeneralInputAndAboutButtonsDispatchActions() throws {
+    func testGeneralAndAboutButtonsDispatchActions() throws {
         var requestedMicrophone = false
         var requestedAccessibility = false
         var requestedHotkey = false
@@ -347,9 +361,10 @@ final class PreferencesWindowControllerTests: XCTestCase {
         ))
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
+        // Microphone, Accessibility, and the hotkey control now all live on General (the
+        // default tab), so no section switch is needed before clicking them.
         try XCTUnwrap(contentView.button(titled: "Request")).performClick(nil)
         try XCTUnwrap(contentView.button(titled: "Open Prompt")).performClick(nil)
-        controller.selectSection(.input)
         try XCTUnwrap(contentView.button(titled: "Set Hotkey…")).performClick(nil)
         controller.selectSection(.about)
         try XCTUnwrap(contentView.button(titled: "Open Project Page")).performClick(nil)
@@ -361,24 +376,13 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testGeneralChangeModelButtonSelectsModels() throws {
-        let controller = PreferencesWindowController(actions: makeActions())
-        let contentView = try XCTUnwrap(controller.window?.contentView)
-
-        XCTAssertEqual(controller.visibleSection, .general)
-        try XCTUnwrap(contentView.button(titled: "Change...")).performClick(nil)
-
-        XCTAssertEqual(controller.visibleSection, .models)
-    }
-
-    @MainActor
     func testGeneralSettingTitlesShareLeadingEdge() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot())
         let contentView = try XCTUnwrap(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
 
-        let titleMinXs = try ["Readiness", "Model", "Hotkey", "Offload model"].map { title -> CGFloat in
+        let titleMinXs = try ["Readiness", "Hotkey", "Offload model"].map { title -> CGFloat in
             let field = try XCTUnwrap(contentView.textField(withValue: title))
             return contentView.convert(field.bounds, from: field).minX.rounded()
         }
@@ -387,12 +391,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testInputAndDictionaryVisibleCopyUseNewNames() throws {
+    func testDictionaryVisibleCopyUsesNewName() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let contentView = try XCTUnwrap(controller.window?.contentView)
-
-        controller.selectSection(.input)
-        XCTAssertNotNil(contentView.textField(withValue: "Input"))
 
         controller.selectSection(.dictionary)
         XCTAssertNotNil(contentView.textField(withValue: "Dictionary"))
@@ -593,6 +594,37 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkbenchActionBarsShareLeadingGrid() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        controller.update(snapshot: makeSnapshot(
+            records: [TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")],
+            dictionaryEntries: [DictionaryEntry(wrong: "Anduril", correct: "Anduril")],
+            modelRows: [
+                PreferencesModelRow(
+                    id: ModelCatalog.parakeetModelID,
+                    displayName: "Parakeet v3",
+                    isInstalled: true,
+                    isSelected: true,
+                    isDownloading: false,
+                    isCancelled: false,
+                    downloadProgressText: nil
+                ),
+            ]
+        ))
+
+        let expectedMinX = PreferencesPageSupport.pageHorizontalInset + PreferencesPageSupport.rowInset
+        for section in [PreferencesWindowController.Section.models, .dictionary, .history] {
+            controller.selectSection(section)
+            window.contentView?.layoutSubtreeIfNeeded()
+
+            let contentStack = try XCTUnwrap(window.contentView?.firstLeadingStackInPinnedActionBar(), "\(section.title) missing action bar stack")
+            let contentMinX = window.contentView?.convert(contentStack.frame, from: contentStack.superview).minX ?? -1
+            XCTAssertEqual(contentMinX, expectedMinX, accuracy: 0.5, "\(section.title) action bar is off-grid")
+        }
+    }
+
+    @MainActor
     func testHistoryUsesPinnedWorkbenchActionBar() {
         let controller = PreferencesWindowController(actions: makeActions())
 
@@ -604,10 +636,10 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let controller = PreferencesWindowController(actions: makeActions())
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
+        // Every page — Models included — now carries a compact subtitle under its title;
+        // the model picker and filter live in a toolbar strip below the header.
         controller.selectSection(.models)
-        XCTAssertNotNil(contentView.textField(withValue: "Manage local transcription models."))
-        XCTAssertNil(contentView.textField(withValue: "Select an installed model, download another, or add your own."))
-
+        XCTAssertNotNil(contentView.textField(withValue: "On-device transcription models."))
         controller.selectSection(.dictionary)
         XCTAssertNotNil(contentView.textField(withValue: "Preferred terms for names and phrases."))
         XCTAssertNil(contentView.textField(withValue: "Preferred names, terms, and phrases that help Whisper recognize your language."))
@@ -793,6 +825,13 @@ private extension NSView {
             return field
         }
         return subviews.lazy.compactMap { $0.textField(withValue: value) }.first
+    }
+
+    func firstLeadingStackInPinnedActionBar() -> NSView? {
+        if self is PreferencesPinnedActionBarView {
+            return subviews.first?.subviews.first
+        }
+        return subviews.lazy.compactMap { $0.firstLeadingStackInPinnedActionBar() }.first
     }
 
     var isEffectivelyHidden: Bool {

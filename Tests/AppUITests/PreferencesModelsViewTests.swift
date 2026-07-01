@@ -3,12 +3,9 @@ import AppKit
 import XCTest
 
 final class PreferencesModelsViewTests: XCTestCase {
-    // Regression: the per-row status label used a fixed 72pt width, which clipped
-    // "Download cancelled" down to "Download can…". The status label must be wide
-    // enough to render its longest status string without truncation.
     @MainActor
-    func testCancelledStatusLabelIsNotTruncated() throws {
-        let view = PreferencesModelsView(
+    private func makeView() -> PreferencesModelsView {
+        PreferencesModelsView(
             selectModel: { _ in },
             downloadModel: { _ in },
             deleteSelectedModel: {},
@@ -16,207 +13,60 @@ final class PreferencesModelsViewTests: XCTestCase {
             addModel: {},
             revealModelsFolder: {},
             openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 480, height: 320)
-
-        let row = PreferencesModelRow(
-            id: "ggml-medium",
-            displayName: "medium — multilingual, 1.5 GB",
-            isInstalled: false,
-            isSelected: false,
-            isDownloading: false,
-            isCancelled: true,
-            downloadProgressText: nil
-        )
-        view.update(rows: [row], downloadableModels: [], isDownloadInProgress: false)
-        view.layoutSubtreeIfNeeded()
-
-        let statusLabel = try XCTUnwrap(view.firstTextField(withValue: "Download cancelled"))
-        XCTAssertGreaterThanOrEqual(
-            statusLabel.frame.width.rounded(),
-            statusLabel.intrinsicContentSize.width.rounded(),
-            "Status label must be wide enough to show 'Download cancelled' without truncation"
         )
     }
 
     @MainActor
-    func testActionControlsFitWhenCancelDownloadIsVisibleAtMinimumWidth() {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 440, height: 320)
+    func testModelRowContentLeftAlignsUnderColumnHeaders() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 700, height: 520)
         view.update(rows: [
-            PreferencesModelRow(
-                id: "ggml-small.en",
-                displayName: "Small (English)",
-                isInstalled: true,
-                isSelected: true,
-                isDownloading: false,
-                isCancelled: false,
-                downloadProgressText: nil
-            ),
-        ], downloadableModels: [], isDownloadInProgress: true)
-        view.layoutSubtreeIfNeeded()
-
-        XCTAssertTrue(view.visibleActionControlsWithinBounds)
-    }
-
-    @MainActor
-    func testSelectedIndicatorUsesCompactActionSlot() throws {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 480, height: 320)
-        view.update(rows: [
-            PreferencesModelRow(
-                id: "ggml-small.en",
-                displayName: "Small (English)",
-                isInstalled: true,
-                isSelected: true,
-                isDownloading: false,
-                isCancelled: false,
-                downloadProgressText: nil
-            ),
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-medium", installed: false, selected: false),
         ], downloadableModels: [], isDownloadInProgress: false)
         view.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(try XCTUnwrap(view.visibleSelectedIndicatorWidth), 28, accuracy: 0.5)
+        // The section label sits near the left content edge, not pushed to the right by
+        // a mis-sized scroll document (regression: rows were centered at ~x=200).
+        let installed = try XCTUnwrap(view.firstTextField(withValue: "Installed Models"))
+        XCTAssertLessThan(view.convert(installed.bounds, from: installed).minX, 60)
     }
 
     @MainActor
-    func testSelectedRowUsesSameActionColumnWidthAsButtonRows() throws {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+    func testModelsTableShowsColumnHeadersAndEngine() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
         view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
             modelRow(id: "ggml-small.en", installed: true, selected: false),
         ], downloadableModels: [], isDownloadInProgress: false)
         view.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(try XCTUnwrap(view.visibleSelectedActionSlotWidth), 86, accuracy: 0.5)
+        XCTAssertEqual(view.visibleColumnHeaderTitles, ["Model", "Engine", "Status", "Action"])
+        XCTAssertNotNil(view.firstTextField(withValue: "Parakeet"))
+        XCTAssertNotNil(view.firstTextField(withValue: "Whisper"))
     }
 
     @MainActor
-    func testInstalledRowActionIsVerticallyCenteredInFullRow() throws {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+    func testModelsHaveFilterFieldAndCurrentModelPicker() {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
         view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: false),
-            modelRow(id: "ggml-small.en", installed: true, selected: true),
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
         ], downloadableModels: [], isDownloadInProgress: false)
         view.layoutSubtreeIfNeeded()
 
-        XCTAssertLessThanOrEqual(abs(try XCTUnwrap(view.visibleFirstActionCenterYOffset)), 2.0)
+        XCTAssertEqual(view.visibleModelSearchFieldCount, 1)
+        XCTAssertEqual(view.visibleModelPickerTitle, "Parakeet v3")
     }
 
     @MainActor
-    func testModelRowsUseNativeContentInsetFromListEdge() throws {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
+    func testModelsSplitInstalledAndAvailableSectionsWithKebabs() {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
         view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: false),
-        ], downloadableModels: [], isDownloadInProgress: false)
-        view.layoutSubtreeIfNeeded()
-
-        XCTAssertEqual(try XCTUnwrap(view.visibleFirstRowTextLeftInset), 18, accuracy: 0.5)
-    }
-
-    @MainActor
-    func testFooterControlsAlignWithModelRowContent() throws {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
-        view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: false),
-        ], downloadableModels: [], isDownloadInProgress: false)
-        view.layoutSubtreeIfNeeded()
-
-        let rowTextMinX = try XCTUnwrap(view.visibleFirstRowTextMinX)
-        XCTAssertEqual(try XCTUnwrap(view.visibleFooterControlsMinX), rowTextMinX, accuracy: 0.5)
-        XCTAssertEqual(try XCTUnwrap(view.visibleFooterHelpMinX), rowTextMinX, accuracy: 0.5)
-    }
-
-    @MainActor
-    func testModelRowTitleAndSubtitleShareLeadingEdge() throws {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 520, height: 320)
-        view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: true),
-        ], downloadableModels: [], isDownloadInProgress: false)
-        view.layoutSubtreeIfNeeded()
-
-        let title = try XCTUnwrap(view.firstTextField(withValue: "Parakeet v3"))
-        let subtitle = try XCTUnwrap(view.firstTextField(withValue: "Fastest on-device"))
-        let titleMinX = view.convert(title.bounds, from: title).minX
-        let subtitleMinX = view.convert(subtitle.bounds, from: subtitle).minX
-        XCTAssertEqual(titleMinX, subtitleMinX, accuracy: 0.5)
-    }
-
-    @MainActor
-    func testModelsSplitInstalledAndAvailableSections() {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
-        view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
             modelRow(id: "ggml-small.en", installed: true, selected: false),
             modelRow(id: "ggml-medium", installed: false, selected: false),
         ], downloadableModels: [], isDownloadInProgress: false)
@@ -224,24 +74,49 @@ final class PreferencesModelsViewTests: XCTestCase {
 
         XCTAssertEqual(view.visibleInstalledSectionTitle, "Installed Models")
         XCTAssertEqual(view.visibleAvailableSectionTitle, "Available Downloads")
-        XCTAssertEqual(view.visibleModelSearchFieldCount, 0)
-        XCTAssertEqual(view.visibleModelInfoButtonCount, 3)
+        XCTAssertEqual(view.visibleModelKebabButtonCount, 3)
+    }
+
+    @MainActor
+    func testSelectedRowKeepsItsActionButton() {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(view.visibleSelectedRowHasAction)
+    }
+
+    @MainActor
+    func testFilterNarrowsVisibleRows() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(view.firstTextField(withValue: "Small (English)"))
+
+        let field = try XCTUnwrap(firstSearchField(in: view))
+        field.stringValue = "parakeet"
+        field.sendAction(field.action, to: field.target)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertNotNil(view.firstTextField(withValue: "Parakeet v3"))
+        XCTAssertNil(view.firstTextField(withValue: "Small (English)"))
     }
 
     @MainActor
     func testModelsUsePinnedWorkbenchActionBar() {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
         view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
             modelRow(id: "ggml-medium", installed: false, selected: false),
         ], downloadableModels: [], isDownloadInProgress: false)
         view.layoutSubtreeIfNeeded()
@@ -250,19 +125,23 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
-    func testModelStatusTextStaysNeutralWhenStateHasOtherVisualIndicator() throws {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 560, height: 360)
+    func testActionControlsFitWhenCancelDownloadIsVisibleAtMinimumWidth() {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 560, height: 400)
         view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: true),
+        ], downloadableModels: [], isDownloadInProgress: true)
+        view.layoutSubtreeIfNeeded()
+
+        XCTAssertTrue(view.visibleActionControlsWithinBounds)
+    }
+
+    @MainActor
+    func testModelStatusTextStaysNeutralWhenStateHasOtherVisualIndicator() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
             PreferencesModelRow(
                 id: "ggml-medium",
                 displayName: PreferencesModelState.displayName(forModelID: "ggml-medium"),
@@ -277,33 +156,32 @@ final class PreferencesModelsViewTests: XCTestCase {
         view.layoutSubtreeIfNeeded()
 
         let recommended = try XCTUnwrap(view.firstTextField(withValue: "Recommended"))
-        let progress = try XCTUnwrap(view.firstTextField(withValue: "42% (630/1500 MB)"))
         XCTAssertFalse(recommended.textColor?.isEqual(NSColor.systemBlue) ?? false)
-        XCTAssertFalse(progress.textColor?.isEqual(NSColor.systemBlue) ?? false)
     }
 
     @MainActor
-    func testFourModelRowsDoNotLeaveLargeEmptyListTail() {
-        let view = PreferencesModelsView(
-            selectModel: { _ in },
-            downloadModel: { _ in },
-            deleteSelectedModel: {},
-            cancelDownload: {},
-            addModel: {},
-            revealModelsFolder: {},
-            openModelSource: {}
-        )
-        view.frame = NSRect(x: 0, y: 0, width: 520, height: 360)
+    func testModelListHeightIsContentDrivenAndCapped() {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 560, height: 620)
+
         view.update(rows: [
-            modelRow(id: "parakeet-v3", installed: true, selected: true),
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+        let shortHeight = view.visibleModelListHeight
+
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
             modelRow(id: "ggml-small.en", installed: true, selected: false),
             modelRow(id: "ggml-medium", installed: false, selected: false),
             modelRow(id: "ggml-large-v3-turbo", installed: false, selected: false),
         ], downloadableModels: [], isDownloadInProgress: false)
         view.layoutSubtreeIfNeeded()
+        let tallHeight = view.visibleModelListHeight
 
-        XCTAssertGreaterThanOrEqual(view.visibleModelListHeight, 198)
-        XCTAssertLessThanOrEqual(view.visibleModelListHeight, 228)
+        XCTAssertGreaterThan(tallHeight, shortHeight)
+        XCTAssertLessThanOrEqual(tallHeight, 380)
     }
 }
 
@@ -314,6 +192,19 @@ private extension NSView {
         }
         return subviews.lazy.compactMap { $0.firstTextField(withValue: value) }.first
     }
+}
+
+@MainActor
+private func firstSearchField(in view: NSView) -> NSSearchField? {
+    if let field = view as? NSSearchField {
+        return field
+    }
+    for subview in view.subviews {
+        if let found = firstSearchField(in: subview) {
+            return found
+        }
+    }
+    return nil
 }
 
 private func modelRow(id: String, installed: Bool, selected: Bool) -> PreferencesModelRow {

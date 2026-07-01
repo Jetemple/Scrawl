@@ -17,6 +17,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private let tableView = DeleteKeyTableView()
     private let stateView = NSView()
     private var workspaceGroup: NSView?
+    private var listHeightConstraint: NSLayoutConstraint?
     private var actionBarView: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
@@ -83,15 +84,20 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         guard visibleTerms.indices.contains(row) else { return nil }
         let cell = NSTableCellView()
         let label = NSTextField(labelWithString: visibleTerms[row].value)
-        label.font = .systemFont(ofSize: 13)
+        label.font = .systemFont(ofSize: 14)
+        label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 14),
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -14),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
+    }
+
+    func tableView(_: NSTableView, rowViewForRow _: Int) -> NSTableRowView? {
+        PreferencesSelectionRowView()
     }
 
     func tableViewSelectionDidChange(_: Notification) {
@@ -108,7 +114,6 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         // gives the input the same soft corners as everything around it.
         termField.bezelStyle = .roundedBezel
         PreferencesPageSupport.configureSecondaryButton(addButton)
-        addButton.bezelColor = .controlAccentColor
         addButton.target = self
         addButton.action = #selector(addTerm(_:))
         let addRow = NSStackView(views: [termField, addButton])
@@ -122,11 +127,15 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 32
+        tableView.rowHeight = 40
+        // `.plain` drops the automatic source-list inset so term text starts at the shared
+        // row grid instead of ~17pt further right than every other page.
+        tableView.style = .plain
         tableView.backgroundColor = .clear
         tableView.intercellSpacing = .zero
         tableView.gridStyleMask = .solidHorizontalGridLineMask
-        tableView.gridColor = .separatorColor.withAlphaComponent(0.45)
+        tableView.gridColor = PreferencesPageSupport.hairlineColor
+        tableView.selectionHighlightStyle = .regular
         tableView.allowsMultipleSelection = true
         tableView.dataSource = self
         tableView.delegate = self
@@ -154,8 +163,9 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
             stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
         ])
 
-        let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
+        let (workspace, listHeight) = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
         workspaceGroup = workspace
+        listHeightConstraint = listHeight
 
         PreferencesPageSupport.configureSecondaryButton(editButton)
         PreferencesPageSupport.configureSecondaryButton(deleteButton)
@@ -200,6 +210,19 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         tableView.selectRowIndexes(IndexSet(visibleTerms.indices.filter { selectedValues.contains(visibleTerms[$0].value) }), byExtendingSelection: false)
         updateState()
         updateActionAvailability()
+        updateListHeight()
+    }
+
+    /// Hug the list to its content so the framed region ends just under the last term (or the
+    /// empty-state message) rather than stretching a mostly-empty box.
+    private func updateListHeight() {
+        let contentHeight: CGFloat = state == .entries
+            ? CGFloat(visibleTerms.count) * tableView.rowHeight + 2
+            : 150
+        listHeightConstraint?.constant = min(
+            PreferencesPageSupport.listMaxHeight,
+            max(PreferencesPageSupport.listMinHeight, contentHeight)
+        )
     }
 
     private func updateState() {

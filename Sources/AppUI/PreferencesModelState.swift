@@ -12,6 +12,8 @@ struct PreferencesModelRow: Equatable, Sendable {
     let isCancelled: Bool
     /// Non-nil only while this row's model is being downloaded, e.g. "25% (412/1621 MB)".
     let downloadProgressText: String?
+    /// Human-readable size shown under the status, e.g. "1.2 GB". Nil when unknown.
+    let sizeText: String?
 
     init(
         id: String,
@@ -23,7 +25,8 @@ struct PreferencesModelRow: Equatable, Sendable {
         isDownloading: Bool,
         isPreparing: Bool = false,
         isCancelled: Bool,
-        downloadProgressText: String?
+        downloadProgressText: String?,
+        sizeText: String? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -35,6 +38,14 @@ struct PreferencesModelRow: Equatable, Sendable {
         self.isPreparing = isPreparing
         self.isCancelled = isCancelled
         self.downloadProgressText = downloadProgressText
+        self.sizeText = sizeText
+    }
+
+    /// The transcription engine family this model runs on, for the Models table.
+    var engineName: String {
+        id == ModelCatalog.parakeetModelID || id.hasPrefix(ModelCatalog.parakeetModelID)
+            ? "Parakeet"
+            : "Whisper"
     }
 
     var canDownload: Bool {

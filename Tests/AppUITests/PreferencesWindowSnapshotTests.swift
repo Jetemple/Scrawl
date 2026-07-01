@@ -40,6 +40,7 @@ private enum PreferencesWindowSnapshotWriter {
         try writeSnapshot(named: "preferences-models.png", section: .models, snapshot: snapshot, to: outputDirectory)
         try writeSnapshot(named: "preferences-history.png", section: .history, snapshot: snapshot, to: outputDirectory)
         try writeSnapshot(named: "preferences-dictionary.png", section: .dictionary, snapshot: snapshot, to: outputDirectory)
+        try writeSnapshot(named: "preferences-about.png", section: .about, snapshot: snapshot, to: outputDirectory)
         try writeSnapshot(
             named: "preferences-minimum-width.png",
             section: .models,
@@ -54,7 +55,7 @@ private enum PreferencesWindowSnapshotWriter {
         named fileName: String,
         section: PreferencesWindowController.Section,
         snapshot: PreferencesWindowController.Snapshot,
-        contentSize: NSSize = NSSize(width: 680, height: 460),
+        contentSize: NSSize = NSSize(width: 740, height: 512),
         to outputDirectory: URL
     ) throws {
         let controller = PreferencesWindowController(actions: makeActions())
@@ -140,7 +141,7 @@ private enum PreferencesWindowSnapshotWriter {
 
     private static let modelRows = [
         modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
-        modelRow(id: "ggml-small.en", installed: true, selected: false),
+        modelRow(id: "ggml-small.en", installed: true, selected: false, sizeText: "1.2 GB"),
         PreferencesModelRow(
             id: "ggml-medium",
             displayName: PreferencesModelState.displayName(forModelID: "ggml-medium"),
@@ -149,9 +150,10 @@ private enum PreferencesWindowSnapshotWriter {
             isSelected: false,
             isDownloading: true,
             isCancelled: false,
-            downloadProgressText: "42% (630/1500 MB)"
+            downloadProgressText: "42% (630/1500 MB)",
+            sizeText: "1.5 GB"
         ),
-        modelRow(id: "ggml-large-v3-turbo", installed: false, selected: false),
+        modelRow(id: "ggml-large-v3-turbo", installed: false, selected: false, sizeText: "3.8 GB"),
     ]
 
     private static let downloadableModels = [
@@ -192,7 +194,7 @@ private enum PreferencesWindowSnapshotWriter {
         )
     }
 
-    private static func modelRow(id: String, installed: Bool, selected: Bool) -> PreferencesModelRow {
+    private static func modelRow(id: String, installed: Bool, selected: Bool, sizeText: String? = nil) -> PreferencesModelRow {
         PreferencesModelRow(
             id: id,
             displayName: PreferencesModelState.displayName(forModelID: id),
@@ -202,7 +204,8 @@ private enum PreferencesWindowSnapshotWriter {
             isDefault: selected,
             isDownloading: false,
             isCancelled: false,
-            downloadProgressText: nil
+            downloadProgressText: nil,
+            sizeText: sizeText
         )
     }
 

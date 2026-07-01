@@ -11,7 +11,7 @@ final class PreferencesAboutView: NSView {
         let versionLabel = NSTextField(labelWithString: "Version \(version)")
         versionLabel.textColor = .secondaryLabelColor
 
-        let privacyLabel = NSTextField(wrappingLabelWithString: "Audio and transcription are processed locally on this Mac.")
+        let privacyLabel = NSTextField(labelWithString: "Audio never leaves this Mac.")
         privacyLabel.textColor = .secondaryLabelColor
 
         let projectButton = NSButton(title: "Open Project Page", target: nil, action: nil)
