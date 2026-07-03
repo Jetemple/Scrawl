@@ -55,7 +55,7 @@ private enum PreferencesWindowSnapshotWriter {
         named fileName: String,
         section: PreferencesWindowController.Section,
         snapshot: PreferencesWindowController.Snapshot,
-        contentSize: NSSize = NSSize(width: 740, height: 512),
+        contentSize: NSSize? = nil,
         to outputDirectory: URL
     ) throws {
         let controller = PreferencesWindowController(actions: makeActions())
@@ -63,7 +63,14 @@ private enum PreferencesWindowSnapshotWriter {
             throw SnapshotError.missingWindow(fileName)
         }
 
-        window.setContentSize(contentSize)
+        // SCRAWL_PREFERENCES_SNAPSHOT_APPEARANCE=dark renders the dark-mode variants;
+        // anything else (or unset) uses the default light appearance.
+        if ProcessInfo.processInfo.environment["SCRAWL_PREFERENCES_SNAPSHOT_APPEARANCE"] == "dark" {
+            window.appearance = NSAppearance(named: .darkAqua)
+        } else {
+            window.appearance = NSAppearance(named: .aqua)
+        }
+
         controller.update(snapshot: snapshot)
         controller.selectSection(section)
 
@@ -71,7 +78,10 @@ private enum PreferencesWindowSnapshotWriter {
             throw SnapshotError.missingContentView(fileName)
         }
 
-        contentView.frame = NSRect(origin: .zero, size: contentSize)
+        // Explicit contentSize forces a stress-case render; by default the window's own
+        // per-page fitted size is what users actually see.
+        let renderSize = contentSize ?? contentView.bounds.size
+        contentView.frame = NSRect(origin: .zero, size: renderSize)
         window.layoutIfNeeded()
         contentView.layoutSubtreeIfNeeded()
         contentView.displayIfNeeded()

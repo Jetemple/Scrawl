@@ -3,7 +3,6 @@ import Permissions
 import SettingsStore
 
 final class PreferencesGeneralView: NSView {
-    private let readinessLabel = NSTextField(labelWithString: "")
     private let hotkeyLabel = NSTextField(labelWithString: "")
     private let microphoneLabel = NSTextField(labelWithString: "")
     private let accessibilityLabel = NSTextField(labelWithString: "")
@@ -55,6 +54,9 @@ final class PreferencesGeneralView: NSView {
         accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
         hotkeyButton.target = self
         hotkeyButton.action = #selector(setHotkeyAction(_:))
+        let hotkeyUsageHint = "Hold to dictate. Double-tap to lock recording."
+        hotkeyButton.toolTip = hotkeyUsageHint
+        hotkeyLabel.toolTip = hotkeyUsageHint
         offloadPopup.addItems(withTitles: ModelOffloadPolicy.allCases.map(\.displayName))
         offloadPopup.controlSize = .small
         offloadPopup.target = self
@@ -63,86 +65,26 @@ final class PreferencesGeneralView: NSView {
         clipboardHistoryCheckbox.target = self
         clipboardHistoryCheckbox.action = #selector(clipboardHistoryChanged(_:))
         clipboardHistoryCheckbox.font = .systemFont(ofSize: 13)
-
-        let clipboardHistorySubtitle = NSTextField(labelWithString: "Allows clipboard managers to save your dictations")
-        clipboardHistorySubtitle.font = .systemFont(ofSize: 11)
-        clipboardHistorySubtitle.textColor = .secondaryLabelColor
-
-        let clipboardGroup = NSStackView(views: [clipboardHistoryCheckbox, clipboardHistorySubtitle])
-        clipboardGroup.orientation = .vertical
-        clipboardGroup.alignment = .leading
-        clipboardGroup.spacing = 3
-        clipboardGroup.edgeInsets = NSEdgeInsets(
-            top: 11,
-            left: PreferencesPageSupport.rowInset,
-            bottom: 11,
-            right: PreferencesPageSupport.rowInset
-        )
-        // A vertical stack won't stretch under the group's `.width` alignment, so pin it left
-        // inside a full-width horizontal row (the trailing spacer absorbs the slack), matching
-        // how the key/value rows and section headers lay out.
-        let clipboardRow = NSStackView(views: [clipboardGroup, NSView()])
-        clipboardRow.orientation = .horizontal
-        clipboardRow.alignment = .top
-        clipboardRow.spacing = 0
+        clipboardHistoryCheckbox.toolTip = "Allows clipboard managers to save your dictations."
+        let clipboardRow = Self.makeCompactCheckboxRow(clipboardHistoryCheckbox)
 
         launchAtLoginCheckbox.target = self
         launchAtLoginCheckbox.action = #selector(launchAtLoginChanged(_:))
         launchAtLoginCheckbox.font = .systemFont(ofSize: 13)
-
-        let launchAtLoginSubtitle = NSTextField(labelWithString: "Start Scrawl automatically when you sign in.")
-        launchAtLoginSubtitle.font = .systemFont(ofSize: 11)
-        launchAtLoginSubtitle.textColor = .secondaryLabelColor
-
-        let launchAtLoginGroup = NSStackView(views: [launchAtLoginCheckbox, launchAtLoginSubtitle])
-        launchAtLoginGroup.orientation = .vertical
-        launchAtLoginGroup.alignment = .leading
-        launchAtLoginGroup.spacing = 3
-        launchAtLoginGroup.edgeInsets = NSEdgeInsets(
-            top: 11,
-            left: PreferencesPageSupport.rowInset,
-            bottom: 11,
-            right: PreferencesPageSupport.rowInset
-        )
-        let launchAtLoginRow = NSStackView(views: [launchAtLoginGroup, NSView()])
-        launchAtLoginRow.orientation = .horizontal
-        launchAtLoginRow.alignment = .top
-        launchAtLoginRow.spacing = 0
-
-        let hotkeyInstructions = NSTextField(wrappingLabelWithString: """
-        Hold the hotkey while speaking, then release to transcribe. \
-        Double-tap to keep recording hands-free, then tap again to stop.
-        """)
-        hotkeyInstructions.font = .systemFont(ofSize: 11)
-        hotkeyInstructions.textColor = .secondaryLabelColor
-        let hotkeyInstructionsRow = NSStackView(views: [hotkeyInstructions, NSView()])
-        hotkeyInstructionsRow.orientation = .horizontal
-        hotkeyInstructionsRow.alignment = .top
-        hotkeyInstructionsRow.spacing = 0
-        hotkeyInstructionsRow.edgeInsets = NSEdgeInsets(
-            top: 0,
-            left: PreferencesPageSupport.rowInset,
-            bottom: 0,
-            right: PreferencesPageSupport.rowInset
-        )
+        launchAtLoginCheckbox.toolTip = "Start Scrawl automatically when you sign in."
+        let launchAtLoginRow = Self.makeCompactCheckboxRow(launchAtLoginCheckbox)
 
         let page = PreferencesPageSupport.makePage(
             title: "General",
-            description: "Readiness and defaults.",
+            description: "Hotkey, permissions, and defaults.",
             content: [
                 PreferencesPageSupport.makeGroup(header: "Transcription", rows: [
-                    PreferencesPageSupport.makeSettingRow(title: "Readiness", detail: readinessLabel),
                     PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel, action: hotkeyButton),
-                    PreferencesPageSupport.makeSettingRow(
+                    PreferencesPageSupport.makeSettingControlRow(
                         title: "Offload model",
-                        // The popup value (Immediately / 1 minute / … / Never) already states
-                        // the timing, so no static detail — a fixed "After inactivity" label
-                        // contradicted the "Immediately" and "Never" choices.
-                        detail: NSTextField(labelWithString: ""),
-                        action: offloadPopup
+                        control: offloadPopup
                     ),
                 ]),
-                hotkeyInstructionsRow,
                 PreferencesPageSupport.makeGroup(header: "Permissions", rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
                     PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton),
@@ -173,10 +115,6 @@ final class PreferencesGeneralView: NSView {
         updatePermissionLabel(microphoneLabel, status: microphoneStatus)
         updatePermissionLabel(accessibilityLabel, status: accessibilityStatus)
 
-        let isReady = microphoneStatus == .authorized && accessibilityStatus == .authorized
-        readinessLabel.stringValue = isReady ? "Ready to transcribe" : "Permissions required"
-        readinessLabel.textColor = isReady ? .systemGreen : .secondaryLabelColor
-
         microphoneButton.isHidden = microphoneStatus == .authorized
         accessibilityButton.isHidden = accessibilityStatus == .authorized
         offloadPopup.selectItem(at: ModelOffloadPolicy.allCases.firstIndex(of: settings.modelOffloadPolicy) ?? 0)
@@ -193,14 +131,39 @@ final class PreferencesGeneralView: NSView {
         switch status {
         case .authorized:
             label.stringValue = "Authorized"
-            label.textColor = .systemGreen
+            label.textColor = Self.authorizedStatusColor
         case .denied:
             label.stringValue = "Denied"
-            label.textColor = .systemRed
+            label.textColor = PreferencesPageSupport.accentColor
         case .notDetermined:
             label.stringValue = "Not Requested"
             label.textColor = .secondaryLabelColor
         }
+    }
+
+    private static var authorizedStatusColor: NSColor {
+        NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return NSColor(srgbRed: 0.42, green: 0.78, blue: 0.48, alpha: 1)
+            }
+            return NSColor(srgbRed: 0.14, green: 0.48, blue: 0.24, alpha: 1)
+        }
+    }
+
+    private static func makeCompactCheckboxRow(_ checkbox: NSButton) -> NSView {
+        checkbox.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [checkbox, NSView()])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 0
+        row.edgeInsets = NSEdgeInsets(
+            top: 8,
+            left: PreferencesPageSupport.rowInset,
+            bottom: 8,
+            right: PreferencesPageSupport.rowInset
+        )
+        return row
     }
 
     var isClipboardHistoryEnabled: Bool {

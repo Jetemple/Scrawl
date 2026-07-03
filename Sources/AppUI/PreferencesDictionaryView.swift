@@ -89,8 +89,8 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 14),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -14),
+            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: PreferencesPageSupport.rowInset),
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -PreferencesPageSupport.rowInset),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
@@ -113,6 +113,8 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         // with the rounded search field and list group below it. The rounded bezel
         // gives the input the same soft corners as everything around it.
         termField.bezelStyle = .roundedBezel
+        termField.target = self
+        termField.action = #selector(addTerm(_:))
         PreferencesPageSupport.configureSecondaryButton(addButton)
         addButton.target = self
         addButton.action = #selector(addTerm(_:))
@@ -189,7 +191,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         PreferencesPageSupport.fill(self, with: page)
     }
 
-    @objc private func addTerm(_: NSButton) {
+    @objc private func addTerm(_: Any) {
         let value = termField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         addButton.isEnabled = false

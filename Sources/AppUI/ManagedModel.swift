@@ -33,6 +33,7 @@ protocol ManagedModel: Sendable {
     var displayName: String { get }
     var isAvailable: Bool { get }
     var installState: ManagedModelInstallState { get }
+    var installedSizeBytes: Int64? { get }
     var preparesOnSelection: Bool { get }
 
     func prepare(progressHandler: ModelPreparationProgressHandler?) async throws
@@ -40,6 +41,7 @@ protocol ManagedModel: Sendable {
 }
 
 extension ManagedModel {
+    var installedSizeBytes: Int64? { installState.installedSizeBytes }
     var preparesOnSelection: Bool { false }
 }
 
@@ -136,13 +138,18 @@ final class ParakeetManagedModel: ManagedModel, @unchecked Sendable {
     var preparesOnSelection: Bool { true }
 
     var installState: ManagedModelInstallState {
+        if cacheStore.parakeetCacheExists() {
+            return .installed(sizeBytes: nil)
+        }
         if let progress = preparationProgressProvider() {
             return .preparing(progress)
         }
-        guard cacheStore.parakeetCacheExists() else {
-            return .notInstalled
-        }
-        return .installed(sizeBytes: cacheStore.parakeetCacheSizeBytes())
+        return .notInstalled
+    }
+
+    var installedSizeBytes: Int64? {
+        guard cacheStore.parakeetCacheExists() else { return nil }
+        return cacheStore.parakeetCacheSizeBytes()
     }
 
     func prepare(progressHandler: ModelPreparationProgressHandler?) async throws {

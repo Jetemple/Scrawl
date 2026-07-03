@@ -83,7 +83,7 @@ final class ModelCatalog: @unchecked Sendable {
 
     func deletionTarget(selectedModelID: String) -> ModelDeletionTarget? {
         guard let model = model(id: selectedModelID),
-              case let .installed(sizeBytes) = model.installState
+              model.installState.isInstalled
         else {
             return nil
         }
@@ -92,7 +92,7 @@ final class ModelCatalog: @unchecked Sendable {
             modelID: model.id,
             displayName: model.displayName,
             isBuiltIn: isBuiltIn(modelID: model.id),
-            sizeNote: Self.sizeNote(for: sizeBytes)
+            sizeNote: Self.sizeNote(for: model.installedSizeBytes)
         )
     }
 

@@ -5,16 +5,15 @@ import SettingsStore
 import TranscriptHistoryStore
 
 /// Hosts a preferences page NSView inside a view controller so `NSTabViewController`
-/// can own it. A fixed `preferredContentSize` keeps the window stable across tabs
-/// (a tall Models list and a short About page report the same size, so switching
-/// tabs never resizes the window) — list pages scroll internally instead.
+/// can own it. Window sizing is handled by `PreferencesWindowController`; child
+/// controllers deliberately avoid preferred-size hints so tab switches do not
+/// reset the user's current window height.
 private final class PreferencesPageViewController: NSViewController {
     private let pageView: NSView
 
-    init(pageView: NSView, preferredSize: NSSize) {
+    init(pageView: NSView) {
         self.pageView = pageView
         super.init(nibName: nil, bundle: nil)
-        preferredContentSize = preferredSize
     }
 
     @available(*, unavailable)
@@ -105,6 +104,7 @@ final class PreferencesWindowController: NSWindowController {
     private let aboutView: PreferencesAboutView
     private let tabController = NSTabViewController()
     private var sectionViews: [Section: NSView] = [:]
+    private var tabSelectionObservation: NSKeyValueObservation?
     private var didCenterWindow = false
 
     var visibleSection: Section {
@@ -253,21 +253,24 @@ final class PreferencesWindowController: NSWindowController {
         ))
         aboutView = PreferencesAboutView(openProjectPage: actions.openProjectPage)
 
+        // Fixed-size window: every page has a designed size (compact General, wider
+        // workbench pages), so user resizing only creates layouts nobody designed.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 740, height: 512),
-            styleMask: [.titled, .closable, .resizable],
+            // Nominal size; the post-setup resize snaps to the General page's fitted size.
+            contentRect: NSRect(x: 0, y: 0, width: Section.general.windowContentWidth, height: 512),
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = "Scrawl Preferences"
         window.isReleasedWhenClosed = false
-        // The toolbar tab strip claims vertical space the old sidebar didn't, so the
-        // minimum window is a little taller to leave the pages the same room to breathe.
-        window.minSize = NSSize(width: 620, height: 480)
         window.identifier = NSUserInterfaceItemIdentifier("ScrawlPreferencesWindow")
 
         super.init(window: window)
         setupTabs()
+        // Assigning contentViewController lets AppKit shrink the window to the tab
+        // view's fitting size; snap back to the selected section's designed size.
+        resizeWindowForSelectedSection(animated: false)
     }
 
     @available(*, unavailable)
@@ -307,6 +310,9 @@ final class PreferencesWindowController: NSWindowController {
             entries: snapshot.dictionaryEntries,
             loadErrorDescription: snapshot.dictionaryLoadErrorDescription
         )
+        // Content changes move a page's natural height (lists hug their rows); the
+        // user can't resize the fixed window, so it follows the visible page.
+        resizeWindowForSelectedSection(animated: window?.isVisible == true)
     }
 
     func selectGeneralModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
@@ -315,6 +321,13 @@ final class PreferencesWindowController: NSWindowController {
 
     func selectSection(_ section: Section) {
         tabController.selectedTabViewItemIndex = section.rawValue
+        // On a visible window the tab-selection observation already animates the
+        // resize; a second, instant resize here would snap-cancel that motion. On a
+        // hidden window (tests, restoration) transitions don't animate reliably, so
+        // resize deterministically.
+        if window?.isVisible != true {
+            resizeWindowForSelectedSection(animated: false)
+        }
         window?.contentView?.layoutSubtreeIfNeeded()
     }
 
@@ -344,12 +357,9 @@ final class PreferencesWindowController: NSWindowController {
         ]
 
         tabController.tabStyle = .toolbar
-        // A fixed content size across every tab is what keeps the window from resizing
-        // as you switch pages (Codex's one design caution). List pages scroll internally.
-        let preferredSize = NSSize(width: 740, height: 468)
         for section in Section.allCases {
             guard let view = sectionViews[section] else { continue }
-            let pageController = PreferencesPageViewController(pageView: view, preferredSize: preferredSize)
+            let pageController = PreferencesPageViewController(pageView: view)
             let item = NSTabViewItem(viewController: pageController)
             item.label = section.title
             item.image = NSImage(systemSymbolName: section.symbolName, accessibilityDescription: section.title)
@@ -357,8 +367,62 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         window?.contentViewController = tabController
+        tabSelectionObservation = tabController.observe(\.selectedTabViewItemIndex, options: [.new]) { [weak self] _, _ in
+            guard let self else { return }
+            self.resizeWindowForSelectedSection(animated: self.window?.isVisible == true)
+            self.window?.title = "Scrawl Preferences"
+        }
         tabController.selectedTabViewItemIndex = Section.general.rawValue
         // NSTabViewController can push the selected page's title onto the window; keep our own.
         window?.title = "Scrawl Preferences"
+    }
+
+    /// Classic macOS preferences sizing: the user cannot resize the window, so each
+    /// page resizes it instead — designed width per section, height fitted to that
+    /// page's content (About stays small, list pages take the room their rows need).
+    private func resizeWindowForSelectedSection(animated: Bool) {
+        guard let window, let contentView = window.contentView else { return }
+        guard let pageView = sectionViews[visibleSection] else { return }
+        let contentSize = NSSize(
+            width: visibleSection.windowContentWidth,
+            height: max(pageView.fittingSize.height, 260)
+        )
+        let currentSize = contentView.bounds.size
+        guard abs(currentSize.width - contentSize.width) > 0.5 ||
+            abs(currentSize.height - contentSize.height) > 0.5
+        else {
+            return
+        }
+
+        let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+        let currentFrame = window.frame
+        let targetFrame = NSRect(
+            x: currentFrame.midX - frameSize.width / 2,
+            y: currentFrame.maxY - frameSize.height,
+            width: frameSize.width,
+            height: frameSize.height
+        )
+        guard animated else {
+            window.setFrame(targetFrame, display: true)
+            return
+        }
+        // `setFrame(animate: true)` is the legacy stepped resize (linear, chunky);
+        // an eased animator group matches the tab crossfade and reads as one motion.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().setFrame(targetFrame, display: true)
+        }
+    }
+}
+
+private extension PreferencesWindowController.Section {
+    var windowContentWidth: CGFloat {
+        switch self {
+        case .general:
+            560
+        case .models, .dictionary, .history, .about:
+            740
+        }
     }
 }

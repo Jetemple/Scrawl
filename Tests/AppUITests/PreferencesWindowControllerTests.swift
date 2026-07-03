@@ -1,6 +1,7 @@
 import AppKit
 @testable import AppUI
 import DictionaryStore
+import Permissions
 import SettingsStore
 import TranscriptHistoryStore
 import XCTest
@@ -22,7 +23,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         XCTAssertEqual(window.title, "Scrawl Preferences")
         XCTAssertTrue(window.styleMask.contains(.titled))
         XCTAssertTrue(window.styleMask.contains(.closable))
-        XCTAssertTrue(window.styleMask.contains(.resizable))
+        XCTAssertFalse(window.styleMask.contains(.resizable), "preferences window must not be user-resizable")
         XCTAssertTrue(controller.usesToolbarTabs)
         XCTAssertEqual(controller.tabSymbolNames.count, 5)
     }
@@ -38,6 +39,76 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.window?.orderOut(nil)
         controller.showWindow(nil)
         XCTAssertEqual(controller.visibleSection, .models)
+    }
+
+    @MainActor
+    func testGeneralUsesCompactWindowWidthAndWorkbenchPagesExpand() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        let contentView = try XCTUnwrap(window.contentView)
+
+        XCTAssertEqual(contentView.bounds.width, 560, accuracy: 0.5)
+
+        controller.selectSection(.models)
+        XCTAssertEqual(contentView.bounds.width, 740, accuracy: 0.5)
+
+        controller.selectSection(.general)
+        XCTAssertEqual(contentView.bounds.width, 560, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testTabSwitchesFitWindowHeightToEachPagesContent() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        let contentView = try XCTUnwrap(window.contentView)
+        controller.update(snapshot: makeSnapshot(
+            records: [TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")],
+            dictionaryEntries: [DictionaryEntry(wrong: "Anduril", correct: "Anduril")],
+            modelRows: [
+                PreferencesModelRow(
+                    id: "tiny.en", displayName: "Tiny (English)",
+                    isInstalled: true, isSelected: true,
+                    isDownloading: false, isCancelled: false, downloadProgressText: nil
+                ),
+                PreferencesModelRow(
+                    id: "ggml-medium", displayName: "Medium",
+                    isInstalled: false, isSelected: false,
+                    isDownloading: false, isCancelled: false, downloadProgressText: nil
+                ),
+            ]
+        ))
+
+        controller.selectSection(.models)
+        let modelsHeight = contentView.bounds.height
+
+        controller.selectSection(.about)
+        let aboutHeight = contentView.bounds.height
+        XCTAssertLessThan(
+            aboutHeight, modelsHeight - 100,
+            "About has far less content and must get a correspondingly shorter window"
+        )
+
+        controller.selectSection(.general)
+        XCTAssertEqual(contentView.bounds.width, 560, accuracy: 0.5)
+        XCTAssertGreaterThan(contentView.bounds.height, aboutHeight)
+    }
+
+    @MainActor
+    func testContentUpdatesAdjustWindowHeightForVisiblePage() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let window = try XCTUnwrap(controller.window)
+        let contentView = try XCTUnwrap(window.contentView)
+        controller.selectSection(.dictionary)
+        let sparseHeight = contentView.bounds.height
+
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: (1 ... 12).map {
+            DictionaryEntry(wrong: "term \($0)", correct: "term \($0)")
+        }))
+
+        XCTAssertGreaterThan(
+            contentView.bounds.height, sparseHeight,
+            "a fuller list must grow the fixed (non-user-resizable) window to fit"
+        )
     }
 
     @MainActor
@@ -58,10 +129,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testModelsPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
+    func testModelsPageHasUnambiguousLayoutAtFixedWindowSize() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
-        window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
         controller.selectSection(.models)
         window.contentView?.layoutSubtreeIfNeeded()
 
@@ -239,10 +309,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testHistoryPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
+    func testHistoryPageHasUnambiguousLayoutAtFixedWindowSize() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
-        window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
         controller.update(snapshot: makeSnapshot(records: [
             TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript"),
         ]))
@@ -382,12 +451,112 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let contentView = try XCTUnwrap(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
 
-        let titleMinXs = try ["Readiness", "Hotkey", "Offload model"].map { title -> CGFloat in
+        let titleMinXs = try ["Hotkey", "Offload model", "Microphone", "Accessibility"].map { title -> CGFloat in
             let field = try XCTUnwrap(contentView.textField(withValue: title))
             return contentView.convert(field.bounds, from: field).minX.rounded()
         }
 
         XCTAssertEqual(Set(titleMinXs).count, 1)
+    }
+
+    @MainActor
+    func testGeneralAvoidsDuplicateReadinessSummary() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        XCTAssertNotNil(contentView.textField(withValue: "Hotkey, permissions, and defaults."))
+        XCTAssertNil(contentView.textField(withValue: "Readiness"))
+        XCTAssertNil(contentView.textField(withValue: "Readiness and defaults."))
+    }
+
+    @MainActor
+    func testGeneralButtonsShareTrailingEdge() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
+
+        let controls: [NSView] = [
+            try XCTUnwrap(contentView.button(titled: "Set Hotkey…")),
+            try XCTUnwrap(contentView.button(titled: "Open Prompt")),
+        ]
+        let trailingEdges = controls.map { control in
+            contentView.convert(control.frame, from: control.superview).maxX.rounded()
+        }
+
+        let maxTrailingEdge = try XCTUnwrap(trailingEdges.max())
+        let minTrailingEdge = try XCTUnwrap(trailingEdges.min())
+        let spread = maxTrailingEdge - minTrailingEdge
+        XCTAssertLessThanOrEqual(spread, 2)
+    }
+
+    @MainActor
+    func testGeneralOffloadPopupAlignsUnderHotkeyValue() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
+
+        let hotkeyValue = try XCTUnwrap(contentView.textField(withValue: "Right ⌥ Option"))
+        let offloadPopup = try XCTUnwrap(contentView.popupButton(selectedTitle: "5 minutes"))
+        let hotkeyMinX = contentView.convert(hotkeyValue.bounds, from: hotkeyValue).minX.rounded()
+        let offloadMinX = contentView.convert(offloadPopup.frame, from: offloadPopup.superview).minX.rounded()
+
+        XCTAssertEqual(offloadMinX, hotkeyMinX, accuracy: 2)
+    }
+
+    @MainActor
+    func testGeneralHotkeyHelpDoesNotAddVisibleRow() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let hotkeyButton = try XCTUnwrap(contentView.button(titled: "Set Hotkey…"))
+        let hotkeyValue = try XCTUnwrap(contentView.textField(withValue: "Right ⌥ Option"))
+        let tooltip = "Hold to dictate. Double-tap to lock recording."
+
+        XCTAssertNil(contentView.textField(withValue: tooltip))
+        XCTAssertNil(contentView.textField(withValue: """
+        Hold the hotkey while speaking, then release to transcribe. \
+        Double-tap to keep recording hands-free, then tap again to stop.
+        """))
+        XCTAssertEqual(hotkeyButton.toolTip, tooltip)
+        XCTAssertEqual(hotkeyValue.toolTip, tooltip)
+    }
+
+    @MainActor
+    func testGeneralOptionsUseCompactRows() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
+
+        let clipboard = try XCTUnwrap(contentView.button(titled: "Keep transcripts in clipboard history"))
+        let launch = try XCTUnwrap(contentView.button(titled: "Launch at login"))
+        XCTAssertNil(contentView.textField(withValue: "Allows clipboard managers to save your dictations"))
+        XCTAssertNil(contentView.textField(withValue: "Start Scrawl automatically when you sign in."))
+        XCTAssertEqual(clipboard.toolTip, "Allows clipboard managers to save your dictations.")
+        XCTAssertEqual(launch.toolTip, "Start Scrawl automatically when you sign in.")
+
+        let clipboardFrame = contentView.convert(clipboard.frame, from: clipboard.superview)
+        let launchFrame = contentView.convert(launch.frame, from: launch.superview)
+        XCTAssertLessThanOrEqual(abs(clipboardFrame.midY - launchFrame.midY), 44)
+    }
+
+    @MainActor
+    func testGeneralPermissionStatusColorsStaySubtle() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        controller.update(snapshot: makeSnapshot(
+            microphoneStatus: .authorized,
+            accessibilityStatus: .denied
+        ))
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+
+        let authorized = try XCTUnwrap(contentView.textField(withValue: "Authorized"))
+        let denied = try XCTUnwrap(contentView.textField(withValue: "Denied"))
+
+        XCTAssertFalse(authorized.textColor?.isEqual(NSColor.systemGreen) ?? false)
+        XCTAssertFalse(denied.textColor?.isEqual(NSColor.systemRed) ?? false)
     }
 
     @MainActor
@@ -550,10 +719,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testDictionaryPageHasUnambiguousLayoutAtMinimumWindowSize() throws {
+    func testDictionaryPageHasUnambiguousLayoutAtFixedWindowSize() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
-        window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
         controller.update(snapshot: makeSnapshot(dictionaryEntries: [
             DictionaryEntry(wrong: "post grass", correct: "Postgres"),
         ]))
@@ -566,10 +734,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testEverySettingsPageFitsAtMinimumWindowSize() throws {
+    func testEverySettingsPageFitsAtFixedWindowSize() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
-        window.setFrame(NSRect(origin: .zero, size: window.minSize), display: false)
         controller.update(snapshot: makeSnapshot(
             records: [TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")],
             dictionaryEntries: [DictionaryEntry(wrong: "Anduril", correct: "Anduril")]
@@ -679,6 +846,25 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testDictionaryReturnKeyAddsPreferredTerm() throws {
+        var savedValue: String?
+        let controller = PreferencesWindowController(actions: makeActions(
+            saveDictionaryEntry: { _, _, correct, completion in
+                savedValue = correct
+                completion(.success(()))
+            }
+        ))
+        controller.selectSection(.dictionary)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let field = try XCTUnwrap(contentView.textField(withPlaceholder: "Add a preferred term"))
+        field.stringValue = "Anduril"
+
+        field.sendAction(field.action, to: field.target)
+
+        XCTAssertEqual(savedValue, "Anduril")
+    }
+
+    @MainActor
     func testDictionaryEditAndDeleteButtonsDispatchActions() throws {
         var editedOriginal: String?
         var editedValue: String?
@@ -723,7 +909,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
         modelRows: [PreferencesModelRow] = [],
         downloadProgressText: String? = nil,
         keepTranscriptsInClipboardHistory: Bool = false,
-        launchAtLoginEnabled: Bool = false
+        launchAtLoginEnabled: Bool = false,
+        microphoneStatus: PermissionStatus = .notDetermined,
+        accessibilityStatus: PermissionStatus = .notDetermined
     ) -> PreferencesWindowController.Snapshot {
         PreferencesWindowController.Snapshot(
             settings: AppSettings(
@@ -733,8 +921,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
             ),
             downloadableModels: [],
             modelRows: modelRows,
-            microphoneStatus: .notDetermined,
-            accessibilityStatus: .notDetermined,
+            microphoneStatus: microphoneStatus,
+            accessibilityStatus: accessibilityStatus,
             isCapturingHotkey: false,
             isModelDownloadInProgress: false,
             downloadProgressText: downloadProgressText,
@@ -804,6 +992,13 @@ private extension NSView {
             return button
         }
         return subviews.lazy.compactMap { $0.button(titled: title) }.first
+    }
+
+    func popupButton(selectedTitle title: String) -> NSPopUpButton? {
+        if let popup = self as? NSPopUpButton, popup.titleOfSelectedItem == title, !popup.isEffectivelyHidden {
+            return popup
+        }
+        return subviews.lazy.compactMap { $0.popupButton(selectedTitle: title) }.first
     }
 
     func textField(withPlaceholder placeholder: String) -> NSTextField? {

@@ -38,8 +38,10 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private var loadErrorDescription: String?
     private var rowsAreTranscriptFirst = true
     private var transcriptTextIsLeftAligned = true
+    private var hasRenderedOnce = false
 
     private(set) var state = State.empty
+    private(set) var contentReloadCount = 0
     var visibleRecordIDs: [UUID] {
         visibleRecords.map(\.id)
     }
@@ -85,6 +87,17 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     func update(records: [TranscriptRecord], isEnabled: Bool, loadErrorDescription: String?) {
+        // Model/permission/hotkey refreshes reach this page with identical history data;
+        // reloading the table and re-measuring every transcript's height each time is a
+        // measured contributor to preferences lag, so skip no-op updates entirely.
+        if hasRenderedOnce,
+           records == self.records,
+           isEnabled == self.isEnabled,
+           loadErrorDescription == self.loadErrorDescription
+        {
+            return
+        }
+        hasRenderedOnce = true
         self.records = records
         self.isEnabled = isEnabled
         self.loadErrorDescription = loadErrorDescription
@@ -147,8 +160,8 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         cell.addSubview(text)
         cell.addSubview(metadata)
         NSLayoutConstraint.activate([
-            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 14),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -14),
+            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: PreferencesPageSupport.rowInset),
+            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -PreferencesPageSupport.rowInset),
             text.topAnchor.constraint(equalTo: cell.topAnchor, constant: 13),
             metadata.leadingAnchor.constraint(equalTo: text.leadingAnchor),
             metadata.trailingAnchor.constraint(equalTo: text.trailingAnchor),
@@ -253,6 +266,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     private func applyFilter() {
+        contentReloadCount += 1
         visibleRecords = PreferencesContentState.filteredHistory(records: records, query: searchField.stringValue)
         selectedID = PreferencesContentState.resolvedHistorySelection(currentID: selectedID, visibleRecords: visibleRecords)
         tableView.reloadData()

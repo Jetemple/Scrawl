@@ -109,8 +109,15 @@ final class ModelCatalogTests: XCTestCase {
         let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
         let provider = SpyRetainingProvider()
         let model = ParakeetManagedModel(cacheStore: cache, provider: provider)
+        let catalog = ModelCatalog(models: [model])
 
-        XCTAssertEqual(model.installState, .installed(sizeBytes: 461 * 1024 * 1024))
+        XCTAssertEqual(model.installState, .installed(sizeBytes: nil))
+        XCTAssertEqual(cache.sizeCallCount, 0)
+        XCTAssertEqual(
+            catalog.deletionTarget(selectedModelID: TranscriptionModelID.parakeetV3)?.sizeNote,
+            " (461 MB)"
+        )
+        XCTAssertEqual(cache.sizeCallCount, 1)
 
         try await model.delete()
 
@@ -118,6 +125,44 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertFalse(cache.exists)
         XCTAssertEqual(provider.shutdownModelIDs, [TranscriptionModelID.parakeetV3])
         XCTAssertEqual(model.installState, .notInstalled)
+    }
+
+    func testCachedParakeetStaysInstalledInPreferenceRowsWhilePreparationIsInProgress() throws {
+        let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
+        let model = ParakeetManagedModel(
+            cacheStore: cache,
+            provider: nil,
+            preparationProgressProvider: {
+                ManagedModelPreparationProgress(displayText: "Preparing")
+            }
+        )
+
+        let rows = PreferencesModelState.rows(
+            models: [model],
+            selectedModelID: TranscriptionModelID.parakeetV3,
+            downloadingModelID: nil
+        )
+
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertTrue(row.isInstalled, "Cached Parakeet must stay in Installed Models while it loads")
+        XCTAssertFalse(row.isPreparing)
+        XCTAssertEqual(row.statusText, "Recommended")
+    }
+
+    func testCachedParakeetPreferenceRefreshDoesNotMeasureCacheSize() throws {
+        let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
+        let model = ParakeetManagedModel(cacheStore: cache, provider: nil)
+        let catalog = ModelCatalog(models: [model])
+
+        XCTAssertTrue(catalog.isInstalled(modelID: TranscriptionModelID.parakeetV3))
+        let rows = PreferencesModelState.rows(
+            models: catalog.availableModels,
+            selectedModelID: TranscriptionModelID.parakeetV3,
+            downloadingModelID: nil
+        )
+
+        XCTAssertTrue(try XCTUnwrap(rows.first).isInstalled)
+        XCTAssertEqual(cache.sizeCallCount, 0)
     }
     #endif
 }
@@ -156,6 +201,7 @@ private final class SpyParakeetCacheStore: ParakeetModelCacheStore, @unchecked S
     var exists: Bool
     var sizeBytes: Int64?
     private(set) var deleteCallCount = 0
+    private(set) var sizeCallCount = 0
 
     init(exists: Bool, sizeBytes: Int64?) {
         self.exists = exists
@@ -167,7 +213,8 @@ private final class SpyParakeetCacheStore: ParakeetModelCacheStore, @unchecked S
     }
 
     func parakeetCacheSizeBytes() -> Int64? {
-        sizeBytes
+        sizeCallCount += 1
+        return sizeBytes
     }
 
     func deleteParakeetCache() throws {

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 private final class FlippedModelsDocumentView: NSView {
     override var isFlipped: Bool {
@@ -17,6 +18,12 @@ private final class ModelRowBackgroundView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         highlightLayer.cornerRadius = 9
+        highlightLayer.actions = [
+            "bounds": NSNull(),
+            "position": NSNull(),
+            "frame": NSNull(),
+            "backgroundColor": NSNull(),
+        ]
         layer?.addSublayer(highlightLayer)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
@@ -35,7 +42,7 @@ private final class ModelRowBackgroundView: NSView {
 
     override func layout() {
         super.layout()
-        highlightLayer.frame = bounds.insetBy(dx: 8, dy: 3)
+        updateHighlightLayer()
     }
 
     override var wantsUpdateLayer: Bool {
@@ -43,12 +50,22 @@ private final class ModelRowBackgroundView: NSView {
     }
 
     override func updateLayer() {
-        highlightLayer.frame = bounds.insetBy(dx: 8, dy: 3)
+        updateHighlightLayer()
+    }
+
+    private func updateHighlightLayer() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        highlightLayer.frame = bounds.insetBy(
+            dx: PreferencesPageSupport.selectionPillHorizontalInset,
+            dy: PreferencesPageSupport.selectionPillVerticalInset
+        )
         effectiveAppearance.performAsCurrentDrawingAppearance {
             highlightLayer.backgroundColor = isSelectedRow
                 ? PreferencesPageSupport.selectionTint.cgColor
                 : NSColor.clear.cgColor
         }
+        CATransaction.commit()
     }
 }
 
@@ -141,10 +158,11 @@ final class PreferencesModelsView: NSView {
     private var allRows: [PreferencesModelRow] = []
     private var isDownloadInProgress = false
     private var filterQuery = ""
+    private var hasRenderedOnce = false
 
     // Bookkeeping for test accessors.
+    private(set) var listRebuildCount = 0
     private var twoLineRowCount = 0
-    private var modelKebabButtonCount = 0
     private var selectedRowHasAction = false
     private var firstActionView: NSView?
     private var firstActionRowView: NSView?
@@ -152,12 +170,11 @@ final class PreferencesModelsView: NSView {
     private weak var installedSectionLabel: NSTextField?
     private weak var availableSectionLabel: NSTextField?
     private weak var firstSectionCard: NSView?
-    private var modelInfoPopover: NSPopover?
     private var pickerIDByIndex: [Int: String] = [:]
 
     // Column metrics shared by header and rows so they line up like the mockup table.
-    private let rowContentLeftInset: CGFloat = 14
-    private let rowContentRightInset: CGFloat = 14
+    private let rowContentLeftInset = PreferencesPageSupport.rowInset
+    private let rowContentRightInset = PreferencesPageSupport.rowInset
     private let columnSpacing: CGFloat = 12
     private let iconColumnWidth: CGFloat = 28
     private let engineColumnWidth: CGFloat = 62
@@ -187,8 +204,8 @@ final class PreferencesModelsView: NSView {
         countDescendants(ofType: NSSearchField.self)
     }
 
-    var visibleModelKebabButtonCount: Int {
-        modelKebabButtonCount
+    var visibleModelInfoButtonCount: Int {
+        0
     }
 
     var visibleModelPickerTitle: String? {
@@ -219,6 +236,10 @@ final class PreferencesModelsView: NSView {
 
     var visibleModelListHeight: CGFloat {
         scrollContainer.frame.height
+    }
+
+    var visibleFirstModelRowHeight: CGFloat? {
+        firstSectionCard?.frame.height
     }
 
     var visibleFirstActionCenterYOffset: CGFloat? {
@@ -284,8 +305,12 @@ final class PreferencesModelsView: NSView {
         }
         let contentHug = scrollContainer.heightAnchor.constraint(equalTo: listView.heightAnchor)
         contentHug.priority = .defaultLow
+        // High-but-breakable: at the window's minimum height the whole page cannot fit,
+        // and the viewport (which scrolls) must be what gives — never the row content.
+        let minHeight = scrollContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: minListHeight)
+        minHeight.priority = NSLayoutConstraint.Priority(900)
         NSLayoutConstraint.activate([
-            scrollContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: minListHeight),
+            minHeight,
             scrollContainer.heightAnchor.constraint(lessThanOrEqualToConstant: maxListHeight),
             contentHug,
             scrollView.leadingAnchor.constraint(equalTo: scrollContainer.leadingAnchor),
@@ -340,7 +365,8 @@ final class PreferencesModelsView: NSView {
         let actionBar = PreferencesPageSupport.makePinnedActionBar(
             leading: [addButton, revealButton],
             trailing: [deleteButton, cancelButton],
-            leadingInset: rowContentLeftInset
+            leadingInset: rowContentLeftInset,
+            trailingInset: rowContentRightInset
         )
         actionBarView = actionBar
 
@@ -396,7 +422,7 @@ final class PreferencesModelsView: NSView {
             item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 
-        let container = NSView()
+        let container = PreferencesPageSupport.makeContentBackground()
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: PreferencesPageSupport.pageHorizontalInset),
@@ -408,13 +434,26 @@ final class PreferencesModelsView: NSView {
     }
 
     func update(rows: [PreferencesModelRow], downloadableModels: [DownloadableModel], isDownloadInProgress: Bool) {
-        downloadableModelsByID = Dictionary(uniqueKeysWithValues: downloadableModels.map { ($0.id, $0) })
+        let newDownloadableModelsByID = Dictionary(uniqueKeysWithValues: downloadableModels.map { ($0.id, $0) })
+        // Preferences refreshes fire for many reasons unrelated to models (permissions,
+        // history, hotkey); tearing down and recreating every row view for an identical
+        // snapshot is pure waste and a measured contributor to model-switch lag.
+        if hasRenderedOnce,
+           rows == allRows,
+           newDownloadableModelsByID == downloadableModelsByID,
+           isDownloadInProgress == self.isDownloadInProgress
+        {
+            return
+        }
+        hasRenderedOnce = true
+        downloadableModelsByID = newDownloadableModelsByID
         allRows = rows
         self.isDownloadInProgress = isDownloadInProgress
         rebuild()
     }
 
     private func rebuild() {
+        listRebuildCount += 1
         deleteButton.isEnabled = allRows.contains { $0.isSelected && $0.isInstalled }
         deleteButton.isHidden = isDownloadInProgress
         cancelButton.isEnabled = isDownloadInProgress
@@ -423,7 +462,6 @@ final class PreferencesModelsView: NSView {
         rebuildModelPicker()
 
         twoLineRowCount = allRows.count
-        modelKebabButtonCount = 0
         selectedRowHasAction = false
         firstActionView = nil
         firstActionRowView = nil
@@ -561,12 +599,17 @@ final class PreferencesModelsView: NSView {
         nameLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Row text must never squash vertically: when the window is squeezed the layout
+        // engine relieves pressure at the softest spot, and label intrinsic heights
+        // (default 750) were losing to the page chrome's required constraints.
+        nameLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         let detailLabel = NSTextField(labelWithString: row.descriptionText)
         detailLabel.font = .systemFont(ofSize: 12)
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        detailLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
         let textStack = NSStackView(views: [nameLabel, detailLabel])
         textStack.orientation = .vertical
@@ -599,9 +642,27 @@ final class PreferencesModelsView: NSView {
         rowStack.alignment = .centerY
         rowStack.distribution = .fill
         rowStack.spacing = columnSpacing
-        rowStack.edgeInsets = NSEdgeInsets(top: 13, left: rowContentLeftInset, bottom: 13, right: rowContentRightInset)
+        let rowVerticalInset: CGFloat = 13
+        rowStack.edgeInsets = NSEdgeInsets(
+            top: rowVerticalInset,
+            left: rowContentLeftInset,
+            bottom: rowVerticalInset,
+            right: rowContentRightInset
+        )
 
         let rowContainer = ModelRowBackgroundView(content: rowStack, isSelected: row.isSelected)
+        // A stack's edge insets and centerY alignment are softer than required, so a
+        // height-squeezed window silently collapses them (squashed rows, clipped text).
+        // Give the row a required floor — insets plus its tallest column — so the
+        // pressure lands on the scroll viewport, which can actually scroll.
+        NSLayoutConstraint.activate([
+            rowContainer.heightAnchor.constraint(
+                greaterThanOrEqualTo: textStack.heightAnchor, constant: rowVerticalInset * 2
+            ),
+            rowContainer.heightAnchor.constraint(
+                greaterThanOrEqualTo: statusCell.heightAnchor, constant: rowVerticalInset * 2
+            ),
+        ])
         if firstSectionCard == nil {
             firstSectionCard = rowContainer
         }
@@ -685,11 +746,7 @@ final class PreferencesModelsView: NSView {
             leading = button
         }
 
-        let stack = NSStackView(views: [leading, makeKebabButton(id: row.id)])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 4
-        return stack
+        return leading
     }
 
     /// Coral "✓ Active" marker for the currently-selected model row.
@@ -713,23 +770,6 @@ final class PreferencesModelsView: NSView {
         marker.translatesAutoresizingMaskIntoConstraints = false
         marker.widthAnchor.constraint(equalToConstant: rowActionButtonWidth).isActive = true
         return marker
-    }
-
-    private func makeKebabButton(id: String) -> NSButton {
-        let kebab = NSButton(image: NSImage(
-            systemSymbolName: "ellipsis",
-            accessibilityDescription: "More actions"
-        ) ?? NSImage(), target: self, action: #selector(showModelMenuAction(_:)))
-        kebab.identifier = NSUserInterfaceItemIdentifier(id)
-        kebab.isBordered = false
-        kebab.controlSize = .small
-        kebab.imagePosition = .imageOnly
-        kebab.contentTintColor = .secondaryLabelColor
-        kebab.toolTip = "More actions"
-        kebab.translatesAutoresizingMaskIntoConstraints = false
-        kebab.widthAnchor.constraint(equalToConstant: 22).isActive = true
-        modelKebabButtonCount += 1
-        return kebab
     }
 
     // MARK: - Row content helpers
@@ -825,49 +865,6 @@ final class PreferencesModelsView: NSView {
 
     @objc private func revealModelsFolderAction(_: NSButton) {
         revealModelsFolder()
-    }
-
-    @objc private func showModelMenuAction(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        let menu = NSMenu()
-        let details = NSMenuItem(title: "Model Details", action: #selector(modelDetailsMenuAction(_:)), keyEquivalent: "")
-        details.target = self
-        details.representedObject = id
-        menu.addItem(details)
-        let reveal = NSMenuItem(title: "Reveal in Finder", action: #selector(revealMenuAction(_:)), keyEquivalent: "")
-        reveal.target = self
-        menu.addItem(reveal)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 4), in: sender)
-    }
-
-    @objc private func revealMenuAction(_: NSMenuItem) {
-        revealModelsFolder()
-    }
-
-    @objc private func modelDetailsMenuAction(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        showModelDetailsPopover(forID: id, anchor: filterField)
-    }
-
-    private func showModelDetailsPopover(forID id: String, anchor: NSView) {
-        let name = PreferencesModelState.displayName(forModelID: id)
-        let detail = PreferencesModelState.description(forModelID: id)
-        let content = NSStackView(views: [
-            NSTextField(labelWithString: name),
-            NSTextField(wrappingLabelWithString: detail),
-        ])
-        content.orientation = .vertical
-        content.alignment = .leading
-        content.spacing = 6
-        content.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-
-        let popover = NSPopover()
-        let controller = NSViewController()
-        controller.view = content
-        popover.contentViewController = controller
-        popover.behavior = .transient
-        modelInfoPopover = popover
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
     }
 
     // MARK: - Layout helpers

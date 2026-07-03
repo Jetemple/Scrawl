@@ -325,7 +325,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         )
     }
 
+    /// One user action (model select) used to funnel into three back-to-back
+    /// preferences rebuilds — the measured cause of the model-switch lag. All
+    /// refreshes route through this coalescer so a `batch` around an action
+    /// collapses them into a single rebuild.
+    private lazy var preferencesRefresh = CoalescedRefresh { [weak self] in
+        self?.performPreferencesWindowRefresh()
+    }
+
     private func refreshPreferencesWindow() {
+        preferencesRefresh.request()
+    }
+
+    private func performPreferencesWindowRefresh() {
         guard let preferencesWindowController else {
             return
         }
@@ -733,31 +745,36 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func selectModel(id modelID: String) {
-        let shouldPrepareOnSelection = modelCatalog.preparesOnSelection(modelID: modelID)
-        let settings = runtime.settingsStore.load()
-        let confirmation: ModelSelectionConfirmation
-        if ModelSelectionPlanner.requiresDownloadConfirmation(
-            preparesOnSelection: shouldPrepareOnSelection,
-            isInstalled: modelCatalog.isInstalled(modelID: modelID)
-        ) {
-            confirmation = confirmParakeetModelDownload() ? .download : .cancel
-        } else {
-            confirmation = .notRequired
-        }
+        // Selection fans out into settings mutation, menu refresh, and preparation
+        // start/cancel, each of which requests a preferences refresh; batch them so
+        // one click rebuilds the window exactly once.
+        preferencesRefresh.batch {
+            let shouldPrepareOnSelection = modelCatalog.preparesOnSelection(modelID: modelID)
+            let isInstalled = modelCatalog.isInstalled(modelID: modelID)
+            let settings = runtime.settingsStore.load()
+            let confirmation: ModelSelectionConfirmation
+            if ModelSelectionPlanner.requiresDownloadConfirmation(
+                preparesOnSelection: shouldPrepareOnSelection,
+                isInstalled: isInstalled
+            ) {
+                confirmation = confirmParakeetModelDownload() ? .download : .cancel
+            } else {
+                confirmation = .notRequired
+            }
 
-        switch ModelSelectionPlanner.outcome(
-            currentModelID: settings.modelID,
-            requestedModelID: modelID,
-            preparesOnSelection: shouldPrepareOnSelection,
-            isInstalled: modelCatalog.isInstalled(modelID: modelID),
-            confirmation: confirmation
-        ) {
-        case .cancelled:
-            refreshPreferencesWindow()
-            return
-        case let .selected(plan):
-            cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
-            completeModelSelection(plan)
+            switch ModelSelectionPlanner.outcome(
+                currentModelID: settings.modelID,
+                requestedModelID: modelID,
+                preparesOnSelection: shouldPrepareOnSelection,
+                isInstalled: isInstalled,
+                confirmation: confirmation
+            ) {
+            case .cancelled:
+                refreshPreferencesWindow()
+            case let .selected(plan):
+                cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
+                completeModelSelection(plan)
+            }
         }
     }
 
@@ -2222,9 +2239,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     }
                 }
             }
-            refreshSettingsRows()
-            refreshModelMenu()
-            refreshPreferencesWindow()
+            preferencesRefresh.batch {
+                refreshSettingsRows()
+                refreshModelMenu()
+                refreshPreferencesWindow()
+            }
             // NOTE: hotkey monitors are intentionally NOT rebuilt here — see doc-comment above.
         } catch {
             setStatus("Settings error: \(describe(error))")

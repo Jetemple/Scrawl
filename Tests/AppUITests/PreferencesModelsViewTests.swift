@@ -62,7 +62,7 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
-    func testModelsSplitInstalledAndAvailableSectionsWithKebabs() {
+    func testModelsSplitInstalledAndAvailableSectionsWithoutInfoButtons() {
         let view = makeView()
         view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
         view.update(rows: [
@@ -74,7 +74,8 @@ final class PreferencesModelsViewTests: XCTestCase {
 
         XCTAssertEqual(view.visibleInstalledSectionTitle, "Installed Models")
         XCTAssertEqual(view.visibleAvailableSectionTitle, "Available Downloads")
-        XCTAssertEqual(view.visibleModelKebabButtonCount, 3)
+        XCTAssertEqual(view.visibleModelInfoButtonCount, 0)
+        XCTAssertNil(view.firstButton(withToolTip: "Model details"))
     }
 
     @MainActor
@@ -88,6 +89,25 @@ final class PreferencesModelsViewTests: XCTestCase {
         view.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(view.visibleSelectedRowHasAction)
+    }
+
+    @MainActor
+    func testSelectedModelHighlightDoesNotImplicitlyAnimateDuringResize() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 740, height: 460)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        let highlightLayer = try XCTUnwrap(firstSelectionPillLayer(in: view))
+        for actionKey in ["bounds", "position", "frame", "backgroundColor"] {
+            XCTAssertTrue(
+                highlightLayer.actions?[actionKey] is NSNull,
+                "\(actionKey) should not implicitly animate while the window resizes"
+            )
+        }
     }
 
     @MainActor
@@ -125,6 +145,13 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
+    func testModelsPagePaintsNativeWindowBackground() {
+        let view = makeView()
+
+        XCTAssertTrue(view.subviews.first is PreferencesBackgroundView)
+    }
+
+    @MainActor
     func testActionControlsFitWhenCancelDownloadIsVisibleAtMinimumWidth() {
         let view = makeView()
         view.frame = NSRect(x: 0, y: 0, width: 560, height: 400)
@@ -134,6 +161,24 @@ final class PreferencesModelsViewTests: XCTestCase {
         view.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(view.visibleActionControlsWithinBounds)
+    }
+
+    @MainActor
+    func testFooterDeleteButtonAlignsWithRowActionButton() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        let rowActionButton = try XCTUnwrap(view.firstButton(titled: "Use"))
+        let footerDeleteButton = try XCTUnwrap(view.firstButton(titled: "Delete Selected"))
+        let rowActionFrame = view.convert(rowActionButton.frame, from: rowActionButton.superview)
+        let footerDeleteFrame = view.convert(footerDeleteButton.frame, from: footerDeleteButton.superview)
+
+        XCTAssertEqual(footerDeleteFrame.maxX, rowActionFrame.maxX, accuracy: 2)
     }
 
     @MainActor
@@ -183,15 +228,108 @@ final class PreferencesModelsViewTests: XCTestCase {
         XCTAssertGreaterThan(tallHeight, shortHeight)
         XCTAssertLessThanOrEqual(tallHeight, 380)
     }
+
+    @MainActor
+    func testShortWindowScrollsTheListInsteadOfSquashingRows() {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 620, height: 400)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+            modelRow(id: "ggml-medium", installed: false, selected: false),
+            modelRow(id: "ggml-large-v3-turbo", installed: false, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+        let squeezedRowHeight = view.visibleFirstModelRowHeight
+
+        view.frame = NSRect(x: 0, y: 0, width: 740, height: 512)
+        view.layoutSubtreeIfNeeded()
+        let naturalRowHeight = view.visibleFirstModelRowHeight
+
+        XCTAssertNotNil(squeezedRowHeight)
+        XCTAssertEqual(
+            squeezedRowHeight ?? 0, naturalRowHeight ?? 0, accuracy: 1,
+            "at minimum window height the list must scroll, not compress row heights"
+        )
+    }
+
+    @MainActor
+    func testUpdateWithUnchangedInputsSkipsListRebuild() {
+        let view = makeView()
+        let rows = [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ]
+
+        view.update(rows: rows, downloadableModels: [], isDownloadInProgress: false)
+        let rebuildsAfterFirstUpdate = view.listRebuildCount
+
+        view.update(rows: rows, downloadableModels: [], isDownloadInProgress: false)
+        view.update(rows: rows, downloadableModels: [], isDownloadInProgress: false)
+
+        XCTAssertEqual(
+            view.listRebuildCount, rebuildsAfterFirstUpdate,
+            "identical snapshots must not tear down and recreate the model rows"
+        )
+    }
+
+    @MainActor
+    func testUpdateWithChangedSelectionStillRebuildsList() {
+        let view = makeView()
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        let rebuildsAfterFirstUpdate = view.listRebuildCount
+
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: false),
+            modelRow(id: "ggml-small.en", installed: true, selected: true),
+        ], downloadableModels: [], isDownloadInProgress: false)
+
+        XCTAssertEqual(view.listRebuildCount, rebuildsAfterFirstUpdate + 1)
+        XCTAssertEqual(view.visibleModelPickerTitle, PreferencesModelState.displayName(forModelID: "ggml-small.en"))
+    }
 }
 
 private extension NSView {
+    func firstButton(titled title: String) -> NSButton? {
+        if let button = self as? NSButton, button.title == title, !button.isEffectivelyHidden {
+            return button
+        }
+        return subviews.lazy.compactMap { $0.firstButton(titled: title) }.first
+    }
+
+    func firstButton(withToolTip toolTip: String) -> NSButton? {
+        if let button = self as? NSButton, button.toolTip == toolTip, !button.isEffectivelyHidden {
+            return button
+        }
+        return subviews.lazy.compactMap { $0.firstButton(withToolTip: toolTip) }.first
+    }
+
     func firstTextField(withValue value: String) -> NSTextField? {
-        if let field = self as? NSTextField, field.stringValue == value {
+        if let field = self as? NSTextField, field.stringValue == value, !field.isEffectivelyHidden {
             return field
         }
         return subviews.lazy.compactMap { $0.firstTextField(withValue: value) }.first
     }
+
+    var isEffectivelyHidden: Bool {
+        isHidden || superview?.isEffectivelyHidden == true
+    }
+}
+
+@MainActor
+private func firstSelectionPillLayer(in view: NSView) -> CALayer? {
+    if let layer = view.layer?.sublayers?.first(where: { $0.cornerRadius == 9 && !$0.frame.isEmpty }) {
+        return layer
+    }
+    for subview in view.subviews {
+        if let found = firstSelectionPillLayer(in: subview) {
+            return found
+        }
+    }
+    return nil
 }
 
 @MainActor

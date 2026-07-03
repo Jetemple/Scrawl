@@ -52,7 +52,10 @@ final class PreferencesPinnedActionBarView: NSView {}
 final class PreferencesSelectionRowView: NSTableRowView {
     override func drawSelection(in _: NSRect) {
         guard isSelected else { return }
-        let rect = bounds.insetBy(dx: 8, dy: 3)
+        let rect = bounds.insetBy(
+            dx: PreferencesPageSupport.selectionPillHorizontalInset,
+            dy: PreferencesPageSupport.selectionPillVerticalInset
+        )
         let path = NSBezierPath(roundedRect: rect, xRadius: 9, yRadius: 9)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             PreferencesPageSupport.selectionTint.setFill()
@@ -72,13 +75,22 @@ enum PreferencesPageSupport {
     static let rowInset: CGFloat = 14
     /// Fixed width of the label column on key/value rows, so titles align across pages.
     static let labelColumnWidth: CGFloat = 132
+    static let selectionPillHorizontalInset: CGFloat = 8
+    static let selectionPillVerticalInset: CGFloat = 3
 
     /// Scrawl's brand accent — the coral-red of the app icon's waveform, not orange.
     static let accentColor = NSColor(srgbRed: 0.95, green: 0.36, blue: 0.30, alpha: 1)
 
     /// Shared coral wash behind a selected row. Kept in one place so the History, Dictionary,
-    /// and Models selection pills read identically (and not as washed-out pink).
-    static var selectionTint: NSColor { accentColor.withAlphaComponent(0.16) }
+    /// and Models selection pills read identically. The saturated accent needs only a whisper
+    /// of alpha in light mode to read as a highlight without shouting; dark mode needs more
+    /// for the wash to stay visible at all.
+    static var selectionTint: NSColor {
+        NSColor(name: nil) { appearance in
+            let alpha: CGFloat = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.14 : 0.09
+            return accentColor.withAlphaComponent(alpha)
+        }
+    }
 
     /// Hairline color shared by every workbench rule (group frames, row dividers, list frames).
     static var hairlineColor: NSColor { .separatorColor.withAlphaComponent(0.5) }
@@ -109,7 +121,7 @@ enum PreferencesPageSupport {
             item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
 
-        let container = NSView()
+        let container = makeContentBackground()
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: pageHorizontalInset),
@@ -206,8 +218,8 @@ enum PreferencesPageSupport {
         // absorbs the row's slack.
         detail.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
-        // Greedy trailing spacer pins title/value/action to the leading edge. Without
-        // it the row stack's gravity centers sparse rows, breaking the title column.
+        // Greedy spacer keeps sparse rows from centering and gives action controls a
+        // stable trailing column.
         let trailingSpacer = NSView()
         trailingSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         trailingSpacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
@@ -220,9 +232,32 @@ enum PreferencesPageSupport {
         row.edgeInsets = NSEdgeInsets(top: 11, left: rowInset, bottom: 11, right: rowInset)
         row.addArrangedSubview(titleLabel)
         row.addArrangedSubview(detail)
+        row.addArrangedSubview(trailingSpacer)
         if let action {
             row.addArrangedSubview(action)
         }
+        return row
+    }
+
+    static func makeSettingControlRow(title: String, control: NSView) -> NSView {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.widthAnchor.constraint(equalToConstant: labelColumnWidth).isActive = true
+
+        let trailingSpacer = NSView()
+        trailingSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        trailingSpacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = 12
+        row.edgeInsets = NSEdgeInsets(top: 11, left: rowInset, bottom: 11, right: rowInset)
+        row.addArrangedSubview(titleLabel)
+        row.addArrangedSubview(control)
         row.addArrangedSubview(trailingSpacer)
         return row
     }
@@ -265,6 +300,7 @@ enum PreferencesPageSupport {
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: rowInset, bottom: 0, right: rowInset)
 
         let row = NSView()
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -278,7 +314,12 @@ enum PreferencesPageSupport {
         return row
     }
 
-    static func makePinnedActionBar(leading: [NSButton], trailing: [NSButton], leadingInset: CGFloat = 0) -> NSView {
+    static func makePinnedActionBar(
+        leading: [NSButton],
+        trailing: [NSButton],
+        leadingInset: CGFloat? = nil,
+        trailingInset: CGFloat? = nil
+    ) -> NSView {
         let leadingStack = NSStackView(views: leading)
         leadingStack.orientation = .horizontal
         leadingStack.alignment = .centerY
@@ -293,7 +334,12 @@ enum PreferencesPageSupport {
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: leadingInset, bottom: 0, right: 0)
+        stack.edgeInsets = NSEdgeInsets(
+            top: 10,
+            left: leadingInset ?? rowInset,
+            bottom: 0,
+            right: trailingInset ?? rowInset
+        )
 
         let row = PreferencesPinnedActionBarView()
         stack.translatesAutoresizingMaskIntoConstraints = false
