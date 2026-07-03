@@ -636,7 +636,7 @@ final class PreferencesModelsView: NSView {
             textStack,
             fixedWidth(engineLabel, engineColumnWidth, align: .left),
             fixedWidth(statusCell, statusColumnWidth, align: .left),
-            fixedWidth(actionCell, actionColumnWidth, align: .right),
+            fixedWidth(actionCell, actionColumnWidth),
         ])
         rowStack.orientation = .horizontal
         rowStack.alignment = .centerY

@@ -43,6 +43,21 @@ final class PreferencesHistoryViewTests: XCTestCase {
     }
 
     @MainActor
+    func testUnchangedEnabledSnapshotResyncsToggleStateAfterCancelledDisable() throws {
+        let view = makeView()
+        let records = [record("first transcript")]
+        view.update(records: records, isEnabled: true, loadErrorDescription: nil)
+        let toggle = try XCTUnwrap(view.button(titled: "Save transcript history"))
+
+        toggle.performClick(nil)
+        XCTAssertEqual(toggle.state, .off)
+
+        view.update(records: records, isEnabled: true, loadErrorDescription: nil)
+
+        XCTAssertEqual(toggle.state, .on)
+    }
+
+    @MainActor
     func testUpdateWithChangedRecordsReloadsContent() {
         let view = makeView()
         view.update(records: [record("first transcript")], isEnabled: true, loadErrorDescription: nil)
@@ -67,5 +82,14 @@ final class PreferencesHistoryViewTests: XCTestCase {
         view.update(records: records, isEnabled: false, loadErrorDescription: nil)
 
         XCTAssertEqual(view.state, .disabled)
+    }
+}
+
+private extension NSView {
+    func button(titled title: String) -> NSButton? {
+        if let button = self as? NSButton, button.title == title {
+            return button
+        }
+        return subviews.lazy.compactMap { $0.button(titled: title) }.first
     }
 }

@@ -429,6 +429,23 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryToggleRevertsWhenDisableIsCancelledAndSameSnapshotReapplies() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let snapshot = makeSnapshot(isHistoryEnabled: true)
+        controller.update(snapshot: snapshot)
+        controller.selectSection(.history)
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        let toggle = try XCTUnwrap(contentView.button(titled: "Save transcript history"))
+
+        toggle.performClick(nil)
+        XCTAssertEqual(toggle.state, .off)
+
+        controller.update(snapshot: snapshot)
+
+        XCTAssertEqual(toggle.state, .on)
+    }
+
+    @MainActor
     func testGeneralAndAboutButtonsDispatchActions() throws {
         var requestedMicrophone = false
         var requestedAccessibility = false

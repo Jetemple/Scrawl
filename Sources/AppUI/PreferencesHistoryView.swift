@@ -87,6 +87,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     func update(records: [TranscriptRecord], isEnabled: Bool, loadErrorDescription: String?) {
+        syncToggleState(isEnabled: isEnabled)
         // Model/permission/hotkey refreshes reach this page with identical history data;
         // reloading the table and re-measuring every transcript's height each time is a
         // measured contributor to preferences lag, so skip no-op updates entirely.
@@ -101,8 +102,11 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         self.records = records
         self.isEnabled = isEnabled
         self.loadErrorDescription = loadErrorDescription
-        toggle.state = isEnabled ? .on : .off
         applyFilter()
+    }
+
+    func syncToggleState(isEnabled: Bool) {
+        toggle.state = isEnabled ? .on : .off
     }
 
     func setSearchQuery(_ query: String) {

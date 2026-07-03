@@ -164,7 +164,7 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
-    func testFooterDeleteButtonAlignsWithRowActionButton() throws {
+    func testFooterDeleteButtonAlignsWithActionColumnRightEdge() throws {
         let view = makeView()
         view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
         view.update(rows: [
@@ -175,10 +175,60 @@ final class PreferencesModelsViewTests: XCTestCase {
 
         let rowActionButton = try XCTUnwrap(view.firstButton(titled: "Use"))
         let footerDeleteButton = try XCTUnwrap(view.firstButton(titled: "Delete Selected"))
-        let rowActionFrame = view.convert(rowActionButton.frame, from: rowActionButton.superview)
+        let rowActionColumnFrame = view.convert(
+            try XCTUnwrap(rowActionButton.superview).bounds,
+            from: rowActionButton.superview
+        )
         let footerDeleteFrame = view.convert(footerDeleteButton.frame, from: footerDeleteButton.superview)
 
-        XCTAssertEqual(footerDeleteFrame.maxX, rowActionFrame.maxX, accuracy: 2)
+        XCTAssertEqual(footerDeleteFrame.maxX, rowActionColumnFrame.maxX, accuracy: 8)
+    }
+
+    @MainActor
+    func testActionColumnHeaderUsesActionColumnLeftEdge() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        let actionHeader = try XCTUnwrap(view.firstTextField(withValue: "Action"))
+        let rowActionButton = try XCTUnwrap(view.firstButton(titled: "Use"))
+        let headerFrame = view.convert(actionHeader.frame, from: actionHeader.superview)
+        let rowActionColumnFrame = view.convert(
+            try XCTUnwrap(rowActionButton.superview).bounds,
+            from: rowActionButton.superview
+        )
+
+        XCTAssertEqual(
+            headerFrame.minX, rowActionColumnFrame.minX, accuracy: 2,
+            "Action header should start at the row action column's leading edge"
+        )
+    }
+
+    @MainActor
+    func testRowActionControlsUseActionColumnLeftEdge() throws {
+        let view = makeView()
+        view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
+        view.update(rows: [
+            modelRow(id: ModelCatalog.parakeetModelID, installed: true, selected: true),
+            modelRow(id: "ggml-small.en", installed: true, selected: false),
+        ], downloadableModels: [], isDownloadInProgress: false)
+        view.layoutSubtreeIfNeeded()
+
+        let rowActionButton = try XCTUnwrap(view.firstButton(titled: "Use"))
+        let rowActionFrame = view.convert(rowActionButton.frame, from: rowActionButton.superview)
+        let rowActionColumnFrame = view.convert(
+            try XCTUnwrap(rowActionButton.superview).bounds,
+            from: rowActionButton.superview
+        )
+
+        XCTAssertEqual(
+            rowActionFrame.minX, rowActionColumnFrame.minX, accuracy: 8,
+            "Row action controls should start at the action column's leading edge"
+        )
     }
 
     @MainActor

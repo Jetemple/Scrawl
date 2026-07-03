@@ -297,7 +297,10 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     func update(snapshot: Snapshot) {
-        guard snapshot != lastAppliedSnapshot else { return }
+        guard snapshot != lastAppliedSnapshot else {
+            syncControlState(from: snapshot)
+            return
+        }
         lastAppliedSnapshot = snapshot
         snapshotApplyCount += 1
         generalView.update(
@@ -324,6 +327,10 @@ final class PreferencesWindowController: NSWindowController {
         // Content changes move a page's natural height (lists hug their rows); the
         // user can't resize the fixed window, so it follows the visible page.
         resizeWindowForSelectedSection(animated: window?.isVisible == true)
+    }
+
+    private func syncControlState(from snapshot: Snapshot) {
+        historyView.syncToggleState(isEnabled: snapshot.settings.isTranscriptHistoryEnabled)
     }
 
     func selectGeneralModelOffloadPolicy(_ policy: ModelOffloadPolicy) {

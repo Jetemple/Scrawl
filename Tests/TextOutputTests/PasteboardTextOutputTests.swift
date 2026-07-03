@@ -2,6 +2,13 @@
 import XCTest
 
 final class PasteboardTextOutputTests: XCTestCase {
+    private func makePasteboard(seed: String) -> NSPasteboard {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        pasteboard.clearContents()
+        pasteboard.setString(seed, forType: .string)
+        return pasteboard
+    }
+
     func testTranscriptWriteMarksTransientAndConcealed() {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
         PasteboardTextOutput.writeTranscript("hello world", to: pasteboard)
@@ -50,5 +57,35 @@ final class PasteboardTextOutputTests: XCTestCase {
         let countAfterWrite = pasteboard.changeCount
         snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: countAfterWrite)
         XCTAssertEqual(pasteboard.string(forType: .string), "original")
+    }
+
+    func testOutputRestoresPreviousClipboardWhenTranscriptIsPrivate() async throws {
+        let pasteboard = makePasteboard(seed: "original")
+        let output = PasteboardTextOutput(
+            pasteboard: pasteboard,
+            isAccessibilityTrusted: { true },
+            isSecureInputActive: { false },
+            sendPasteCommand: {},
+            pasteSettleDelayNanoseconds: 0
+        )
+
+        try await output.output("transcript", markPrivate: true)
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "original")
+    }
+
+    func testOutputLeavesTranscriptOnClipboardWhenTranscriptIsNotPrivate() async throws {
+        let pasteboard = makePasteboard(seed: "original")
+        let output = PasteboardTextOutput(
+            pasteboard: pasteboard,
+            isAccessibilityTrusted: { true },
+            isSecureInputActive: { false },
+            sendPasteCommand: {},
+            pasteSettleDelayNanoseconds: 0
+        )
+
+        try await output.output("transcript", markPrivate: false)
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "transcript")
     }
 }
