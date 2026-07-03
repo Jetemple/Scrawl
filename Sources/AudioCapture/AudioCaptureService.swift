@@ -108,6 +108,9 @@ extension AudioCaptureError: LocalizedError {
 public protocol AudioCaptureServing: Sendable {
     func startCapture() throws
     func stopCapture() throws -> URL
+    /// Instantaneous input level in decibels (typically -160...0) for the live
+    /// recording indicator. nil when no capture is in progress.
+    func currentAveragePower() -> Float?
 }
 
 public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable {
@@ -211,5 +214,13 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
         }
 
         return outputURL
+    }
+
+    public func currentAveragePower() -> Float? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let recorder else { return nil }
+        recorder.updateMeters()
+        return recorder.averagePower(forChannel: 0)
     }
 }

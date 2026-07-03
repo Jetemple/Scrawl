@@ -169,6 +169,8 @@ private struct StubAudioCaptureService: AudioCaptureServing {
     func stopCapture() throws -> URL {
         URL(filePath: "/tmp/audio.wav")
     }
+
+    func currentAveragePower() -> Float? { nil }
 }
 
 private struct StubTextOutputTarget: TextOutputTarget {
