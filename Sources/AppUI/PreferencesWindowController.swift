@@ -51,7 +51,7 @@ final class PreferencesWindowController: NSWindowController {
         let openProjectPage: () -> Void
     }
 
-    struct Snapshot {
+    struct Snapshot: Equatable {
         let settings: AppSettings
         let downloadableModels: [DownloadableModel]
         let modelRows: [PreferencesModelRow]
@@ -106,6 +106,12 @@ final class PreferencesWindowController: NSWindowController {
     private var sectionViews: [Section: NSView] = [:]
     private var tabSelectionObservation: NSKeyValueObservation?
     private var didCenterWindow = false
+    /// Refreshes fire for many app events (hotkey ticks, permission polls, history
+    /// actions). An identical snapshot would still pay four page updates plus a
+    /// `fittingSize` layout measurement, so skip it wholesale.
+    private var lastAppliedSnapshot: Snapshot?
+    /// Test seam mirroring `PreferencesModelsView.listRebuildCount`.
+    private(set) var snapshotApplyCount = 0
 
     var visibleSection: Section {
         Section(rawValue: tabController.selectedTabViewItemIndex) ?? .general
@@ -289,6 +295,9 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     func update(snapshot: Snapshot) {
+        guard snapshot != lastAppliedSnapshot else { return }
+        lastAppliedSnapshot = snapshot
+        snapshotApplyCount += 1
         generalView.update(
             settings: snapshot.settings,
             microphoneStatus: snapshot.microphoneStatus,

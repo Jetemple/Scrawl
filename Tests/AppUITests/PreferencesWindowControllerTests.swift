@@ -8,6 +8,18 @@ import XCTest
 
 final class PreferencesWindowControllerTests: XCTestCase {
     @MainActor
+    func testIdenticalSnapshotIsAppliedOnlyOnce() {
+        let controller = PreferencesWindowController(actions: makeActions())
+
+        controller.update(snapshot: makeSnapshot())
+        controller.update(snapshot: makeSnapshot())
+        XCTAssertEqual(controller.snapshotApplyCount, 1, "identical snapshots must not re-apply")
+
+        controller.update(snapshot: makeSnapshot(downloadProgressText: "10% (100/1000 MB)"))
+        XCTAssertEqual(controller.snapshotApplyCount, 2, "changed snapshots must still apply")
+    }
+
+    @MainActor
     func testToolbarContainsFiveConsolidatedSections() {
         XCTAssertEqual(
             PreferencesWindowController.Section.allCases.map(\.title),
