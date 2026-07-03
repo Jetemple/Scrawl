@@ -278,7 +278,7 @@ final class PreferencesWindowController: NSWindowController {
         setupTabs()
         // Assigning contentViewController lets AppKit shrink the window to the tab
         // view's fitting size; snap back to the selected section's designed size.
-        resizeWindowForSelectedSection(animated: false)
+        resizeWindowForSelectedSection()
     }
 
     @available(*, unavailable)
@@ -326,7 +326,7 @@ final class PreferencesWindowController: NSWindowController {
         )
         // Content changes move a page's natural height (lists hug their rows); the
         // user can't resize the fixed window, so it follows the visible page.
-        resizeWindowForSelectedSection(animated: window?.isVisible == true)
+        resizeWindowForSelectedSection()
     }
 
     private func syncControlState(from snapshot: Snapshot) {
@@ -338,14 +338,9 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     func selectSection(_ section: Section) {
+        // The tab-selection observation resizes the window synchronously; force
+        // layout after it so callers (tests, restoration) see settled frames.
         tabController.selectedTabViewItemIndex = section.rawValue
-        // On a visible window the tab-selection observation already animates the
-        // resize; a second, instant resize here would snap-cancel that motion. On a
-        // hidden window (tests, restoration) transitions don't animate reliably, so
-        // resize deterministically.
-        if window?.isVisible != true {
-            resizeWindowForSelectedSection(animated: false)
-        }
         window?.contentView?.layoutSubtreeIfNeeded()
     }
 
@@ -375,6 +370,9 @@ final class PreferencesWindowController: NSWindowController {
         ]
 
         tabController.tabStyle = .toolbar
+        // No crossfade: the window snaps to each page's size, and fading the
+        // outgoing page inside the new frame stretches it mid-fade. Instant swap.
+        tabController.transitionOptions = []
         for section in Section.allCases {
             guard let view = sectionViews[section] else { continue }
             let pageController = PreferencesPageViewController(pageView: view)
@@ -387,7 +385,7 @@ final class PreferencesWindowController: NSWindowController {
         window?.contentViewController = tabController
         tabSelectionObservation = tabController.observe(\.selectedTabViewItemIndex, options: [.new]) { [weak self] _, _ in
             guard let self else { return }
-            self.resizeWindowForSelectedSection(animated: self.window?.isVisible == true)
+            self.resizeWindowForSelectedSection()
             self.window?.title = "Scrawl Preferences"
         }
         tabController.selectedTabViewItemIndex = Section.general.rawValue
@@ -398,7 +396,12 @@ final class PreferencesWindowController: NSWindowController {
     /// Classic macOS preferences sizing: the user cannot resize the window, so each
     /// page resizes it instead — designed width per section, height fitted to that
     /// page's content (About stays small, list pages take the room their rows need).
-    private func resizeWindowForSelectedSection(animated: Bool) {
+    ///
+    /// The resize is deliberately instant. Animating the frame re-runs Auto Layout
+    /// on these table-heavy pages at every animation tick, which overruns the frame
+    /// budget and reads as stutter — both eased animator groups and the legacy
+    /// stepped resize were tried and looked worse than a clean snap.
+    private func resizeWindowForSelectedSection() {
         guard let window, let contentView = window.contentView else { return }
         guard let pageView = sectionViews[visibleSection] else { return }
         let contentSize = NSSize(
@@ -420,23 +423,7 @@ final class PreferencesWindowController: NSWindowController {
             width: frameSize.width,
             height: frameSize.height
         )
-        guard animated else {
-            window.setFrame(targetFrame, display: true)
-            return
-        }
-        // `setFrame(animate: true)` is the legacy stepped resize (linear, chunky);
-        // an eased animator group matches the tab crossfade and reads as one motion.
-        // A content change (say, a list growing a row) lands as a constraint change
-        // in the same turn as this resize; laying out inside the group with implicit
-        // animation on moves the content and the window frame together instead of
-        // the content snapping first and the frame chasing it.
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            context.allowsImplicitAnimation = true
-            window.animator().setFrame(targetFrame, display: true)
-            contentView.layoutSubtreeIfNeeded()
-        }
+        window.setFrame(targetFrame, display: true)
     }
 }
 
