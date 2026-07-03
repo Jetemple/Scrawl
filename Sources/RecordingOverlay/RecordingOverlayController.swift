@@ -538,24 +538,6 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
     // MARK: - Animation
 
-    private func startDotPulse() {
-        guard let dotView, let layer = dotView.layer else {
-            return
-        }
-        stopIndicatorAnimations()
-        // Respect Reduce Motion: leave a fully-visible static dot instead of a looping pulse.
-        guard !isReduceMotionEnabled else { return }
-
-        let pulse = CABasicAnimation(keyPath: "opacity")
-        pulse.fromValue = 0.3
-        pulse.toValue = 1.0
-        pulse.duration = 0.7
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(pulse, forKey: "pulse")
-    }
-
     private func startSymbolPulse() {
         guard let symbolView, let layer = symbolView.layer else {
             return

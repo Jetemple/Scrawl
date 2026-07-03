@@ -170,6 +170,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
         setupHotkeyHandling()
 
+        // Feed real mic levels to the recording pill's waveform (nil when not capturing).
+        runtime.overlayController.levelProvider = { [audioCapture = runtime.audioCaptureService] in
+            audioCapture.currentAveragePower()
+        }
+
         do {
             try modelManager.ensureDirectory()
         } catch {
