@@ -120,7 +120,9 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
         case .recording:
             titleLabel.stringValue = "Recording"
-            titleLabel.textColor = NSColor.white.withAlphaComponent(0.95)
+            // Semantic color like every other state: the pill material follows the
+            // system appearance, so hardcoded white washes out in light mode.
+            titleLabel.textColor = .labelColor
             symbolView.isHidden = true
             spinner.stopAnimation(nil)
             spinner.isHidden = true
