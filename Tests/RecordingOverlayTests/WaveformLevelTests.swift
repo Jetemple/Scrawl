@@ -2,13 +2,22 @@
 import XCTest
 
 final class WaveformLevelTests: XCTestCase {
-    func testNormalizedLevelClampsTheDecibelWindow() {
+    func testNormalizedLevelClampsTheSpeechWindow() {
         XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: nil), 0)
         XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: -160), 0)
         XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: -50), 0)
-        XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: 0), 1)
-        XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: -25), 0.5, accuracy: 0.001)
-        XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: 10), 1)
+        // Anything at or above the loud ceiling saturates the bars.
+        XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: -10), 1, accuracy: 0.001)
+        XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: 0), 1, accuracy: 0.001)
+        XCTAssertEqual(WaveformLevel.normalizedLevel(fromDecibels: 10), 1, accuracy: 0.001)
+    }
+
+    func testMidSpeechDrivesBarsPastTheMutedMiddle() {
+        // -30 dB is the middle of the speech window; the expansion curve lifts it well
+        // past the 0.5 a linear map would give, so ordinary talking reads as dramatic.
+        let level = WaveformLevel.normalizedLevel(fromDecibels: -30)
+        XCTAssertEqual(level, 0.637, accuracy: 0.01)
+        XCTAssertGreaterThan(level, 0.6)
     }
 
     func testSilenceSettlesToTheFloor() {

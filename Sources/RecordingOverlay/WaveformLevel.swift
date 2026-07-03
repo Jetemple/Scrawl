@@ -11,14 +11,23 @@ enum WaveformLevel {
     static let barFractions: [CGFloat] = [0.45, 0.75, 1.0, 0.75, 0.45]
     /// Per-tick easing toward the target (0 = frozen, 1 = instant) so silence settles
     /// instead of snapping.
-    static let smoothing: CGFloat = 0.45
+    static let smoothing: CGFloat = 0.5
+    /// Speech in `averagePower` terms mostly lives between quiet-room (~-50 dB) and loud
+    /// talking (~-10 dB); mapping that window — not the full -160...0 — to 0...1 keeps
+    /// ordinary speech off the muted lower-middle of the bars.
+    static let silenceFloorDecibels: CGFloat = -50
+    static let loudCeilingDecibels: CGFloat = -10
+    /// Expansion curve (<1) so moderate volume pushes the bars up dramatically rather
+    /// than proportionally.
+    static let responseGamma: CGFloat = 0.65
 
-    /// Maps `AVAudioRecorder.averagePower(forChannel:)` decibels (typically -160...0)
-    /// to 0...1, clamped to the -50...0 dB window. nil (not capturing) is silence.
+    /// Maps `AVAudioRecorder.averagePower(forChannel:)` decibels to 0...1 across the speech
+    /// window above, then applies the expansion curve. nil (not capturing) is silence.
     static func normalizedLevel(fromDecibels decibels: Float?) -> CGFloat {
         guard let decibels else { return 0 }
-        let clamped = min(max(CGFloat(decibels), -50), 0)
-        return (clamped + 50) / 50
+        let clamped = min(max(CGFloat(decibels), silenceFloorDecibels), loudCeilingDecibels)
+        let linear = (clamped - silenceFloorDecibels) / (loudCeilingDecibels - silenceFloorDecibels)
+        return CGFloat(pow(Double(linear), Double(responseGamma)))
     }
 
     /// Returns the next five bar heights for `level` given the previous heights.
