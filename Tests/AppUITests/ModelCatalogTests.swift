@@ -197,10 +197,16 @@ final class ModelCatalogTests: XCTestCase {
     func testCanDeleteModelDoesNotMeasureParakeetCacheSize() {
         let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
         let model = ParakeetManagedModel(cacheStore: cache, provider: nil)
-        let catalog = ModelCatalog(models: [model])
+        let notInstalled = StubManagedModel(
+            id: "ggml-small.en",
+            displayName: "small.en",
+            state: .notInstalled
+        )
+        let catalog = ModelCatalog(models: [model, notInstalled])
 
         XCTAssertTrue(catalog.canDeleteModel(selectedModelID: TranscriptionModelID.parakeetV3))
         XCTAssertFalse(catalog.canDeleteModel(selectedModelID: "ggml-small.en"))
+        XCTAssertFalse(catalog.canDeleteModel(selectedModelID: "ggml-nonexistent"))
         XCTAssertEqual(cache.sizeCallCount, 0, "menu enablement must never walk the cache directory")
     }
     #endif

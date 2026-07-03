@@ -109,6 +109,8 @@ final class PreferencesWindowController: NSWindowController {
     /// Refreshes fire for many app events (hotkey ticks, permission polls, history
     /// actions). An identical snapshot would still pay four page updates plus a
     /// `fittingSize` layout measurement, so skip it wholesale.
+    /// Invariant: anything that changes a page's height or content must be represented
+    /// in a Snapshot field — state outside Snapshot will never trigger a re-apply or resize.
     private var lastAppliedSnapshot: Snapshot?
     /// Test seam mirroring `PreferencesModelsView.listRebuildCount`.
     private(set) var snapshotApplyCount = 0
