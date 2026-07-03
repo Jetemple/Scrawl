@@ -242,19 +242,27 @@ final class LocalModelManager: @unchecked Sendable {
     }
 
     func resolvedInstalledModelID(for downloadableModel: DownloadableModel) -> String? {
-        let installedIDs = installedModelIDs()
+        Self.resolvedInstalledModelID(for: downloadableModel, inInstalledIDs: installedModelIDs())
+    }
+
+    /// Snapshot-based variant: resolves against an already-captured directory listing so
+    /// callers iterating many models pay for one `contentsOfDirectory`, not one per model.
+    static func resolvedInstalledModelID(
+        for downloadableModel: DownloadableModel,
+        inInstalledIDs installedIDs: [String]
+    ) -> String? {
         if installedIDs.contains(downloadableModel.id) {
             return downloadableModel.id
         }
 
         let targetFamilies: Set<String> = [
-            canonicalFamily(from: downloadableModel.id),
-            canonicalFamily(from: downloadableModel.fileName),
+            PreferencesModelState.canonicalFamily(downloadableModel.id),
+            PreferencesModelState.canonicalFamily(downloadableModel.fileName),
         ]
 
         return installedIDs
             .sorted()
-            .first { targetFamilies.contains(canonicalFamily(from: $0)) }
+            .first { targetFamilies.contains(PreferencesModelState.canonicalFamily($0)) }
     }
 
     func modelURL(id: String) -> URL {

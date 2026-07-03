@@ -55,22 +55,31 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
     private let manager: LocalModelManager
     private let downloadableModel: DownloadableModel?
     private let customModelID: String?
+    /// Models-directory listing captured once per catalog build. Identity and
+    /// install checks resolve against this snapshot instead of re-scanning the
+    /// directory on every property access.
+    private let installedModelIDs: [String]
 
-    init(downloadableModel: DownloadableModel, manager: LocalModelManager) {
+    init(downloadableModel: DownloadableModel, manager: LocalModelManager, installedModelIDs: [String]) {
         self.downloadableModel = downloadableModel
         customModelID = nil
         self.manager = manager
+        self.installedModelIDs = installedModelIDs
     }
 
-    init(installedModelID: String, manager: LocalModelManager) {
+    init(installedModelID: String, manager: LocalModelManager, installedModelIDs: [String]) {
         downloadableModel = nil
         customModelID = installedModelID
         self.manager = manager
+        self.installedModelIDs = installedModelIDs
     }
 
     var id: String {
         if let downloadableModel {
-            return manager.resolvedInstalledModelID(for: downloadableModel) ?? downloadableModel.id
+            return LocalModelManager.resolvedInstalledModelID(
+                for: downloadableModel,
+                inInstalledIDs: installedModelIDs
+            ) ?? downloadableModel.id
         }
         return customModelID ?? ""
     }
@@ -83,13 +92,16 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
 
     var installState: ManagedModelInstallState {
         if let downloadableModel {
-            guard let installedID = manager.resolvedInstalledModelID(for: downloadableModel) else {
+            guard let installedID = LocalModelManager.resolvedInstalledModelID(
+                for: downloadableModel,
+                inInstalledIDs: installedModelIDs
+            ) else {
                 return .notInstalled
             }
             return .installed(sizeBytes: manager.modelSizeBytes(id: installedID))
         }
 
-        guard manager.modelExists(id: id) else {
+        guard installedModelIDs.contains(id) else {
             return .notInstalled
         }
         return .installed(sizeBytes: manager.modelSizeBytes(id: id))

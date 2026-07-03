@@ -29,6 +29,9 @@ final class ModelCatalog: @unchecked Sendable {
         preparationProgressProvider: @escaping @Sendable () -> ManagedModelPreparationProgress?
     ) {
         modelsProvider = {
+            // One directory listing per catalog build; every model resolves against it.
+            let installedModelIDs = manager.installedModelIDs()
+
             var models: [any ManagedModel] = []
             #if arch(arm64)
             models.append(
@@ -42,7 +45,7 @@ final class ModelCatalog: @unchecked Sendable {
             #endif
 
             let downloadableModels = LocalModelManager.downloadableModels.map {
-                WhisperGgmlModel(downloadableModel: $0, manager: manager)
+                WhisperGgmlModel(downloadableModel: $0, manager: manager, installedModelIDs: installedModelIDs)
             }
             models.append(contentsOf: downloadableModels)
 
@@ -50,10 +53,10 @@ final class ModelCatalog: @unchecked Sendable {
                 PreferencesModelState.canonicalFamily($0.id)
             })
             let knownIDs = Set(LocalModelManager.downloadableModels.map(\.id))
-            let customModels = manager.installedModelIDs()
+            let customModels = installedModelIDs
                 .filter { !knownIDs.contains($0) && !knownFamilies.contains(PreferencesModelState.canonicalFamily($0)) }
                 .sorted()
-                .map { WhisperGgmlModel(installedModelID: $0, manager: manager) }
+                .map { WhisperGgmlModel(installedModelID: $0, manager: manager, installedModelIDs: installedModelIDs) }
             models.append(contentsOf: customModels)
             return models
         }

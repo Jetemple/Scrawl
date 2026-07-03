@@ -104,6 +104,35 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertTrue(rows[1].isSelected)
     }
 
+    func testCatalogBuildResolvesWhisperIdentityFromSingleDirectorySnapshot() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scrawl-catalog-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let downloadable = try XCTUnwrap(LocalModelManager.downloadableModels.first)
+        FileManager.default.createFile(
+            atPath: tempDir.appendingPathComponent("\(downloadable.id).bin").path,
+            contents: Data("stub".utf8)
+        )
+
+        let manager = LocalModelManager(modelsDirectoryURL: tempDir)
+        let catalog = ModelCatalog(
+            manager: manager,
+            retainingProvider: nil,
+            languageProvider: { "en" },
+            preparationProgressProvider: { nil }
+        )
+
+        let models = catalog.availableModels // one build = one directory listing
+        try FileManager.default.removeItem(at: tempDir) // a re-scan would now find nothing
+
+        let whisper = try XCTUnwrap(models.first { $0.id == downloadable.id })
+        XCTAssertTrue(
+            whisper.installState.isInstalled,
+            "identity/install resolution must use the build-time snapshot, not re-scan the directory"
+        )
+    }
+
     #if arch(arm64)
     func testParakeetManagedModelDeleteClearsCacheAndShutdownsProvider() async throws {
         let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
