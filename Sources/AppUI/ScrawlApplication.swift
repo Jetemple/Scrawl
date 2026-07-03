@@ -144,6 +144,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var parakeetPreparationState = ParakeetPreparationState()
     private var parakeetPreparationGeneration: UUID?
     private var parakeetPreparationTask: Task<Void, Never>?
+    private var preparationRefreshGate = PreparationRefreshGate()
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
     private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
@@ -1230,6 +1231,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let generation = UUID()
         parakeetPreparationGeneration = generation
+        preparationRefreshGate.reset()
         parakeetPreparationState.apply(.started)
         publishParakeetPreparationState()
 
@@ -1264,6 +1266,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         parakeetPreparationTask = nil
         parakeetPreparationGeneration = nil
         parakeetPreparationState = ParakeetPreparationState()
+        preparationRefreshGate.reset()
         refreshPreferencesWindow()
     }
 
@@ -1276,6 +1279,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
         if event == .ready {
             setStatus("Parakeet ready")
+            // Deduping the optimize-phase spam removes the ~18/sec refreshes that used to
+            // incidentally repaint the row as installed the instant prep finished; refresh
+            // once here so the completed state still lands.
+            preparationRefreshGate.reset()
+            refreshPreferencesWindow()
         } else {
             publishParakeetPreparationState()
         }
@@ -1284,6 +1292,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private func publishParakeetPreparationState() {
         if let statusText = parakeetPreparationState.statusText {
             setStatus(statusText)
+        }
+        // Progress callbacks fire ~18x/sec but the window only renders the coarse row text;
+        // skip refreshes that would rebuild an identical snapshot (measured main-thread
+        // saturation during preparation with the preferences window open).
+        guard preparationRefreshGate.shouldRefresh(rowText: parakeetPreparationState.modelRowProgressText) else {
+            return
         }
         refreshPreferencesWindow()
     }
