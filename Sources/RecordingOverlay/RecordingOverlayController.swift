@@ -34,6 +34,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
     var reduceMotionOverride: Bool?
     var isPollingLevels: Bool { levelTimer != nil }
     var isShowingWaveform: Bool { waveformView?.isHidden == false }
+    var isShowingDot: Bool { dotView?.isHidden == false }
 
     private var isReduceMotionEnabled: Bool {
         reduceMotionOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -48,6 +49,10 @@ public final class RecordingOverlayController: @unchecked Sendable {
     private static let barGap: CGFloat = 2
 
     public init() {}
+
+    deinit {
+        levelTimer?.invalidate()
+    }
 
     public func setState(_ state: RecordingOverlayState) {
         if Thread.isMainThread {
@@ -201,13 +206,22 @@ public final class RecordingOverlayController: @unchecked Sendable {
         announce(text)
 
         let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            if state == .idle {
-                fadeOut(panel)
-            }
+            self?.fireTransientDismiss()
         }
         transientDismissWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0.2), execute: workItem)
+    }
+
+    /// Runs when a transient message's display time elapses. Idle → fade the pill out;
+    /// otherwise re-apply the live state so a transient shown mid-recording restores the
+    /// waveform/spinner/symbol instead of leaving stale text with no indicator.
+    func fireTransientDismiss() {
+        guard let panel else { return }
+        if state == .idle {
+            fadeOut(panel)
+        } else {
+            apply(state)
+        }
     }
 
     // MARK: - Pill width computation
@@ -323,7 +337,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
         let dot = NSView(frame: .zero)
         dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.layer?.backgroundColor = Self.coralAccent.cgColor
         dot.layer?.cornerRadius = 4
         dot.isHidden = true
 
@@ -583,6 +597,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
         let timer = Timer(timeInterval: 0.04, repeats: true) { [weak self] _ in
             self?.pollLevelOnce()
         }
+        // A 25Hz timer doesn't need sub-frame precision; tolerance lets the OS coalesce wakeups.
+        timer.tolerance = 0.008
         // .common so the bars keep moving while menus or drags track the run loop.
         RunLoop.main.add(timer, forMode: .common)
         levelTimer = timer

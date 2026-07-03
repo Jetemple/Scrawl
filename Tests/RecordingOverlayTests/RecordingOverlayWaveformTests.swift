@@ -42,6 +42,7 @@ final class RecordingOverlayWaveformTests: XCTestCase {
         controller.setState(.recording)
         XCTAssertFalse(controller.isShowingWaveform)
         XCTAssertFalse(controller.isPollingLevels)
+        XCTAssertTrue(controller.isShowingDot, "Reduce Motion recording shows a static coral dot")
     }
 
     func testPollTicksDriveBarHeightsFromTheProvider() {
@@ -59,5 +60,20 @@ final class RecordingOverlayWaveformTests: XCTestCase {
         for height in controller.barHeights {
             XCTAssertEqual(height, WaveformLevel.minBarHeight, accuracy: 0.05)
         }
+    }
+
+    func testTransientMessageDuringRecordingRestoresWaveformOnDismiss() {
+        let controller = RecordingOverlayController()
+        controller.reduceMotionOverride = false
+        controller.levelProvider = { -20 }
+
+        controller.setState(.recording)
+        controller.showTransientMessage("Stop recording before changing the hotkey")
+        XCTAssertFalse(controller.isPollingLevels, "a transient message pauses live polling")
+        XCTAssertFalse(controller.isShowingWaveform)
+
+        controller.fireTransientDismiss()
+        XCTAssertTrue(controller.isShowingWaveform, "dismissing a transient mid-recording restores the waveform")
+        XCTAssertTrue(controller.isPollingLevels)
     }
 }
