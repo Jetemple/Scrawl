@@ -96,6 +96,12 @@ final class ModelCatalog: @unchecked Sendable {
         )
     }
 
+    /// Cheap enablement check for menu/UI state. Unlike `deletionTarget`, this never
+    /// measures on-disk size — for Parakeet that walks a ~600 MB cache directory.
+    func canDeleteModel(selectedModelID: String) -> Bool {
+        model(id: selectedModelID)?.installState.isInstalled == true
+    }
+
     func delete(_ target: ModelDeletionTarget) async throws -> ModelDeletionResult {
         try await deleteModel(id: target.modelID)
     }

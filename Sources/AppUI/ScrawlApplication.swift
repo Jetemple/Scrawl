@@ -1949,7 +1949,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let deleteItem = NSMenuItem(title: "Delete Selected Model", action: #selector(deleteSelectedModel(_:)), keyEquivalent: "")
         deleteItem.target = self
-        deleteItem.isEnabled = modelCatalog.deletionTarget(selectedModelID: settings.modelID) != nil
+        deleteItem.isEnabled = modelCatalog.canDeleteModel(selectedModelID: settings.modelID)
         modelsSubmenu.addItem(deleteItem)
     }
 
