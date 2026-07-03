@@ -332,8 +332,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
         visual.layer?.cornerRadius = pillHeight / 2
         visual.layer?.masksToBounds = true
         // A hairline edge so the pill stays legible on dark or busy wallpapers, where the
-        // drop shadow alone gives little separation. The .hudWindow material is always dark,
-        // so a faint light stroke reads correctly in both system appearances.
+        // drop shadow alone gives little separation. The faint stroke disappears into the
+        // light-mode material and separates the dark one, so it works in both appearances.
         visual.layer?.borderWidth = 1
         visual.layer?.borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
 
