@@ -1283,9 +1283,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
         if event == .ready {
             setStatus("Parakeet ready")
-            // Deduping the optimize-phase spam removes the ~18/sec refreshes that used to
-            // incidentally repaint the row as installed the instant prep finished; refresh
-            // once here so the completed state still lands.
+            // The gate has already baselined this row text, so a gated publish would
+            // skip; reset and refresh explicitly so the installed row lands.
             preparationRefreshGate.reset()
             refreshPreferencesWindow()
         } else {

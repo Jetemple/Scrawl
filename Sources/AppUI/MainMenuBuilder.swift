@@ -8,6 +8,10 @@ import AppKit
 enum MainMenuBuilder {
     static func make() -> NSMenu {
         let main = NSMenu()
+        // Slot 0 is the application menu by AppKit convention. It stays empty —
+        // the menu bar never renders for an accessory app — but reserving it
+        // keeps File/Edit in the right slots if the activation policy changes.
+        main.addItem(makeSubmenuItem(NSMenu()))
         main.addItem(makeSubmenuItem(makeFileMenu()))
         main.addItem(makeSubmenuItem(makeEditMenu()))
         return main
@@ -21,6 +25,9 @@ enum MainMenuBuilder {
 
     private static func makeFileMenu() -> NSMenu {
         let file = NSMenu(title: "File")
+        // No Quit (⌘Q) on purpose: a background dictation app shouldn't die to a
+        // reflexive keystroke while the preferences window happens to be focused.
+        // Quit lives in the status-bar menu.
         file.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         return file
     }
