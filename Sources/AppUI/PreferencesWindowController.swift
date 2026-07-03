@@ -426,10 +426,16 @@ final class PreferencesWindowController: NSWindowController {
         }
         // `setFrame(animate: true)` is the legacy stepped resize (linear, chunky);
         // an eased animator group matches the tab crossfade and reads as one motion.
+        // A content change (say, a list growing a row) lands as a constraint change
+        // in the same turn as this resize; laying out inside the group with implicit
+        // animation on moves the content and the window frame together instead of
+        // the content snapping first and the frame chasing it.
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.25
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
             window.animator().setFrame(targetFrame, display: true)
+            contentView.layoutSubtreeIfNeeded()
         }
     }
 }
