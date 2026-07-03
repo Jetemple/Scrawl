@@ -53,7 +53,8 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
         self.focusedTextInserter = focusedTextInserter
         self.isAccessibilityTrusted = isAccessibilityTrusted
         self.isSecureInputActive = isSecureInputActive
-        self.sendPasteCommand = sendPasteCommand ?? PasteboardTextOutput.sendCommandV
+        // Wrapped in a literal because a bare method reference is not @Sendable.
+        self.sendPasteCommand = sendPasteCommand ?? { try PasteboardTextOutput.sendCommandV() }
         self.pasteSettleDelayNanoseconds = pasteSettleDelayNanoseconds
     }
 
