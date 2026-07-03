@@ -166,6 +166,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             TempFileSweeper.sweep(directory: tempDir)
         }
 
+        // The menu bar never shows for an accessory app, but key equivalents
+        // (⌘V/⌘C/⌘A/⌘W…) only work when a main menu defines them.
+        NSApplication.shared.mainMenu = MainMenuBuilder.make()
+
         setupStatusItem()
         observeWorkspaceActivations()
         cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
