@@ -13,9 +13,9 @@ import XCTest
 final class AppRuntimeResolutionTests: XCTestCase {
     func testRecommendedDefaultModelIsLightweightEnglishForFastOnboarding() {
         #if arch(arm64)
-        XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "parakeet-v3")
+            XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "parakeet-v3")
         #else
-        XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "ggml-small.en")
+            XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "ggml-small.en")
         #endif
     }
 
@@ -170,7 +170,9 @@ private struct StubAudioCaptureService: AudioCaptureServing {
         URL(filePath: "/tmp/audio.wav")
     }
 
-    func currentAveragePower() -> Float? { nil }
+    func currentAveragePower() -> Float? {
+        nil
+    }
 }
 
 private struct StubTextOutputTarget: TextOutputTarget {

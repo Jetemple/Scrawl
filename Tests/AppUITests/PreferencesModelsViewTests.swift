@@ -33,7 +33,7 @@ final class PreferencesModelsViewTests: XCTestCase {
     }
 
     @MainActor
-    func testModelsTableShowsColumnHeadersAndEngine() throws {
+    func testModelsTableShowsColumnHeadersAndEngine() {
         let view = makeView()
         view.frame = NSRect(x: 0, y: 0, width: 640, height: 460)
         view.update(rows: [
@@ -175,8 +175,8 @@ final class PreferencesModelsViewTests: XCTestCase {
 
         let rowActionButton = try XCTUnwrap(view.firstButton(titled: "Use"))
         let footerDeleteButton = try XCTUnwrap(view.firstButton(titled: "Delete Selected"))
-        let rowActionColumnFrame = view.convert(
-            try XCTUnwrap(rowActionButton.superview).bounds,
+        let rowActionColumnFrame = try view.convert(
+            XCTUnwrap(rowActionButton.superview).bounds,
             from: rowActionButton.superview
         )
         let footerDeleteFrame = view.convert(footerDeleteButton.frame, from: footerDeleteButton.superview)
@@ -197,8 +197,8 @@ final class PreferencesModelsViewTests: XCTestCase {
         let actionHeader = try XCTUnwrap(view.firstTextField(withValue: "Action"))
         let rowActionButton = try XCTUnwrap(view.firstButton(titled: "Use"))
         let headerFrame = view.convert(actionHeader.frame, from: actionHeader.superview)
-        let rowActionColumnFrame = view.convert(
-            try XCTUnwrap(rowActionButton.superview).bounds,
+        let rowActionColumnFrame = try view.convert(
+            XCTUnwrap(rowActionButton.superview).bounds,
             from: rowActionButton.superview
         )
 
@@ -220,8 +220,8 @@ final class PreferencesModelsViewTests: XCTestCase {
 
         let rowActionButton = try XCTUnwrap(view.firstButton(titled: "Use"))
         let rowActionFrame = view.convert(rowActionButton.frame, from: rowActionButton.superview)
-        let rowActionColumnFrame = view.convert(
-            try XCTUnwrap(rowActionButton.superview).bounds,
+        let rowActionColumnFrame = try view.convert(
+            XCTUnwrap(rowActionButton.superview).bounds,
             from: rowActionButton.superview
         )
 

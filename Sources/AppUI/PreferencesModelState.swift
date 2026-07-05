@@ -234,17 +234,17 @@ enum PreferencesModelState {
     static func description(forModelID modelID: String) -> String {
         switch canonicalFamily(modelID) {
         case canonicalFamily(ModelCatalog.parakeetModelID):
-            return "Fastest on-device"
+            "Fastest on-device"
         case "tiny.en":
-            return "Smallest English"
+            "Smallest English"
         case "small.en":
-            return "Fast English"
+            "Fast English"
         case "medium":
-            return "Multilingual"
+            "Multilingual"
         case "large-v3-turbo":
-            return "Most accurate"
+            "Most accurate"
         default:
-            return "Custom Whisper model"
+            "Custom Whisper model"
         }
     }
 

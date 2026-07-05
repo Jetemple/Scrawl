@@ -15,7 +15,7 @@ final class PreferencesModelsViewSnapshotTests: XCTestCase {
         for name in ["models-installed.png", "models-downloading.png", "models-minimum-width.png"] {
             let url = outputDirectory.appendingPathComponent(name)
             XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "Missing \(name)")
-            XCTAssertGreaterThan(try Data(contentsOf: url).count, 1_000, "\(name) should be a real PNG artifact")
+            XCTAssertGreaterThan(try Data(contentsOf: url).count, 1000, "\(name) should be a real PNG artifact")
         }
     }
 }
@@ -177,9 +177,9 @@ private enum PreferencesModelsSnapshotWriter {
         var errorDescription: String? {
             switch self {
             case let .couldNotCreateBitmap(fileName):
-                return "Could not create bitmap for \(fileName)."
+                "Could not create bitmap for \(fileName)."
             case let .couldNotEncodePNG(fileName):
-                return "Could not encode \(fileName) as PNG."
+                "Could not encode \(fileName) as PNG."
             }
         }
     }

@@ -25,7 +25,7 @@ final class PreferencesWindowSnapshotTests: XCTestCase {
         ] {
             let url = outputDirectory.appendingPathComponent(name)
             XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "Missing \(name)")
-            XCTAssertGreaterThan(try Data(contentsOf: url).count, 1_000, "\(name) should be a real PNG artifact")
+            XCTAssertGreaterThan(try Data(contentsOf: url).count, 1000, "\(name) should be a real PNG artifact")
         }
     }
 }
@@ -176,14 +176,14 @@ private enum PreferencesWindowSnapshotWriter {
             id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
             createdAt: Date(timeIntervalSince1970: 1_782_790_000),
             text: "Follow up with Anduril about the local inference demo.",
-            recordingDurationMS: 31_000,
-            transcriptionLatencyMS: 1_400
+            recordingDurationMS: 31000,
+            transcriptionLatencyMS: 1400
         ),
         TranscriptRecord(
             id: UUID(uuidString: "22222222-2222-2222-2222-222222222222")!,
             createdAt: Date(timeIntervalSince1970: 1_782_703_600),
             text: "Ship the preferences redesign after snapshot review.",
-            recordingDurationMS: 19_500,
+            recordingDurationMS: 19500,
             transcriptionLatencyMS: 920
         ),
     ]
@@ -228,13 +228,13 @@ private enum PreferencesWindowSnapshotWriter {
         var errorDescription: String? {
             switch self {
             case let .missingWindow(fileName):
-                return "Could not create preferences window for \(fileName)."
+                "Could not create preferences window for \(fileName)."
             case let .missingContentView(fileName):
-                return "Could not find preferences content view for \(fileName)."
+                "Could not find preferences content view for \(fileName)."
             case let .couldNotCreateBitmap(fileName):
-                return "Could not create bitmap for \(fileName)."
+                "Could not create bitmap for \(fileName)."
             case let .couldNotEncodePNG(fileName):
-                return "Could not encode \(fileName) as PNG."
+                "Could not encode \(fileName) as PNG."
             }
         }
     }

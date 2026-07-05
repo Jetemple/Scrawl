@@ -52,11 +52,15 @@ final class RecordingOverlayWaveformTests: XCTestCase {
         controller.levelProvider = { decibels }
 
         controller.setState(.recording)
-        for _ in 0 ..< 30 { controller.pollLevelOnce() }
+        for _ in 0..<30 {
+            controller.pollLevelOnce()
+        }
         XCTAssertEqual(controller.barHeights[2], WaveformLevel.maxBarHeight, accuracy: 0.05)
 
         decibels = nil
-        for _ in 0 ..< 30 { controller.pollLevelOnce() }
+        for _ in 0..<30 {
+            controller.pollLevelOnce()
+        }
         for height in controller.barHeights {
             XCTAssertEqual(height, WaveformLevel.minBarHeight, accuracy: 0.05)
         }

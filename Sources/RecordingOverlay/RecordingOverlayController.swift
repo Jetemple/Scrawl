@@ -32,9 +32,17 @@ public final class RecordingOverlayController: @unchecked Sendable {
     public var levelProvider: (() -> Float?)?
     /// Test seam: overrides the system Reduce Motion setting when non-nil.
     var reduceMotionOverride: Bool?
-    var isPollingLevels: Bool { levelTimer != nil }
-    var isShowingWaveform: Bool { waveformView?.isHidden == false }
-    var isShowingDot: Bool { dotView?.isHidden == false }
+    var isPollingLevels: Bool {
+        levelTimer != nil
+    }
+
+    var isShowingWaveform: Bool {
+        waveformView?.isHidden == false
+    }
+
+    var isShowingDot: Bool {
+        dotView?.isHidden == false
+    }
 
     private var isReduceMotionEnabled: Bool {
         reduceMotionOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -347,7 +355,7 @@ public final class RecordingOverlayController: @unchecked Sendable {
         waveform.wantsLayer = true
         waveform.isHidden = true
         var layers: [CALayer] = []
-        for index in 0 ..< WaveformLevel.barCount {
+        for index in 0..<WaveformLevel.barCount {
             let bar = CALayer()
             bar.backgroundColor = Self.coralAccent.cgColor
             bar.cornerRadius = Self.barWidth / 2

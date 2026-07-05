@@ -822,7 +822,7 @@ final class PreferencesModelsView: NSView {
         else {
             return nil
         }
-        return String(text[text.index(after: open) ..< close])
+        return String(text[text.index(after: open)..<close])
     }
 
     // MARK: - Actions

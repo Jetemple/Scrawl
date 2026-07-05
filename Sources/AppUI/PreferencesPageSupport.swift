@@ -97,7 +97,9 @@ enum PreferencesPageSupport {
     }
 
     /// Hairline color shared by every workbench rule (group frames, row dividers, list frames).
-    static var hairlineColor: NSColor { .separatorColor.withAlphaComponent(0.5) }
+    static var hairlineColor: NSColor {
+        .separatorColor.withAlphaComponent(0.5)
+    }
 
     static func fill(_ container: NSView, with view: NSView) {
         view.translatesAutoresizingMaskIntoConstraints = false

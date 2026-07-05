@@ -18,7 +18,7 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(status.contains("parakeet-v3"))
     }
 
-    func testRowsIncludeParakeetModelWhenAvailable() throws {
+    func testRowsIncludeParakeetModelWhenAvailable() {
         let rows = PreferencesModelState.rows(
             models: [
                 StubPreferenceManagedModel(
@@ -40,7 +40,7 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(rows[0].canDownload)
     }
 
-    func testParakeetRowIsRecommendedOnlyWhenDefault() throws {
+    func testParakeetRowIsRecommendedOnlyWhenDefault() {
         let rows = PreferencesModelState.rows(
             models: [
                 StubPreferenceManagedModel(
@@ -57,7 +57,7 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertEqual(rows[0].statusText, "Installed")
     }
 
-    func testRowsShowParakeetPreparationProgressWhenPreparing() throws {
+    func testRowsShowParakeetPreparationProgressWhenPreparing() {
         let rows = PreferencesModelState.rows(
             models: [
                 StubPreferenceManagedModel(

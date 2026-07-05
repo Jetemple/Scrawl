@@ -12,7 +12,7 @@ final class PreparationRefreshGateTests: XCTestCase {
         XCTAssertTrue(gate.shouldRefresh(rowText: "Preparing"))
         // The optimize phase fires ~18 progress callbacks/sec that all collapse to the same
         // row text; only the first should refresh the preferences window.
-        for _ in 0 ..< 20 {
+        for _ in 0..<20 {
             XCTAssertFalse(gate.shouldRefresh(rowText: "Preparing"))
         }
     }

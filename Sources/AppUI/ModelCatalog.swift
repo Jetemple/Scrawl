@@ -34,14 +34,14 @@ final class ModelCatalog: @unchecked Sendable {
 
             var models: [any ManagedModel] = []
             #if arch(arm64)
-            models.append(
-                ParakeetManagedModel(
-                    cacheStore: LiveParakeetModelCacheStore(),
-                    provider: retainingProvider,
-                    languageProvider: languageProvider,
-                    preparationProgressProvider: preparationProgressProvider
+                models.append(
+                    ParakeetManagedModel(
+                        cacheStore: LiveParakeetModelCacheStore(),
+                        provider: retainingProvider,
+                        languageProvider: languageProvider,
+                        preparationProgressProvider: preparationProgressProvider
+                    )
                 )
-            )
             #endif
 
             let downloadableModels = LocalModelManager.downloadableModels.map {
@@ -72,7 +72,7 @@ final class ModelCatalog: @unchecked Sendable {
 
     func installedModelIDs() -> [String] {
         availableModels
-            .filter { $0.installState.isInstalled }
+            .filter(\.installState.isInstalled)
             .map(\.id)
     }
 

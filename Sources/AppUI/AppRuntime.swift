@@ -3,13 +3,13 @@ import DictionaryStore
 import Foundation
 import HotkeyEngine
 import Metal
+import ParakeetProvider
 import Permissions
 import RecordingOverlay
 import SettingsStore
 import TextOutput
 import TranscriptHistoryStore
 import TranscriptionCore
-import ParakeetProvider
 import WhisperCppProvider
 
 public struct AppRuntime {
@@ -80,9 +80,9 @@ public struct AppRuntime {
             )
         )
         #if arch(arm64)
-        let parakeetProvider: (any TranscriptionProvider)? = ParakeetTranscriptionProvider()
+            let parakeetProvider: (any TranscriptionProvider)? = ParakeetTranscriptionProvider()
         #else
-        let parakeetProvider: (any TranscriptionProvider)? = nil
+            let parakeetProvider: (any TranscriptionProvider)? = nil
         #endif
 
         return AppRuntime(
@@ -220,13 +220,13 @@ public struct AppRuntime {
 
     static func resolveRecommendedDefaultModelID() -> String {
         #if arch(arm64)
-        return TranscriptionModelID.parakeetV3
+            return TranscriptionModelID.parakeetV3
         #else
-        // First-run onboarding favors a fast, lightweight download. `small.en` (466 MB) is far
-        // smaller and faster than the multilingual `medium` (1.5 GB), and the app is English-only
-        // today, so `medium` would be strictly heavier with no benefit. Larger/multilingual models
-        // remain one-click upgrades in the Models menu.
-        return "ggml-small.en"
+            // First-run onboarding favors a fast, lightweight download. `small.en` (466 MB) is far
+            // smaller and faster than the multilingual `medium` (1.5 GB), and the app is English-only
+            // today, so `medium` would be strictly heavier with no benefit. Larger/multilingual models
+            // remain one-click upgrades in the Models menu.
+            return "ggml-small.en"
         #endif
     }
 

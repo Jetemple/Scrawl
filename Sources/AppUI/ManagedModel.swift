@@ -41,8 +41,13 @@ protocol ManagedModel: Sendable {
 }
 
 extension ManagedModel {
-    var installedSizeBytes: Int64? { installState.installedSizeBytes }
-    var preparesOnSelection: Bool { false }
+    var installedSizeBytes: Int64? {
+        installState.installedSizeBytes
+    }
+
+    var preparesOnSelection: Bool {
+        false
+    }
 }
 
 protocol ParakeetModelCacheStore: Sendable {
@@ -88,7 +93,9 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
         PreferencesModelState.displayName(forModelID: id)
     }
 
-    var isAvailable: Bool { true }
+    var isAvailable: Bool {
+        true
+    }
 
     var installState: ManagedModelInstallState {
         if let downloadableModel {
@@ -110,11 +117,10 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
     func prepare(progressHandler: ModelPreparationProgressHandler?) async throws {
         guard let downloadableModel else { return }
         _ = try await manager.download(model: downloadableModel) { receivedBytes, totalBytes in
-            let fraction: Double?
-            if let totalBytes, totalBytes > 0 {
-                fraction = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
+            let fraction: Double? = if let totalBytes, totalBytes > 0 {
+                max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
             } else {
-                fraction = nil
+                nil
             }
             progressHandler?(ModelPreparationProgress(fractionCompleted: fraction, phase: .downloading))
         }
@@ -126,58 +132,69 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
 }
 
 #if arch(arm64)
-final class ParakeetManagedModel: ManagedModel, @unchecked Sendable {
-    private let cacheStore: ParakeetModelCacheStore
-    private let provider: (any ModelRetainingTranscriptionProvider)?
-    private let languageProvider: @Sendable () -> String
-    private let preparationProgressProvider: @Sendable () -> ManagedModelPreparationProgress?
+    final class ParakeetManagedModel: ManagedModel, @unchecked Sendable {
+        private let cacheStore: ParakeetModelCacheStore
+        private let provider: (any ModelRetainingTranscriptionProvider)?
+        private let languageProvider: @Sendable () -> String
+        private let preparationProgressProvider: @Sendable () -> ManagedModelPreparationProgress?
 
-    init(
-        cacheStore: ParakeetModelCacheStore,
-        provider: (any ModelRetainingTranscriptionProvider)?,
-        languageProvider: @escaping @Sendable () -> String = { "en" },
-        preparationProgressProvider: @escaping @Sendable () -> ManagedModelPreparationProgress? = { nil }
-    ) {
-        self.cacheStore = cacheStore
-        self.provider = provider
-        self.languageProvider = languageProvider
-        self.preparationProgressProvider = preparationProgressProvider
-    }
-
-    var id: String { TranscriptionModelID.parakeetV3 }
-    var displayName: String { PreferencesModelState.displayName(forModelID: id) }
-    var isAvailable: Bool { true }
-    var preparesOnSelection: Bool { true }
-
-    var installState: ManagedModelInstallState {
-        if cacheStore.parakeetCacheExists() {
-            return .installed(sizeBytes: nil)
+        init(
+            cacheStore: ParakeetModelCacheStore,
+            provider: (any ModelRetainingTranscriptionProvider)?,
+            languageProvider: @escaping @Sendable () -> String = { "en" },
+            preparationProgressProvider: @escaping @Sendable () -> ManagedModelPreparationProgress? = { nil }
+        ) {
+            self.cacheStore = cacheStore
+            self.provider = provider
+            self.languageProvider = languageProvider
+            self.preparationProgressProvider = preparationProgressProvider
         }
-        if let progress = preparationProgressProvider() {
-            return .preparing(progress)
+
+        var id: String {
+            TranscriptionModelID.parakeetV3
         }
-        return .notInstalled
-    }
 
-    var installedSizeBytes: Int64? {
-        guard cacheStore.parakeetCacheExists() else { return nil }
-        return cacheStore.parakeetCacheSizeBytes()
-    }
-
-    func prepare(progressHandler: ModelPreparationProgressHandler?) async throws {
-        guard let provider else {
-            throw TranscriptionError.providerUnavailable
+        var displayName: String {
+            PreferencesModelState.displayName(forModelID: id)
         }
-        try await provider.prepareModel(
-            modelID: id,
-            language: languageProvider(),
-            progressHandler: progressHandler
-        )
-    }
 
-    func delete() async throws {
-        await provider?.shutdown(modelID: id)
-        try cacheStore.deleteParakeetCache()
+        var isAvailable: Bool {
+            true
+        }
+
+        var preparesOnSelection: Bool {
+            true
+        }
+
+        var installState: ManagedModelInstallState {
+            if cacheStore.parakeetCacheExists() {
+                return .installed(sizeBytes: nil)
+            }
+            if let progress = preparationProgressProvider() {
+                return .preparing(progress)
+            }
+            return .notInstalled
+        }
+
+        var installedSizeBytes: Int64? {
+            guard cacheStore.parakeetCacheExists() else { return nil }
+            return cacheStore.parakeetCacheSizeBytes()
+        }
+
+        func prepare(progressHandler: ModelPreparationProgressHandler?) async throws {
+            guard let provider else {
+                throw TranscriptionError.providerUnavailable
+            }
+            try await provider.prepareModel(
+                modelID: id,
+                language: languageProvider(),
+                progressHandler: progressHandler
+            )
+        }
+
+        func delete() async throws {
+            await provider?.shutdown(modelID: id)
+            try cacheStore.deleteParakeetCache()
+        }
     }
-}
 #endif

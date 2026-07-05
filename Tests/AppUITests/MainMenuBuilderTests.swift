@@ -1,5 +1,5 @@
-@testable import AppUI
 import AppKit
+@testable import AppUI
 import XCTest
 
 final class MainMenuBuilderTests: XCTestCase {

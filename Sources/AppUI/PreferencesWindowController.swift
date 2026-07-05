@@ -385,8 +385,8 @@ final class PreferencesWindowController: NSWindowController {
         window?.contentViewController = tabController
         tabSelectionObservation = tabController.observe(\.selectedTabViewItemIndex, options: [.new]) { [weak self] _, _ in
             guard let self else { return }
-            self.resizeWindowForSelectedSection()
-            self.window?.title = "Scrawl Preferences"
+            resizeWindowForSelectedSection()
+            window?.title = "Scrawl Preferences"
         }
         tabController.selectedTabViewItemIndex = Section.general.rawValue
         // NSTabViewController can push the selected page's title onto the window; keep our own.

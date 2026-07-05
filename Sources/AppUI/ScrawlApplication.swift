@@ -89,7 +89,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             self?.runtime.settingsStore.load().language ?? "en"
         },
         preparationProgressProvider: { [weak self] in
-            guard let self, let text = self.parakeetPreparationState.modelRowProgressText else {
+            guard let self, let text = parakeetPreparationState.modelRowProgressText else {
                 return nil
             }
             return ManagedModelPreparationProgress(displayText: text)
@@ -762,14 +762,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             let shouldPrepareOnSelection = modelCatalog.preparesOnSelection(modelID: modelID)
             let isInstalled = modelCatalog.isInstalled(modelID: modelID)
             let settings = runtime.settingsStore.load()
-            let confirmation: ModelSelectionConfirmation
-            if ModelSelectionPlanner.requiresDownloadConfirmation(
+            let confirmation: ModelSelectionConfirmation = if ModelSelectionPlanner.requiresDownloadConfirmation(
                 preparesOnSelection: shouldPrepareOnSelection,
                 isInstalled: isInstalled
             ) {
-                confirmation = confirmParakeetModelDownload() ? .download : .cancel
+                confirmParakeetModelDownload() ? .download : .cancel
             } else {
-                confirmation = .notRequired
+                .notRequired
             }
 
             switch ModelSelectionPlanner.outcome(
@@ -846,7 +845,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         Task { [weak self] in
             guard let self else { return }
             do {
-                let result = try await self.modelCatalog.delete(target)
+                let result = try await modelCatalog.delete(target)
                 await MainActor.run {
                     guard result.deletedModelID != nil else {
                         self.setStatus("No installed model to delete")

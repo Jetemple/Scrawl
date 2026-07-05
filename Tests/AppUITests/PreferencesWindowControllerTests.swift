@@ -113,7 +113,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.selectSection(.dictionary)
         let sparseHeight = contentView.bounds.height
 
-        controller.update(snapshot: makeSnapshot(dictionaryEntries: (1 ... 12).map {
+        controller.update(snapshot: makeSnapshot(dictionaryEntries: (1...12).map {
             DictionaryEntry(wrong: "term \($0)", correct: "term \($0)")
         }))
 
@@ -516,9 +516,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let contentView = try XCTUnwrap(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
 
-        let controls: [NSView] = [
-            try XCTUnwrap(contentView.button(titled: "Set Hotkey…")),
-            try XCTUnwrap(contentView.button(titled: "Open Prompt")),
+        let controls: [NSView] = try [
+            XCTUnwrap(contentView.button(titled: "Set Hotkey…")),
+            XCTUnwrap(contentView.button(titled: "Open Prompt")),
         ]
         let trailingEdges = controls.map { control in
             contentView.convert(control.frame, from: control.superview).maxX.rounded()

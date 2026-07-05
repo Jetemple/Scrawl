@@ -22,7 +22,7 @@ final class WaveformLevelTests: XCTestCase {
 
     func testSilenceSettlesToTheFloor() {
         var heights = Array(repeating: WaveformLevel.maxBarHeight, count: WaveformLevel.barCount)
-        for _ in 0 ..< 30 {
+        for _ in 0..<30 {
             heights = WaveformLevel.nextBarHeights(level: 0, previous: heights)
         }
         for height in heights {
@@ -32,7 +32,7 @@ final class WaveformLevelTests: XCTestCase {
 
     func testFullLevelConvergesToDampedNeighborTargets() {
         var heights = Array(repeating: WaveformLevel.minBarHeight, count: WaveformLevel.barCount)
-        for _ in 0 ..< 30 {
+        for _ in 0..<30 {
             heights = WaveformLevel.nextBarHeights(level: 1, previous: heights)
         }
         let range = WaveformLevel.maxBarHeight - WaveformLevel.minBarHeight

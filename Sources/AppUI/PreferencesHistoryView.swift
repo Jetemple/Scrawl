@@ -287,11 +287,10 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     /// Hug the list to its content so the framed region ends just under the last row (or the
     /// empty-state message) rather than stretching a mostly-empty box.
     private func updateListHeight() {
-        let contentHeight: CGFloat
-        if state == .records, !visibleRecords.isEmpty {
-            contentHeight = visibleRecords.indices.reduce(CGFloat(0)) { $0 + self.tableView(tableView, heightOfRow: $1) } + 2
+        let contentHeight: CGFloat = if state == .records, !visibleRecords.isEmpty {
+            visibleRecords.indices.reduce(CGFloat(0)) { $0 + self.tableView(tableView, heightOfRow: $1) } + 2
         } else {
-            contentHeight = 150
+            150
         }
         listHeightConstraint?.constant = min(
             PreferencesPageSupport.listMaxHeight,
