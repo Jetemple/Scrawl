@@ -227,6 +227,16 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testCustomPreferencesSelectionKeepsNormalTextBackgroundStyle() {
+        let row = PreferencesSelectionRowView()
+        row.isSelected = true
+        row.isEmphasized = true
+        row.selectionHighlightStyle = .regular
+
+        XCTAssertEqual(row.interiorBackgroundStyle, .normal)
+    }
+
+    @MainActor
     func testPageHeaderUsesSameWidthAndLeadingEdgeAsContent() throws {
         let content = PreferencesPageSupport.makeRoundedBackground()
         content.heightAnchor.constraint(equalToConstant: 80).isActive = true
@@ -790,6 +800,23 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testListPageTableScrollViewsDoNotRubberBandVertically() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
+        let contentView = try XCTUnwrap(controller.window?.contentView)
+        controller.update(snapshot: makeSnapshot(
+            records: [TranscriptRecord(id: UUID(), createdAt: .now, text: "A saved transcript")],
+            dictionaryEntries: [DictionaryEntry(wrong: "Anduril", correct: "Anduril")]
+        ))
+
+        for section in [PreferencesWindowController.Section.dictionary, .history] {
+            controller.selectSection(section)
+            let scrollView = try XCTUnwrap(contentView.visibleTableScrollView(), "\(section.title) missing table scroll view")
+
+            XCTAssertEqual(scrollView.verticalScrollElasticity, .none, "\(section.title) table should not rubber-band")
+        }
+    }
+
+    @MainActor
     func testWorkbenchActionBarsShareLeadingGrid() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         let window = try XCTUnwrap(controller.window)
@@ -1056,6 +1083,16 @@ private extension NSView {
             return subviews.first?.subviews.first
         }
         return subviews.lazy.compactMap { $0.firstLeadingStackInPinnedActionBar() }.first
+    }
+
+    func visibleTableScrollView() -> NSScrollView? {
+        if let scrollView = self as? NSScrollView,
+           scrollView.documentView is NSTableView,
+           !scrollView.isEffectivelyHidden
+        {
+            return scrollView
+        }
+        return subviews.lazy.compactMap { $0.visibleTableScrollView() }.first
     }
 
     var isEffectivelyHidden: Bool {

@@ -50,6 +50,10 @@ final class PreferencesPinnedActionBarView: NSView {}
 /// highlight instead of the default full-bleed macOS selection band. Pair with
 /// `tableView.selectionHighlightStyle = .regular` and return this from the row-view delegate.
 final class PreferencesSelectionRowView: NSTableRowView {
+    override var interiorBackgroundStyle: NSView.BackgroundStyle {
+        .normal
+    }
+
     override func drawSelection(in _: NSRect) {
         guard isSelected else { return }
         let rect = bounds.insetBy(
@@ -369,6 +373,7 @@ enum PreferencesPageSupport {
     static func makeListWorkspace(scrollView: NSScrollView, stateView: NSView) -> (view: NSView, heightConstraint: NSLayoutConstraint) {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
+        scrollView.verticalScrollElasticity = .none
 
         let content = NSView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
