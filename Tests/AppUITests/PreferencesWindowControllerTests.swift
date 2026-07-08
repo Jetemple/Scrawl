@@ -403,24 +403,17 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testHistoryAddTermPopoverSavesPreferredTerm() throws {
+    func testHistoryDoesNotShowAddTermButton() throws {
         let record = TranscriptRecord(id: UUID(), createdAt: .now, text: "Anduril was mentioned")
-        var savedValue: String?
-        let controller = PreferencesWindowController(actions: makeActions(
-            saveDictionaryEntry: { _, _, correct, completion in
-                savedValue = correct
-                completion(.success(()))
-            }
-        ))
+        let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot(records: [record]))
         controller.selectSection(.history)
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
-        try XCTUnwrap(contentView.button(titled: "Add Term...")).performClick(nil)
-        controller.setHistoryPreferredTermDraft("Anduril")
-        controller.saveHistoryPreferredTermDraft()
-
-        XCTAssertEqual(savedValue, "Anduril")
+        XCTAssertNotNil(contentView.button(titled: "Copy"))
+        XCTAssertNotNil(contentView.button(titled: "Paste Again"))
+        XCTAssertNotNil(contentView.button(titled: "Delete"))
+        XCTAssertNil(contentView.button(titled: "Add Term..."))
     }
 
     @MainActor
@@ -894,22 +887,13 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testDictionaryAddButtonDispatchesAction() throws {
-        var savedValue: String?
-        let controller = PreferencesWindowController(actions: makeActions(
-            saveDictionaryEntry: { _, _, correct, completion in
-                savedValue = correct
-                completion(.success(()))
-            }
-        ))
+    func testDictionaryDoesNotShowAddTermButton() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
         controller.selectSection(.dictionary)
         let contentView = try XCTUnwrap(controller.window?.contentView)
-        let field = try XCTUnwrap(contentView.textField(withPlaceholder: "Add a preferred term"))
-        field.stringValue = "Anduril"
 
-        try XCTUnwrap(contentView.button(titled: "Add Term")).performClick(nil)
-
-        XCTAssertEqual(savedValue, "Anduril")
+        XCTAssertNotNil(contentView.textField(withPlaceholder: "Add a preferred term"))
+        XCTAssertNil(contentView.button(titled: "Add Term"))
     }
 
     @MainActor

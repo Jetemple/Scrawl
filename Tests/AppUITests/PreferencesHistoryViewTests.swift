@@ -10,8 +10,7 @@ final class PreferencesHistoryViewTests: XCTestCase {
             setEnabled: { _ in },
             copy: { _ in },
             repaste: { _ in },
-            delete: { _ in },
-            addTerm: { _, completion in completion(.success(())) }
+            delete: { _ in }
         ))
     }
 

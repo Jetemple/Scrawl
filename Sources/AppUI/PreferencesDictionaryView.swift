@@ -12,7 +12,6 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 
     private let actions: Actions
     private let termField = NSTextField()
-    private let addButton = NSButton(title: "Add Term", target: nil, action: nil)
     private let searchField = NSSearchField()
     private let tableView = DeleteKeyTableView()
     private let stateView = NSView()
@@ -115,12 +114,6 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         termField.bezelStyle = .roundedBezel
         termField.target = self
         termField.action = #selector(addTerm(_:))
-        PreferencesPageSupport.configureSecondaryButton(addButton)
-        addButton.target = self
-        addButton.action = #selector(addTerm(_:))
-        let addRow = NSStackView(views: [termField, addButton])
-        addRow.orientation = .horizontal
-        addRow.spacing = 8
 
         searchField.placeholderString = "Search dictionary"
         searchField.delegate = self
@@ -182,7 +175,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
             title: "Dictionary",
             description: "Preferred terms for names and phrases.",
             content: [
-                addRow,
+                termField,
                 searchField,
                 workspace,
                 actionBar,
@@ -194,10 +187,11 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     @objc private func addTerm(_: Any) {
         let value = termField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
-        addButton.isEnabled = false
+        termField.isEnabled = false
         actions.save(nil, value, value) { [weak self] result in
-            self?.addButton.isEnabled = true
-            if case .success = result { self?.termField.stringValue = "" }
+            guard let self else { return }
+            termField.isEnabled = state != .unavailable
+            if case .success = result { termField.stringValue = "" }
             if case let .failure(error) = result { NSAlert(error: error).runModal() }
         }
     }
@@ -247,7 +241,6 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         stateView.isHidden = state == .entries
         tableView.enclosingScrollView?.isHidden = state != .entries
         termField.isEnabled = state != .unavailable
-        addButton.isEnabled = state != .unavailable
         searchField.isEnabled = state != .unavailable
     }
 

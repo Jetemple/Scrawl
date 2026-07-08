@@ -11,7 +11,6 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         let copy: (UUID) -> Void
         let repaste: (UUID) -> Void
         let delete: (Set<UUID>) -> Void
-        let addTerm: (String, @escaping (Result<Void, Error>) -> Void) -> Void
     }
 
     private let actions: Actions
@@ -26,11 +25,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let repasteButton = NSButton(title: "Paste Again", target: nil, action: nil)
-    private let addTermButton = NSButton(title: "Add Term...", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
-    private var preferredTermPopover: NSPopover?
-    private var preferredTermField: NSTextField?
-    private var preferredTermSaveButton: NSButton?
     private var records: [TranscriptRecord] = []
     private var visibleRecords: [TranscriptRecord] = []
     private var selectedID: UUID?
@@ -71,7 +66,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     var areActionControlsWithinBounds: Bool {
-        [copyButton, repasteButton, addTermButton, deleteButton].allSatisfy { bounds.contains(convert($0.bounds, from: $0)) }
+        [copyButton, repasteButton, deleteButton].allSatisfy { bounds.contains(convert($0.bounds, from: $0)) }
     }
 
     init(actions: Actions) {
@@ -212,7 +207,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         scrollView.hasVerticalScroller = true
         scrollView.documentView = tableView
 
-        for button in [copyButton, repasteButton, addTermButton, deleteButton] {
+        for button in [copyButton, repasteButton, deleteButton] {
             PreferencesPageSupport.configureSecondaryButton(button)
         }
         deleteButton.contentTintColor = .systemRed
@@ -220,8 +215,6 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         copyButton.action = #selector(copySelected(_:))
         repasteButton.target = self
         repasteButton.action = #selector(repasteSelected(_:))
-        addTermButton.target = self
-        addTermButton.action = #selector(showAddTermPopover(_:))
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected(_:))
         stateTitle.font = .systemFont(ofSize: 15, weight: .medium)
@@ -242,7 +235,7 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         workspaceGroup = workspace
         listHeightConstraint = listHeight
         let actionBar = PreferencesPageSupport.makePinnedActionBar(
-            leading: [copyButton, repasteButton, addTermButton],
+            leading: [copyButton, repasteButton],
             trailing: [deleteButton]
         )
         actionBarView = actionBar
@@ -327,7 +320,6 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         let enabled = selectedID != nil && state == .records
         copyButton.isEnabled = enabled
         repasteButton.isEnabled = enabled
-        addTermButton.isEnabled = enabled
         deleteButton.isEnabled = enabled
     }
 
@@ -342,78 +334,6 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
 
     @objc private func repasteSelected(_: NSButton) {
         performOnSelected(actions.repaste)
-    }
-
-    @objc private func showAddTermPopover(_ sender: NSButton) {
-        let field = NSTextField()
-        field.placeholderString = "Preferred term"
-        field.bezelStyle = .roundedBezel
-        field.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(equalToConstant: 220).isActive = true
-
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPreferredTermPopover(_:)))
-        let save = NSButton(title: "Save", target: self, action: #selector(savePreferredTermDraftAction(_:)))
-        save.keyEquivalent = "\r"
-        PreferencesPageSupport.configureSecondaryButton(cancel)
-        PreferencesPageSupport.configureSecondaryButton(save)
-
-        let title = NSTextField(labelWithString: "Add preferred term")
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
-        let buttons = NSStackView(views: [NSView(), cancel, save])
-        buttons.orientation = .horizontal
-        buttons.alignment = .centerY
-        buttons.spacing = 8
-
-        let content = NSStackView(views: [title, field, buttons])
-        content.orientation = .vertical
-        content.alignment = .width
-        content.spacing = 10
-        content.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-
-        let controller = NSViewController()
-        controller.view = content
-        let popover = NSPopover()
-        popover.contentViewController = controller
-        popover.behavior = .transient
-        preferredTermPopover = popover
-        preferredTermField = field
-        preferredTermSaveButton = save
-        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
-        field.window?.makeFirstResponder(field)
-    }
-
-    func setPreferredTermDraft(_ value: String) {
-        preferredTermField?.stringValue = value
-    }
-
-    func savePreferredTermDraft() {
-        guard let field = preferredTermField else { return }
-        let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        preferredTermSaveButton?.isEnabled = false
-        actions.addTerm(value) { [weak self] result in
-            self?.preferredTermSaveButton?.isEnabled = true
-            if case .success = result {
-                self?.preferredTermPopover?.close()
-                self?.preferredTermPopover = nil
-                self?.preferredTermField = nil
-                self?.preferredTermSaveButton = nil
-            }
-            if case let .failure(error) = result {
-                NSAlert(error: error).runModal()
-            }
-        }
-    }
-
-    @objc private func savePreferredTermDraftAction(_: NSButton) {
-        savePreferredTermDraft()
-    }
-
-    @objc private func cancelPreferredTermPopover(_: NSButton) {
-        preferredTermPopover?.close()
-        preferredTermPopover = nil
-        preferredTermField = nil
-        preferredTermSaveButton = nil
     }
 
     @objc private func deleteSelected(_: NSButton) {
