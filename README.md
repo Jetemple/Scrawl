@@ -7,7 +7,7 @@
 <p align="center">
   <strong>Local voice-to-text for macOS.</strong><br>
   Hold a key, talk, let go. Your words appear at the cursor.
-  Everything runs on your Mac with <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a>: no cloud, no account, no telemetry.
+  Everything runs on your Mac: Parakeet v3 on Apple Silicon, or <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a> ggml models when you want them. No cloud, no account, no telemetry.
 </p>
 
 <p align="center">
@@ -42,22 +42,22 @@ Upgrade later with `brew upgrade --cask scrawl`.
 
 **From source**
 
-Needs the Xcode command line tools.
+Needs the Xcode command line tools. Install `whisper-cpp` too if you want Whisper models or bring-your-own ggml models.
 
 ```bash
-brew install whisper-cpp
 git clone https://github.com/Jetemple/Scrawl.git
 cd Scrawl && make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```
 
-On first launch, grant Microphone and Accessibility. Open the menubar's Models menu and download one: `small.en` (470 MB) is a fast, English-only default; `medium` (1.5 GB) handles other languages; `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option ⌥, and talk.
+On first launch, grant Microphone and Accessibility. On Apple Silicon, use Parakeet v3 for the recommended fully local setup. To use Whisper instead, install `whisper-cpp`, then open the menubar's Models menu and download one: `small.en` (470 MB) is a fast, English-only default; `medium` (1.5 GB) handles other languages; `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option ⌥, and talk.
 
 ## Features
 
 - **Fully local.** Audio never leaves your Mac.
 - **Pastes at the cursor.** Straight into the focused field, or the clipboard if an app blocks it.
-- **Bring your own model.** Download a built-in size (tiny/small/medium/large-v3-turbo), or load any whisper.cpp ggml model.
+- **Apple Silicon default.** Parakeet v3 is the recommended on-device model on arm64 Macs.
+- **Bring your own Whisper model.** Download a built-in size (tiny/small/medium/large-v3-turbo), or load any whisper.cpp ggml model.
 - **Stays warm.** Keeps the model in memory between recordings, unloads it after idle. GPU by default, CPU fallback.
 - **Custom vocabulary.** Teach it the names, jargon, and acronyms you use.
 - **Local history.** Last 100 transcripts, searchable, on-device. One switch wipes them.
