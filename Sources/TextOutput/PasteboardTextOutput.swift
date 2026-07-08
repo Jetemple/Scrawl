@@ -38,17 +38,24 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
     private let focusedTextInserter: FocusedTextInserting
     private let isAccessibilityTrusted: @Sendable () -> Bool
     private let isSecureInputActive: @Sendable () -> Bool
+    private let sendPasteCommand: @Sendable () throws -> Void
+    private let pasteSettleDelayNanoseconds: UInt64
 
     public init(
         pasteboard: NSPasteboard = .general,
         focusedTextInserter: FocusedTextInserting = AccessibilityFocusedTextInserter(),
         isAccessibilityTrusted: @escaping @Sendable () -> Bool = { AXIsProcessTrusted() },
-        isSecureInputActive: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() }
+        isSecureInputActive: @escaping @Sendable () -> Bool = { IsSecureEventInputEnabled() },
+        sendPasteCommand: (@Sendable () throws -> Void)? = nil,
+        pasteSettleDelayNanoseconds: UInt64 = 140_000_000
     ) {
         self.pasteboard = pasteboard
         self.focusedTextInserter = focusedTextInserter
         self.isAccessibilityTrusted = isAccessibilityTrusted
         self.isSecureInputActive = isSecureInputActive
+        // Wrapped in a literal because a bare method reference is not @Sendable.
+        self.sendPasteCommand = sendPasteCommand ?? { try PasteboardTextOutput.sendCommandV() }
+        self.pasteSettleDelayNanoseconds = pasteSettleDelayNanoseconds
     }
 
     public func output(_ text: String, markPrivate: Bool = true) async throws {
@@ -82,15 +89,19 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
         let changeCountAfterWrite = pasteboard.changeCount
 
         do {
-            try sendCommandV()
+            try sendPasteCommand()
         } catch {
-            snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: changeCountAfterWrite)
+            if markPrivate {
+                snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: changeCountAfterWrite)
+            }
             throw error
         }
 
         // Wait briefly to let the focused app consume Cmd+V before restoring clipboard.
-        try await Task.sleep(nanoseconds: 140_000_000)
-        snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: changeCountAfterWrite)
+        try await Task.sleep(nanoseconds: pasteSettleDelayNanoseconds)
+        if markPrivate {
+            snapshot.restoreIfUnchanged(into: pasteboard, expectedChangeCount: changeCountAfterWrite)
+        }
     }
 
     static func writeTranscript(_ text: String, to pasteboard: NSPasteboard, markPrivate: Bool = true) {
@@ -105,7 +116,7 @@ public final class PasteboardTextOutput: TextOutputTarget, @unchecked Sendable {
         pasteboard.writeObjects([item])
     }
 
-    private func sendCommandV() throws {
+    private static func sendCommandV() throws {
         guard let source = CGEventSource(stateID: .combinedSessionState) else {
             throw TextOutputError.failedToCreateEventSource
         }

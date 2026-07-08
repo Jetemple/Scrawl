@@ -1,7 +1,100 @@
 @testable import AppUI
+import TranscriptionCore
 import XCTest
 
 final class PreferencesModelStateTests: XCTestCase {
+    func testDisplayNameForModelIDUsesFriendlyNames() {
+        XCTAssertEqual(PreferencesModelState.displayName(forModelID: "parakeet-v3"), "Parakeet v3")
+        XCTAssertEqual(PreferencesModelState.displayName(forModelID: "ggml-small.en"), "Small (English)")
+        XCTAssertEqual(PreferencesModelState.displayName(forModelID: "ggml-medium"), "Medium")
+        XCTAssertEqual(PreferencesModelState.displayName(forModelID: "ggml-large-v3-turbo"), "Large v3 Turbo")
+        XCTAssertEqual(PreferencesModelState.displayName(forModelID: "ggml-custom-model"), "custom-model")
+    }
+
+    func testSelectedModelStatusUsesDisplayName() {
+        let status = PreferencesModelState.selectedModelStatusText(forModelID: "parakeet-v3")
+
+        XCTAssertEqual(status, "Selected model: Parakeet v3")
+        XCTAssertFalse(status.contains("parakeet-v3"))
+    }
+
+    func testRowsIncludeParakeetModelWhenAvailable() {
+        let rows = PreferencesModelState.rows(
+            models: [
+                StubPreferenceManagedModel(
+                    id: "parakeet-v3",
+                    displayName: "Parakeet v3 — recommended",
+                    state: .installed(sizeBytes: 461 * 1024 * 1024)
+                ),
+            ],
+            selectedModelID: "parakeet-v3",
+            downloadingModelID: nil
+        )
+
+        XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
+        XCTAssertEqual(rows[0].displayName, "Parakeet v3")
+        XCTAssertEqual(rows[0].descriptionText, "Fastest on-device")
+        XCTAssertEqual(rows[0].statusText, "Recommended")
+        XCTAssertTrue(rows[0].isInstalled)
+        XCTAssertTrue(rows[0].isSelected)
+        XCTAssertFalse(rows[0].canDownload)
+    }
+
+    func testParakeetRowIsRecommendedOnlyWhenDefault() {
+        let rows = PreferencesModelState.rows(
+            models: [
+                StubPreferenceManagedModel(
+                    id: "parakeet-v3",
+                    displayName: "Parakeet v3",
+                    state: .installed(sizeBytes: 461 * 1024 * 1024)
+                ),
+            ],
+            selectedModelID: "parakeet-v3",
+            defaultModelID: "ggml-small.en",
+            downloadingModelID: nil
+        )
+
+        XCTAssertEqual(rows[0].statusText, "Installed")
+    }
+
+    func testRowsShowParakeetPreparationProgressWhenPreparing() {
+        let rows = PreferencesModelState.rows(
+            models: [
+                StubPreferenceManagedModel(
+                    id: "parakeet-v3",
+                    displayName: "Parakeet v3 — recommended",
+                    state: .preparing(ManagedModelPreparationProgress(displayText: "Downloading Parakeet model — 37%"))
+                ),
+            ],
+            selectedModelID: "parakeet-v3",
+            downloadingModelID: nil
+        )
+
+        XCTAssertEqual(rows.map(\.id), ["parakeet-v3"])
+        XCTAssertFalse(rows[0].isInstalled)
+        XCTAssertTrue(rows[0].isSelected)
+        XCTAssertTrue(rows[0].isPreparing)
+        XCTAssertEqual(rows[0].statusText, "Preparing 37%")
+        XCTAssertEqual(rows[0].downloadProgressText, "Downloading Parakeet model — 37%")
+    }
+
+    func testRowsHideParakeetModelWhenUnavailable() {
+        let rows = PreferencesModelState.rows(
+            models: ModelCatalog(models: [
+                StubPreferenceManagedModel(
+                    id: "parakeet-v3",
+                    displayName: "Parakeet v3 — recommended",
+                    isAvailable: false,
+                    state: .notInstalled
+                ),
+            ]).availableModels,
+            selectedModelID: "parakeet-v3",
+            downloadingModelID: nil
+        )
+
+        XCTAssertTrue(rows.isEmpty)
+    }
+
     func testRowsMarkSelectedInstalledAndDownloadingModels() throws {
         let rows = try PreferencesModelState.rows(
             downloadableModels: [
@@ -26,13 +119,17 @@ final class PreferencesModelStateTests: XCTestCase {
         )
 
         XCTAssertEqual(rows.map(\.id), ["ggml-small.en", "ggml-medium"])
-        XCTAssertEqual(rows[0].displayName, "small.en - recommended, 466 MB")
+        XCTAssertEqual(rows[0].displayName, "Small (English)")
+        XCTAssertEqual(rows[0].descriptionText, "Fast English")
+        XCTAssertEqual(rows[0].statusText, "Installed")
         XCTAssertTrue(rows[0].isInstalled)
         XCTAssertTrue(rows[0].isSelected)
         XCTAssertFalse(rows[0].isDownloading)
         XCTAssertFalse(rows[0].canDownload)
         XCTAssertFalse(rows[0].canSelect)
 
+        XCTAssertEqual(rows[1].displayName, "Medium")
+        XCTAssertEqual(rows[1].descriptionText, "Multilingual")
         XCTAssertFalse(rows[1].isInstalled)
         XCTAssertFalse(rows[1].isSelected)
         XCTAssertTrue(rows[1].isDownloading)
@@ -62,7 +159,7 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertEqual(rows[1].displayName, "custom-model")
         XCTAssertTrue(rows[1].isInstalled)
         XCTAssertTrue(rows[1].isSelected)
-        XCTAssertEqual(rows[1].statusText, "Selected")
+        XCTAssertEqual(rows[1].statusText, "Installed")
         XCTAssertEqual(rows[1].actionTitle, "Selected")
         XCTAssertFalse(rows[1].canSelect)
         XCTAssertFalse(rows[1].canDownload)
@@ -103,7 +200,7 @@ final class PreferencesModelStateTests: XCTestCase {
             downloadProgressText: nil
         )
 
-        XCTAssertEqual(row.statusText, "Available")
+        XCTAssertEqual(row.statusText, "Not installed")
         XCTAssertEqual(row.actionTitle, "Download")
     }
 
@@ -158,8 +255,8 @@ final class PreferencesModelStateTests: XCTestCase {
     }
 
     /// Defense in depth: even if a row is constructed as both installed and cancelled,
-    /// statusText must prefer the installed/selected truth over the stale cancelled flag.
-    func testStatusTextPrefersInstalledAndSelectedOverCancelled() {
+    /// statusText must prefer the installed truth over the stale cancelled flag.
+    func testStatusTextPrefersInstalledOverCancelled() {
         let installed = PreferencesModelRow(
             id: "ggml-medium", displayName: "medium",
             isInstalled: true, isSelected: false, isDownloading: false,
@@ -172,7 +269,7 @@ final class PreferencesModelStateTests: XCTestCase {
             isInstalled: true, isSelected: true, isDownloading: false,
             isCancelled: true, downloadProgressText: nil
         )
-        XCTAssertEqual(selected.statusText, "Selected")
+        XCTAssertEqual(selected.statusText, "Installed")
     }
 
     // Regression: installed ggml-medium.en must NOT suppress the downloadable ggml-medium.
@@ -272,4 +369,26 @@ final class PreferencesModelStateTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(mediumEnRow?.isInstalled), "ggml-medium.en must not be considered installed when only ggml-medium is present")
         XCTAssertTrue(try XCTUnwrap(mediumEnRow?.canDownload), "ggml-medium.en must remain downloadable")
     }
+}
+
+private final class StubPreferenceManagedModel: ManagedModel, @unchecked Sendable {
+    let id: String
+    let displayName: String
+    let isAvailable: Bool
+    let installState: ManagedModelInstallState
+
+    init(
+        id: String,
+        displayName: String,
+        isAvailable: Bool = true,
+        state: ManagedModelInstallState
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.isAvailable = isAvailable
+        installState = state
+    }
+
+    func prepare(progressHandler _: ModelPreparationProgressHandler?) async throws {}
+    func delete() async throws {}
 }

@@ -12,14 +12,15 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 
     private let actions: Actions
     private let termField = NSTextField()
-    private let addButton = NSButton(title: "Add Term", target: nil, action: nil)
     private let searchField = NSSearchField()
     private let tableView = DeleteKeyTableView()
     private let stateView = NSView()
     private var workspaceGroup: NSView?
+    private var listHeightConstraint: NSLayoutConstraint?
+    private var actionBarView: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
-    private let resetButton = NSButton(title: "Reset Vocabulary", target: nil, action: nil)
+    private let resetButton = NSButton(title: "Reset Dictionary", target: nil, action: nil)
     private let editButton = NSButton(title: "Edit", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete", target: nil, action: nil)
     private var terms: [VocabularyTerm] = []
@@ -41,6 +42,10 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 
     var usesGroupedWorkspace: Bool {
         workspaceGroup is PreferencesBackgroundView
+    }
+
+    var usesPinnedActionBar: Bool {
+        actionBarView is PreferencesPinnedActionBarView
     }
 
     init(actions: Actions) {
@@ -78,15 +83,20 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         guard visibleTerms.indices.contains(row) else { return nil }
         let cell = NSTableCellView()
         let label = NSTextField(labelWithString: visibleTerms[row].value)
-        label.font = .systemFont(ofSize: 13)
+        label.font = .systemFont(ofSize: 14)
+        label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: PreferencesPageSupport.rowInset),
+            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -PreferencesPageSupport.rowInset),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
+    }
+
+    func tableView(_: NSTableView, rowViewForRow _: Int) -> NSTableRowView? {
+        PreferencesSelectionRowView()
     }
 
     func tableViewSelectionDidChange(_: Notification) {
@@ -102,26 +112,25 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         // with the rounded search field and list group below it. The rounded bezel
         // gives the input the same soft corners as everything around it.
         termField.bezelStyle = .roundedBezel
-        PreferencesPageSupport.configureSecondaryButton(addButton)
-        addButton.bezelColor = .controlAccentColor
-        addButton.target = self
-        addButton.action = #selector(addTerm(_:))
-        let addRow = NSStackView(views: [termField, addButton])
-        addRow.orientation = .horizontal
-        addRow.spacing = 8
+        termField.target = self
+        termField.action = #selector(addTerm(_:))
 
-        searchField.placeholderString = "Search vocabulary"
+        searchField.placeholderString = "Search dictionary"
         searchField.delegate = self
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("term"))
         column.title = "Preferred Terms"
         column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 32
+        tableView.rowHeight = 40
+        // `.plain` drops the automatic source-list inset so term text starts at the shared
+        // row grid instead of ~17pt further right than every other page.
+        tableView.style = .plain
         tableView.backgroundColor = .clear
         tableView.intercellSpacing = .zero
         tableView.gridStyleMask = .solidHorizontalGridLineMask
-        tableView.gridColor = .separatorColor.withAlphaComponent(0.45)
+        tableView.gridColor = PreferencesPageSupport.hairlineColor
+        tableView.selectionHighlightStyle = .regular
         tableView.allowsMultipleSelection = true
         tableView.dataSource = self
         tableView.delegate = self
@@ -149,8 +158,9 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
             stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
         ])
 
-        let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
+        let (workspace, listHeight) = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
         workspaceGroup = workspace
+        listHeightConstraint = listHeight
 
         PreferencesPageSupport.configureSecondaryButton(editButton)
         PreferencesPageSupport.configureSecondaryButton(deleteButton)
@@ -159,26 +169,29 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         editButton.action = #selector(editSelected(_:))
         deleteButton.target = self
         deleteButton.action = #selector(deleteSelected(_:))
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(leading: [editButton], trailing: [deleteButton])
+        actionBarView = actionBar
         let page = PreferencesPageSupport.makePage(
-            title: "Vocabulary",
-            description: "Preferred names, terms, and phrases that help Whisper recognize your language.",
+            title: "Dictionary",
+            description: "Preferred terms for names and phrases.",
             content: [
-                addRow,
+                termField,
                 searchField,
                 workspace,
-                PreferencesPageSupport.makeActionRow(buttons: [editButton, deleteButton]),
+                actionBar,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
     }
 
-    @objc private func addTerm(_: NSButton) {
+    @objc private func addTerm(_: Any) {
         let value = termField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
-        addButton.isEnabled = false
+        termField.isEnabled = false
         actions.save(nil, value, value) { [weak self] result in
-            self?.addButton.isEnabled = true
-            if case .success = result { self?.termField.stringValue = "" }
+            guard let self else { return }
+            termField.isEnabled = state != .unavailable
+            if case .success = result { termField.stringValue = "" }
             if case let .failure(error) = result { NSAlert(error: error).runModal() }
         }
     }
@@ -193,13 +206,26 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         tableView.selectRowIndexes(IndexSet(visibleTerms.indices.filter { selectedValues.contains(visibleTerms[$0].value) }), byExtendingSelection: false)
         updateState()
         updateActionAvailability()
+        updateListHeight()
+    }
+
+    /// Hug the list to its content so the framed region ends just under the last term (or the
+    /// empty-state message) rather than stretching a mostly-empty box.
+    private func updateListHeight() {
+        let contentHeight: CGFloat = state == .entries
+            ? CGFloat(visibleTerms.count) * tableView.rowHeight + 2
+            : 150
+        listHeightConstraint?.constant = min(
+            PreferencesPageSupport.listMaxHeight,
+            max(PreferencesPageSupport.listMinHeight, contentHeight)
+        )
     }
 
     private func updateState() {
         if loadErrorDescription != nil {
             state = .unavailable
-            stateTitle.stringValue = "Vocabulary unavailable"
-            stateDetail.stringValue = "Scrawl could not read the saved vocabulary file."
+            stateTitle.stringValue = "Dictionary unavailable"
+            stateDetail.stringValue = "Scrawl could not read the saved dictionary file."
         } else if terms.isEmpty {
             state = .empty
             stateTitle.stringValue = "No preferred terms yet"
@@ -215,7 +241,6 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         stateView.isHidden = state == .entries
         tableView.enclosingScrollView?.isHidden = state != .entries
         termField.isEnabled = state != .unavailable
-        addButton.isEnabled = state != .unavailable
         searchField.isEnabled = state != .unavailable
     }
 
@@ -246,7 +271,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
     private func showEditor(original: String) {
         guard let window else { return }
         let field = NSTextField(string: original)
-        field.bezelStyle = .roundedBezel // Match the rounded input on the Vocabulary page.
+        field.bezelStyle = .roundedBezel
         let cancel = NSButton(title: "Cancel", target: nil, action: nil)
         let save = NSButton(title: "Save", target: nil, action: nil)
         save.keyEquivalent = "\r"

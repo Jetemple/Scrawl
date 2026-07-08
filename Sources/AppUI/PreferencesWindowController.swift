@@ -4,7 +4,29 @@ import Permissions
 import SettingsStore
 import TranscriptHistoryStore
 
-final class PreferencesWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
+/// Hosts a preferences page NSView inside a view controller so `NSTabViewController`
+/// can own it. Window sizing is handled by `PreferencesWindowController`; child
+/// controllers deliberately avoid preferred-size hints so tab switches do not
+/// reset the user's current window height.
+private final class PreferencesPageViewController: NSViewController {
+    private let pageView: NSView
+
+    init(pageView: NSView) {
+        self.pageView = pageView
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = pageView
+    }
+}
+
+final class PreferencesWindowController: NSWindowController {
     struct Actions {
         let selectModel: (String) -> Void
         let downloadModel: (DownloadableModel) -> Void
@@ -29,7 +51,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let openProjectPage: () -> Void
     }
 
-    struct Snapshot {
+    struct Snapshot: Equatable {
         let settings: AppSettings
         let downloadableModels: [DownloadableModel]
         let modelRows: [PreferencesModelRow]
@@ -46,21 +68,20 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         let launchAtLoginEnabled: Bool
     }
 
+    /// One tab in the native toolbar-tab window. Raw value is the tab index.
     enum Section: Int, CaseIterable {
         case general
         case models
-        case keyboard
-        case history
         case dictionary
+        case history
         case about
 
         var title: String {
             switch self {
             case .general: "General"
             case .models: "Models"
-            case .keyboard: "Keyboard"
+            case .dictionary: "Dictionary"
             case .history: "History"
-            case .dictionary: "Vocabulary"
             case .about: "About"
             }
         }
@@ -69,9 +90,8 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             switch self {
             case .general: "gearshape"
             case .models: "cpu"
-            case .keyboard: "keyboard"
-            case .history: "clock.arrow.circlepath"
             case .dictionary: "text.book.closed"
+            case .history: "clock.arrow.circlepath"
             case .about: "info.circle"
             }
         }
@@ -79,44 +99,52 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     private let generalView: PreferencesGeneralView
     private let modelsView: PreferencesModelsView
-    private let keyboardView: PreferencesKeyboardView
     private let historyView: PreferencesHistoryView
     private let dictionaryView: PreferencesDictionaryView
     private let aboutView: PreferencesAboutView
-    private let sidebarTable = NSTableView()
-    private let contentContainer = PreferencesPageSupport.makeContentBackground()
+    private let tabController = NSTabViewController()
     private var sectionViews: [Section: NSView] = [:]
-    private var selectedSection = Section.general
+    private var tabSelectionObservation: NSKeyValueObservation?
     private var didCenterWindow = false
+    /// Refreshes fire for many app events (hotkey ticks, permission polls, history
+    /// actions). An identical snapshot would still pay four page updates plus a
+    /// `fittingSize` layout measurement, so skip it wholesale.
+    /// Invariant: anything that changes a page's height or content must be represented
+    /// in a Snapshot field — state outside Snapshot will never trigger a re-apply or resize.
+    private var lastAppliedSnapshot: Snapshot?
+    /// Test seam mirroring `PreferencesModelsView.listRebuildCount`.
+    private(set) var snapshotApplyCount = 0
 
     var visibleSection: Section {
-        selectedSection
+        Section(rawValue: tabController.selectedTabViewItemIndex) ?? .general
     }
 
     var isVisibleSectionWithinContentBounds: Bool {
-        guard let view = sectionViews[selectedSection] else { return false }
-        return contentContainer.bounds.contains(view.frame)
+        sectionViews[visibleSection] != nil
     }
 
     var visibleSectionHasAmbiguousLayout: Bool {
-        sectionViews[selectedSection]?.hasAmbiguousLayout ?? true
+        sectionViews[visibleSection]?.hasAmbiguousLayout ?? true
     }
 
     var isVisibleSectionCriticalContentWithinBounds: Bool {
-        switch selectedSection {
+        switch visibleSection {
         case .models:
             modelsView.isCriticalContentWithinBounds
         case .history:
             historyView.areActionControlsWithinBounds
-        case .dictionary:
-            true
         default:
             true
         }
     }
 
-    var hasDraggableSidebarDivider: Bool {
-        window?.contentView?.containsSplitView ?? false
+    /// SF Symbol names shown on the toolbar tabs, in tab order.
+    var tabSymbolNames: [String] {
+        Section.allCases.map(\.symbolName)
+    }
+
+    var usesToolbarTabs: Bool {
+        tabController.tabStyle == .toolbar
     }
 
     var historyState: PreferencesHistoryView.State {
@@ -147,6 +175,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         historyView.usesGroupedWorkspace
     }
 
+    var historyUsesPinnedActionBar: Bool {
+        historyView.usesPinnedActionBar
+    }
+
     var historyRowsAreTranscriptFirst: Bool {
         historyView.visibleRowsAreTranscriptFirst
     }
@@ -161,6 +193,10 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     var dictionaryUsesGroupedWorkspace: Bool {
         dictionaryView.usesGroupedWorkspace
+    }
+
+    var dictionaryUsesPinnedActionBar: Bool {
+        dictionaryView.usesPinnedActionBar
     }
 
     var modelsListIsTopAnchored: Bool {
@@ -193,6 +229,7 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
 
     init(actions: Actions) {
         generalView = PreferencesGeneralView(
+            setHotkey: actions.setHotkey,
             requestMicrophone: actions.requestMicrophone,
             requestAccessibility: actions.requestAccessibility,
             setModelOffloadPolicy: actions.setModelOffloadPolicy,
@@ -208,7 +245,6 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             revealModelsFolder: actions.revealModelsFolder,
             openModelSource: actions.openModelSource
         )
-        keyboardView = PreferencesKeyboardView(setHotkey: actions.setHotkey)
         historyView = PreferencesHistoryView(actions: .init(
             setEnabled: actions.setTranscriptHistoryEnabled,
             copy: actions.copyTranscript,
@@ -222,20 +258,24 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         ))
         aboutView = PreferencesAboutView(openProjectPage: actions.openProjectPage)
 
+        // Fixed-size window: every page has a designed size (compact General, wider
+        // workbench pages), so user resizing only creates layouts nobody designed.
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 460),
-            styleMask: [.titled, .closable, .resizable],
+            // Nominal size; the post-setup resize snaps to the General page's fitted size.
+            contentRect: NSRect(x: 0, y: 0, width: Section.general.windowContentWidth, height: 512),
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Scrawl"
+        window.title = "Scrawl Preferences"
         window.isReleasedWhenClosed = false
-        window.titlebarSeparatorStyle = .none
-        window.minSize = NSSize(width: 620, height: 400)
         window.identifier = NSUserInterfaceItemIdentifier("ScrawlPreferencesWindow")
 
         super.init(window: window)
-        window.contentView = makeContentView()
+        setupTabs()
+        // Assigning contentViewController lets AppKit shrink the window to the tab
+        // view's fitting size; snap back to the selected section's designed size.
+        resizeWindowForSelectedSection()
     }
 
     @available(*, unavailable)
@@ -254,6 +294,12 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
     }
 
     func update(snapshot: Snapshot) {
+        guard snapshot != lastAppliedSnapshot else {
+            syncControlState(from: snapshot)
+            return
+        }
+        lastAppliedSnapshot = snapshot
+        snapshotApplyCount += 1
         generalView.update(
             settings: snapshot.settings,
             microphoneStatus: snapshot.microphoneStatus,
@@ -266,7 +312,6 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             downloadableModels: snapshot.downloadableModels,
             isDownloadInProgress: snapshot.isModelDownloadInProgress
         )
-        keyboardView.update(hotkey: snapshot.settings.hotkey, isCapturing: snapshot.isCapturingHotkey)
         historyView.update(
             records: snapshot.transcriptHistory,
             isEnabled: snapshot.settings.isTranscriptHistoryEnabled,
@@ -276,50 +321,24 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
             entries: snapshot.dictionaryEntries,
             loadErrorDescription: snapshot.dictionaryLoadErrorDescription
         )
+        // Content changes move a page's natural height (lists hug their rows); the
+        // user can't resize the fixed window, so it follows the visible page.
+        resizeWindowForSelectedSection()
+    }
+
+    private func syncControlState(from snapshot: Snapshot) {
+        historyView.syncToggleState(isEnabled: snapshot.settings.isTranscriptHistoryEnabled)
     }
 
     func selectGeneralModelOffloadPolicy(_ policy: ModelOffloadPolicy) {
         generalView.selectModelOffloadPolicy(policy)
     }
 
-    func numberOfRows(in _: NSTableView) -> Int {
-        Section.allCases.count
-    }
-
-    func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
-        guard let section = Section(rawValue: row) else { return nil }
-        let cell = NSTableCellView()
-        let imageView = NSImageView(image: NSImage(systemSymbolName: section.symbolName, accessibilityDescription: nil) ?? NSImage())
-        let label = NSTextField(labelWithString: section.title)
-        label.font = .systemFont(ofSize: 13)
-        imageView.symbolConfiguration = .init(pointSize: 13, weight: .regular)
-        imageView.contentTintColor = .secondaryLabelColor
-
-        let stack = NSStackView(views: [imageView, label])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(stack)
-        NSLayoutConstraint.activate([
-            imageView.widthAnchor.constraint(equalToConstant: 16),
-            stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -8),
-            stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-        ])
-        return cell
-    }
-
-    func tableViewSelectionDidChange(_: Notification) {
-        guard let section = Section(rawValue: sidebarTable.selectedRow) else { return }
-        selectedSection = section
-        showSelectedSection()
-    }
-
     func selectSection(_ section: Section) {
-        selectedSection = section
-        sidebarTable.selectRowIndexes(IndexSet(integer: section.rawValue), byExtendingSelection: false)
-        showSelectedSection()
+        // The tab-selection observation resizes the window synchronously; force
+        // layout after it so callers (tests, restoration) see settled frames.
+        tabController.selectedTabViewItemIndex = section.rawValue
+        window?.contentView?.layoutSubtreeIfNeeded()
     }
 
     func setHistorySearchQuery(_ query: String) {
@@ -330,99 +349,80 @@ final class PreferencesWindowController: NSWindowController, NSTableViewDataSour
         dictionaryView.setSearchQuery(query)
     }
 
-    private func makeContentView() -> NSView {
+    private func setupTabs() {
         sectionViews = [
             .general: generalView,
             .models: modelsView,
-            .keyboard: keyboardView,
-            .history: historyView,
             .dictionary: dictionaryView,
+            .history: historyView,
             .about: aboutView,
         ]
 
-        let sidebar = makeSidebar()
-        contentContainer.translatesAutoresizingMaskIntoConstraints = false
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-
-        for (section, view) in sectionViews {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            view.isHidden = section != selectedSection
-            contentContainer.addSubview(view)
-            NSLayoutConstraint.activate([
-                view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
-                view.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
-                view.topAnchor.constraint(equalTo: contentContainer.topAnchor),
-                view.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
-            ])
+        tabController.tabStyle = .toolbar
+        // No crossfade: the window snaps to each page's size, and fading the
+        // outgoing page inside the new frame stretches it mid-fade. Instant swap.
+        tabController.transitionOptions = []
+        for section in Section.allCases {
+            guard let view = sectionViews[section] else { continue }
+            let pageController = PreferencesPageViewController(pageView: view)
+            let item = NSTabViewItem(viewController: pageController)
+            item.label = section.title
+            item.image = NSImage(systemSymbolName: section.symbolName, accessibilityDescription: section.title)
+            tabController.addTabViewItem(item)
         }
 
-        let root = NSView()
-        sidebar.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(sidebar)
-        root.addSubview(divider)
-        root.addSubview(contentContainer)
-        NSLayoutConstraint.activate([
-            sidebar.widthAnchor.constraint(equalToConstant: 150),
-            sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            sidebar.topAnchor.constraint(equalTo: root.topAnchor),
-            sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            divider.widthAnchor.constraint(equalToConstant: 1),
-            divider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            divider.topAnchor.constraint(equalTo: root.topAnchor),
-            divider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            contentContainer.leadingAnchor.constraint(equalTo: divider.trailingAnchor),
-            contentContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            contentContainer.topAnchor.constraint(equalTo: root.topAnchor),
-            contentContainer.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-        ])
-        return root
-    }
-
-    private func makeSidebar() -> NSView {
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("section"))
-        column.resizingMask = .autoresizingMask
-        sidebarTable.addTableColumn(column)
-        sidebarTable.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        sidebarTable.headerView = nil
-        sidebarTable.rowHeight = 30
-        sidebarTable.style = .sourceList
-        sidebarTable.backgroundColor = .clear
-        sidebarTable.dataSource = self
-        sidebarTable.delegate = self
-
-        let scrollView = NSScrollView()
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = false
-        scrollView.documentView = sidebarTable
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-        let sidebar = NSVisualEffectView()
-        sidebar.material = .sidebar
-        sidebar.blendingMode = .behindWindow
-        sidebar.state = .active
-        sidebar.addSubview(scrollView)
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 12),
-            scrollView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
-        ])
-
-        sidebarTable.selectRowIndexes(IndexSet(integer: selectedSection.rawValue), byExtendingSelection: false)
-        return sidebar
-    }
-
-    private func showSelectedSection() {
-        for (section, view) in sectionViews {
-            view.isHidden = section != selectedSection
+        window?.contentViewController = tabController
+        tabSelectionObservation = tabController.observe(\.selectedTabViewItemIndex, options: [.new]) { [weak self] _, _ in
+            guard let self else { return }
+            resizeWindowForSelectedSection()
+            window?.title = "Scrawl Preferences"
         }
+        tabController.selectedTabViewItemIndex = Section.general.rawValue
+        // NSTabViewController can push the selected page's title onto the window; keep our own.
+        window?.title = "Scrawl Preferences"
+    }
+
+    /// Classic macOS preferences sizing: the user cannot resize the window, so each
+    /// page resizes it instead — designed width per section, height fitted to that
+    /// page's content (About stays small, list pages take the room their rows need).
+    ///
+    /// The resize is deliberately instant. Animating the frame re-runs Auto Layout
+    /// on these table-heavy pages at every animation tick, which overruns the frame
+    /// budget and reads as stutter — both eased animator groups and the legacy
+    /// stepped resize were tried and looked worse than a clean snap.
+    private func resizeWindowForSelectedSection() {
+        guard let window, let contentView = window.contentView else { return }
+        guard let pageView = sectionViews[visibleSection] else { return }
+        let contentSize = NSSize(
+            width: visibleSection.windowContentWidth,
+            height: max(pageView.fittingSize.height, 260)
+        )
+        let currentSize = contentView.bounds.size
+        guard abs(currentSize.width - contentSize.width) > 0.5 ||
+            abs(currentSize.height - contentSize.height) > 0.5
+        else {
+            return
+        }
+
+        let frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+        let currentFrame = window.frame
+        let targetFrame = NSRect(
+            x: currentFrame.midX - frameSize.width / 2,
+            y: currentFrame.maxY - frameSize.height,
+            width: frameSize.width,
+            height: frameSize.height
+        )
+        window.setFrame(targetFrame, display: true)
     }
 }
 
-private extension NSView {
-    var containsSplitView: Bool {
-        self is NSSplitView || subviews.contains(where: \.containsSplitView)
+private extension PreferencesWindowController.Section {
+    var windowContentWidth: CGFloat {
+        switch self {
+        case .general:
+            560
+        case .models, .dictionary, .history, .about:
+            740
+        }
     }
 }

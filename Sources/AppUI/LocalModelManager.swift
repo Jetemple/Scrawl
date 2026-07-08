@@ -1,4 +1,5 @@
 import Foundation
+import TranscriptionCore
 
 struct DownloadableModel: Equatable, Sendable {
     let id: String
@@ -25,7 +26,7 @@ private enum ModelDownloadError: LocalizedError {
             return "Download failed: server returned non-model data from \(url.host ?? url.absoluteString)."
         case let .allSourcesFailed(modelID, failures):
             let details = failures.joined(separator: " | ")
-            return "Could not download \(modelID). \(details)"
+            return "Could not download \(PreferencesModelState.displayName(forModelID: modelID)). \(details)"
         case .downloadAlreadyInProgress:
             return "Another model download is already in progress."
         }
@@ -240,8 +241,37 @@ final class LocalModelManager: @unchecked Sendable {
         return !targetFamilies.isDisjoint(with: installedFamilies)
     }
 
+    func resolvedInstalledModelID(for downloadableModel: DownloadableModel) -> String? {
+        Self.resolvedInstalledModelID(for: downloadableModel, inInstalledIDs: installedModelIDs())
+    }
+
+    /// Snapshot-based variant: resolves against an already-captured directory listing so
+    /// callers iterating many models pay for one `contentsOfDirectory`, not one per model.
+    static func resolvedInstalledModelID(
+        for downloadableModel: DownloadableModel,
+        inInstalledIDs installedIDs: [String]
+    ) -> String? {
+        if installedIDs.contains(downloadableModel.id) {
+            return downloadableModel.id
+        }
+
+        let targetFamilies: Set<String> = [
+            PreferencesModelState.canonicalFamily(downloadableModel.id),
+            PreferencesModelState.canonicalFamily(downloadableModel.fileName),
+        ]
+
+        return installedIDs
+            .sorted()
+            .first { targetFamilies.contains(PreferencesModelState.canonicalFamily($0)) }
+    }
+
     func modelURL(id: String) -> URL {
         modelsDirectoryURL.appendingPathComponent("\(id).bin")
+    }
+
+    func modelSizeBytes(id: String) -> Int64? {
+        let url = modelURL(id: id)
+        return Self.fileSizeBytes(at: url)
     }
 
     func deleteModel(id: String) throws {
@@ -577,6 +607,21 @@ final class LocalModelManager: @unchecked Sendable {
     }
 }
 
+private extension LocalModelManager {
+    static func fileSizeBytes(at url: URL) -> Int64? {
+        guard let rawSize = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] else {
+            return nil
+        }
+        if let size = rawSize as? Int64 {
+            return size
+        }
+        if let size = rawSize as? NSNumber {
+            return size.int64Value
+        }
+        return nil
+    }
+}
+
 private extension NSLock {
     func withLock<Result>(_ body: () throws -> Result) rethrows -> Result {
         lock()
@@ -586,32 +631,34 @@ private extension NSLock {
 }
 
 extension LocalModelManager {
+    static let parakeetDisplayName = "Parakeet v3"
+
     static let downloadableModels: [DownloadableModel] = [
         DownloadableModel(
             id: "ggml-tiny.en",
             fileName: "ggml-tiny.en.bin",
-            displayName: "tiny.en — fast, 75 MB",
+            displayName: PreferencesModelState.displayName(forModelID: "ggml-tiny.en"),
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin")!,
             sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f"
         ),
         DownloadableModel(
             id: "ggml-small.en",
             fileName: "ggml-small.en.bin",
-            displayName: "small.en — recommended, 466 MB",
+            displayName: PreferencesModelState.displayName(forModelID: "ggml-small.en"),
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin")!,
             sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d"
         ),
         DownloadableModel(
             id: "ggml-medium",
             fileName: "ggml-medium.bin",
-            displayName: "medium — multilingual, 1.5 GB",
+            displayName: PreferencesModelState.displayName(forModelID: "ggml-medium"),
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin")!,
             sha256: "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208"
         ),
         DownloadableModel(
             id: "ggml-large-v3-turbo",
             fileName: "ggml-large-v3-turbo.bin",
-            displayName: "large-v3-turbo — highest accuracy, 1.6 GB",
+            displayName: PreferencesModelState.displayName(forModelID: "ggml-large-v3-turbo"),
             url: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin")!,
             sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
         ),

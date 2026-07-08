@@ -50,12 +50,34 @@ public struct TranscriptionResult: Sendable {
     }
 }
 
+public enum ModelPreparationPhase: Sendable, Equatable {
+    case checkingCache
+    case downloading
+    case optimizing
+}
+
+public struct ModelPreparationProgress: Sendable, Equatable {
+    public var fractionCompleted: Double?
+    public var phase: ModelPreparationPhase
+
+    public init(fractionCompleted: Double?, phase: ModelPreparationPhase) {
+        self.fractionCompleted = fractionCompleted
+        self.phase = phase
+    }
+}
+
+public typealias ModelPreparationProgressHandler = @Sendable (ModelPreparationProgress) -> Void
+
 public enum TranscriptionError: Error {
     case providerUnavailable
     case modelMissing(String)
     case noSpeechDetected
     case executionFailed(String)
     case timedOut(seconds: Int)
+}
+
+public enum TranscriptionModelID {
+    public static let parakeetV3 = "parakeet-v3"
 }
 
 extension TranscriptionError: LocalizedError {
@@ -81,6 +103,26 @@ public protocol TranscriptionProvider: Sendable {
 
 public protocol ModelRetainingTranscriptionProvider: TranscriptionProvider {
     func warmUp(modelID: String, language: String) async
+    func prepareModel(
+        modelID: String,
+        language: String,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws
     func setIdleOffloadSeconds(_ seconds: TimeInterval?) async
+    func shutdown(modelID: String) async
     func shutdown() async
+}
+
+public extension ModelRetainingTranscriptionProvider {
+    func prepareModel(
+        modelID: String,
+        language: String,
+        progressHandler _: ModelPreparationProgressHandler? = nil
+    ) async throws {
+        await warmUp(modelID: modelID, language: language)
+    }
+
+    func shutdown(modelID _: String) async {
+        await shutdown()
+    }
 }

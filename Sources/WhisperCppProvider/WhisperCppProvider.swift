@@ -127,6 +127,10 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
         await warmServer.setIdleOffloadSeconds(seconds)
     }
 
+    public func shutdown(modelID _: String) async {
+        await warmServer.shutdown()
+    }
+
     public func shutdown() async {
         await warmServer.shutdown()
     }

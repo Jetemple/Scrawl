@@ -3,16 +3,21 @@ import Permissions
 import SettingsStore
 
 final class PreferencesGeneralView: NSView {
-    private let readinessLabel = NSTextField(labelWithString: "")
-    private let modelLabel = NSTextField(labelWithString: "")
+    private static let hotkeyHelpLines = [
+        "Press and hold: Record until release.",
+        "Double-tap: Record until you tap again.",
+    ]
+
     private let hotkeyLabel = NSTextField(labelWithString: "")
     private let microphoneLabel = NSTextField(labelWithString: "")
     private let accessibilityLabel = NSTextField(labelWithString: "")
     private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
     private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
+    private let hotkeyButton = NSButton(title: "Set Hotkey…", target: nil, action: nil)
     private let offloadPopup = NSPopUpButton()
     private let clipboardHistoryCheckbox = NSButton(checkboxWithTitle: "Keep transcripts in clipboard history", target: nil, action: nil)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
+    private let setHotkey: () -> Void
     private let requestMicrophone: () -> Void
     private let requestAccessibility: () -> Void
     private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
@@ -29,12 +34,14 @@ final class PreferencesGeneralView: NSView {
     }
 
     init(
+        setHotkey: @escaping () -> Void,
         requestMicrophone: @escaping () -> Void,
         requestAccessibility: @escaping () -> Void,
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void,
         setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
         setLaunchAtLogin: @escaping (Bool) -> Void = { _ in }
     ) {
+        self.setHotkey = setHotkey
         self.requestMicrophone = requestMicrophone
         self.requestAccessibility = requestAccessibility
         self.setModelOffloadPolicy = setModelOffloadPolicy
@@ -44,11 +51,17 @@ final class PreferencesGeneralView: NSView {
 
         PreferencesPageSupport.configureSecondaryButton(microphoneButton)
         PreferencesPageSupport.configureSecondaryButton(accessibilityButton)
+        PreferencesPageSupport.configureSecondaryButton(hotkeyButton)
 
         microphoneButton.target = self
         microphoneButton.action = #selector(requestMicrophoneAccess(_:))
         accessibilityButton.target = self
         accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
+        hotkeyButton.target = self
+        hotkeyButton.action = #selector(setHotkeyAction(_:))
+        let hotkeyUsageHint = "Hold to dictate. Double-tap to lock recording."
+        hotkeyButton.toolTip = hotkeyUsageHint
+        hotkeyLabel.toolTip = hotkeyUsageHint
         offloadPopup.addItems(withTitles: ModelOffloadPolicy.allCases.map(\.displayName))
         offloadPopup.controlSize = .small
         offloadPopup.target = self
@@ -57,52 +70,39 @@ final class PreferencesGeneralView: NSView {
         clipboardHistoryCheckbox.target = self
         clipboardHistoryCheckbox.action = #selector(clipboardHistoryChanged(_:))
         clipboardHistoryCheckbox.font = .systemFont(ofSize: 13)
-
-        let clipboardHistorySubtitle = NSTextField(labelWithString: "Allows clipboard managers to save your dictations")
-        clipboardHistorySubtitle.font = .systemFont(ofSize: 11)
-        clipboardHistorySubtitle.textColor = .secondaryLabelColor
-
-        let clipboardGroup = NSStackView(views: [clipboardHistoryCheckbox, clipboardHistorySubtitle])
-        clipboardGroup.orientation = .vertical
-        clipboardGroup.alignment = .leading
-        clipboardGroup.spacing = 3
+        clipboardHistoryCheckbox.toolTip = "Allows clipboard managers to save your dictations."
+        let clipboardRow = Self.makeCompactCheckboxRow(clipboardHistoryCheckbox)
 
         launchAtLoginCheckbox.target = self
         launchAtLoginCheckbox.action = #selector(launchAtLoginChanged(_:))
         launchAtLoginCheckbox.font = .systemFont(ofSize: 13)
-
-        let launchAtLoginSubtitle = NSTextField(labelWithString: "Start Scrawl automatically when you sign in.")
-        launchAtLoginSubtitle.font = .systemFont(ofSize: 11)
-        launchAtLoginSubtitle.textColor = .secondaryLabelColor
-
-        let launchAtLoginGroup = NSStackView(views: [launchAtLoginCheckbox, launchAtLoginSubtitle])
-        launchAtLoginGroup.orientation = .vertical
-        launchAtLoginGroup.alignment = .leading
-        launchAtLoginGroup.spacing = 3
+        launchAtLoginCheckbox.toolTip = "Start Scrawl automatically when you sign in."
+        let launchAtLoginRow = Self.makeCompactCheckboxRow(launchAtLoginCheckbox)
 
         let page = PreferencesPageSupport.makePage(
             title: "General",
-            description: "Scrawl readiness and current transcription setup.",
+            description: "Hotkey, permissions, and defaults.",
             content: [
-                PreferencesPageSupport.makeGroup(rows: [
-                    PreferencesPageSupport.makeSettingRow(title: "Readiness", detail: readinessLabel),
-                    PreferencesPageSupport.makeSettingRow(title: "Model", detail: modelLabel),
-                    PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel),
+                PreferencesPageSupport.makeGroup(header: "Transcription", rows: [
                     PreferencesPageSupport.makeSettingRow(
+                        title: "Hotkey",
+                        detail: hotkeyLabel,
+                        action: hotkeyButton,
+                        helpLines: Self.hotkeyHelpLines
+                    ),
+                    PreferencesPageSupport.makeSettingControlRow(
                         title: "Offload model",
-                        // The popup value (Immediately / 1 minute / … / Never) already states
-                        // the timing, so no static detail — a fixed "After inactivity" label
-                        // contradicted the "Immediately" and "Never" choices.
-                        detail: NSTextField(labelWithString: ""),
-                        action: offloadPopup
+                        control: offloadPopup
                     ),
                 ]),
-                PreferencesPageSupport.makeGroup(rows: [
+                PreferencesPageSupport.makeGroup(header: "Permissions", rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
                     PreferencesPageSupport.makeSettingRow(title: "Accessibility", detail: accessibilityLabel, action: accessibilityButton),
                 ]),
-                clipboardGroup,
-                launchAtLoginGroup,
+                PreferencesPageSupport.makeGroup(header: "Options", rows: [
+                    clipboardRow,
+                    launchAtLoginRow,
+                ]),
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
@@ -120,14 +120,10 @@ final class PreferencesGeneralView: NSView {
         isCapturingHotkey: Bool,
         launchAtLoginEnabled: Bool
     ) {
-        modelLabel.stringValue = PreferencesModelState.displayName(forInstalledModelID: settings.modelID)
         hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input..." : settings.hotkey.displayName
+        hotkeyButton.title = isCapturingHotkey ? "Cancel Capture" : "Set Hotkey…"
         updatePermissionLabel(microphoneLabel, status: microphoneStatus)
         updatePermissionLabel(accessibilityLabel, status: accessibilityStatus)
-
-        let isReady = microphoneStatus == .authorized && accessibilityStatus == .authorized
-        readinessLabel.stringValue = isReady ? "Ready to transcribe" : "Permissions required"
-        readinessLabel.textColor = isReady ? .systemGreen : .secondaryLabelColor
 
         microphoneButton.isHidden = microphoneStatus == .authorized
         accessibilityButton.isHidden = accessibilityStatus == .authorized
@@ -145,14 +141,39 @@ final class PreferencesGeneralView: NSView {
         switch status {
         case .authorized:
             label.stringValue = "Authorized"
-            label.textColor = .systemGreen
+            label.textColor = Self.authorizedStatusColor
         case .denied:
             label.stringValue = "Denied"
-            label.textColor = .systemRed
+            label.textColor = PreferencesPageSupport.accentColor
         case .notDetermined:
             label.stringValue = "Not Requested"
             label.textColor = .secondaryLabelColor
         }
+    }
+
+    private static var authorizedStatusColor: NSColor {
+        NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return NSColor(srgbRed: 0.42, green: 0.78, blue: 0.48, alpha: 1)
+            }
+            return NSColor(srgbRed: 0.14, green: 0.48, blue: 0.24, alpha: 1)
+        }
+    }
+
+    private static func makeCompactCheckboxRow(_ checkbox: NSButton) -> NSView {
+        checkbox.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [checkbox, NSView()])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 0
+        row.edgeInsets = NSEdgeInsets(
+            top: 8,
+            left: PreferencesPageSupport.rowInset,
+            bottom: 8,
+            right: PreferencesPageSupport.rowInset
+        )
+        return row
     }
 
     var isClipboardHistoryEnabled: Bool {
@@ -161,6 +182,10 @@ final class PreferencesGeneralView: NSView {
 
     var isLaunchAtLoginEnabled: Bool {
         launchAtLoginCheckbox.state == .on
+    }
+
+    @objc private func setHotkeyAction(_: NSButton) {
+        setHotkey()
     }
 
     @objc private func requestMicrophoneAccess(_: NSButton) {

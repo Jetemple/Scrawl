@@ -1,12 +1,14 @@
 PREFIX ?= $(HOME)/Applications
 BUILD_CONFIG ?= release
 BUILD_ARCHS ?=
+SNAPSHOT_DIR ?= /tmp/scrawl-models
+SNAPSHOT_PREFERENCES_DIR ?= /tmp/scrawl-preferences
 APP_NAME := Scrawl
 APP_BUNDLE := $(APP_NAME).app
 EXECUTABLE_TARGET := ScrawlApp
 SWIFT_ARCH_FLAGS := $(foreach arch,$(BUILD_ARCHS),--arch $(arch))
 
-.PHONY: build install uninstall clean test coverage lint format format-check run run-debug check-deps doctor
+.PHONY: build install uninstall clean test coverage lint format format-check run run-debug snapshots-models snapshots-preferences check-deps doctor
 
 check-deps:
 	@command -v swift >/dev/null 2>&1 || { echo "Error: swift is not installed. Install Xcode command line tools: xcode-select --install"; exit 1; }
@@ -51,6 +53,16 @@ run:
 
 run-debug:
 	./scripts/run-local.sh --debug
+
+snapshots-models:
+	rm -rf "$(SNAPSHOT_DIR)"
+	SCRAWL_SNAPSHOT_DIR="$(SNAPSHOT_DIR)" swift test --filter PreferencesModelsViewSnapshotTests
+	open "$(SNAPSHOT_DIR)"
+
+snapshots-preferences:
+	rm -rf "$(SNAPSHOT_PREFERENCES_DIR)"
+	SCRAWL_PREFERENCES_SNAPSHOT_DIR="$(SNAPSHOT_PREFERENCES_DIR)" swift test --filter PreferencesWindowSnapshotTests
+	open "$(SNAPSHOT_PREFERENCES_DIR)"
 
 install: build
 	SCRAWL_SKIP_BUILD=1 SCRAWL_BUILD_CONFIGURATION="$(BUILD_CONFIG)" SCRAWL_BUILD_ARCHS="$(BUILD_ARCHS)" ./scripts/install-app.sh "$(PREFIX)"

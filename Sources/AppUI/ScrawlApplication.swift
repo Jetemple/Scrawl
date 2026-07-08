@@ -82,6 +82,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private let runtime: AppRuntime
     private let modelManager: LocalModelManager
+    private lazy var modelCatalog = ModelCatalog(
+        manager: modelManager,
+        retainingProvider: runtime.whisperProvider as? any ModelRetainingTranscriptionProvider,
+        languageProvider: { [weak self] in
+            self?.runtime.settingsStore.load().language ?? "en"
+        },
+        preparationProgressProvider: { [weak self] in
+            guard let self, let text = parakeetPreparationState.modelRowProgressText else {
+                return nil
+            }
+            return ManagedModelPreparationProgress(displayText: text)
+        }
+    )
     private let loginItem: LoginItemControlling = SMAppServiceLoginItem()
     private lazy var transcriptHistoryCoordinator = TranscriptHistoryCoordinator(
         settingsStore: runtime.settingsStore,
@@ -128,6 +141,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var currentDownloadProgressText: String?
     private var modelDownloadGeneration: UUID?
     private var modelDownloadTask: Task<Void, Never>?
+    private var parakeetPreparationState = ParakeetPreparationState()
+    private var parakeetPreparationGeneration: UUID?
+    private var parakeetPreparationTask: Task<Void, Never>?
+    private var preparationRefreshGate = PreparationRefreshGate()
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
     private var historyActionPresentationPolicy = HistoryActionPresentationPolicy()
@@ -149,10 +166,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             TempFileSweeper.sweep(directory: tempDir)
         }
 
+        // The menu bar never shows for an accessory app, but key equivalents
+        // (⌘V/⌘C/⌘A/⌘W…) only work when a main menu defines them.
+        NSApplication.shared.mainMenu = MainMenuBuilder.make()
+
         setupStatusItem()
         observeWorkspaceActivations()
         cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
         setupHotkeyHandling()
+
+        // Feed real mic levels to the recording pill's waveform (nil when not capturing).
+        runtime.overlayController.levelProvider = { [audioCapture = runtime.audioCaptureService] in
+            audioCapture.currentAveragePower()
+        }
 
         do {
             try modelManager.ensureDirectory()
@@ -168,9 +194,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
         setStatus("Idle")
         updateStatusIcon()
+        startSelectedModelPreparationIfNeeded()
     }
 
     func applicationWillTerminate(_: Notification) {
+        parakeetPreparationTask?.cancel()
+        parakeetPreparationTask = nil
         if let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider {
             let shutdownComplete = DispatchSemaphore(value: 0)
             Task {
@@ -306,22 +335,33 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         )
     }
 
+    /// One user action (model select) used to funnel into three back-to-back
+    /// preferences rebuilds — the measured cause of the model-switch lag. All
+    /// refreshes route through this coalescer so a `batch` around an action
+    /// collapses them into a single rebuild.
+    private lazy var preferencesRefresh = CoalescedRefresh { [weak self] in
+        self?.performPreferencesWindowRefresh()
+    }
+
     private func refreshPreferencesWindow() {
+        preferencesRefresh.request()
+    }
+
+    private func performPreferencesWindowRefresh() {
         guard let preferencesWindowController else {
             return
         }
 
         let settings = runtime.settingsStore.load()
-        let installedModelIDs = modelManager.installedModelIDs()
-        let downloadableModels = LocalModelManager.downloadableModels
         let modelRows = PreferencesModelState.rows(
-            downloadableModels: downloadableModels,
-            installedModelIDs: installedModelIDs,
+            models: modelCatalog.availableModels,
             selectedModelID: settings.modelID,
+            defaultModelID: settings.defaultModelID,
             downloadingModelID: downloadingModelID,
             cancelledModelID: cancelledModelID,
             downloadProgressText: currentDownloadProgressText
         )
+        let downloadableModels = LocalModelManager.downloadableModels
 
         preferencesWindowController.update(
             snapshot: PreferencesWindowController.Snapshot(
@@ -715,14 +755,61 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func selectModel(id modelID: String) {
-        cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
-        mutateSettings {
-            $0.selectedModelID = modelID
-            if $0.defaultModelID.isEmpty {
-                $0.defaultModelID = modelID
+        // Selection fans out into settings mutation, menu refresh, and preparation
+        // start/cancel, each of which requests a preferences refresh; batch them so
+        // one click rebuilds the window exactly once.
+        preferencesRefresh.batch {
+            let shouldPrepareOnSelection = modelCatalog.preparesOnSelection(modelID: modelID)
+            let isInstalled = modelCatalog.isInstalled(modelID: modelID)
+            let settings = runtime.settingsStore.load()
+            let confirmation: ModelSelectionConfirmation = if ModelSelectionPlanner.requiresDownloadConfirmation(
+                preparesOnSelection: shouldPrepareOnSelection,
+                isInstalled: isInstalled
+            ) {
+                confirmParakeetModelDownload() ? .download : .cancel
+            } else {
+                .notRequired
+            }
+
+            switch ModelSelectionPlanner.outcome(
+                currentModelID: settings.modelID,
+                requestedModelID: modelID,
+                preparesOnSelection: shouldPrepareOnSelection,
+                isInstalled: isInstalled,
+                confirmation: confirmation
+            ) {
+            case .cancelled:
+                refreshPreferencesWindow()
+            case let .selected(plan):
+                cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
+                completeModelSelection(plan)
             }
         }
-        setStatus("Selected model: \(modelID)")
+    }
+
+    private func completeModelSelection(_ plan: ModelSelectionPlan) {
+        mutateSettings {
+            $0.selectedModelID = plan.modelID
+            if $0.defaultModelID.isEmpty {
+                $0.defaultModelID = plan.modelID
+            }
+        }
+        if plan.shouldPrepareOnSelection {
+            startSelectedModelPreparationIfNeeded()
+        } else {
+            cancelParakeetPreparation()
+        }
+        setStatus(PreferencesModelState.selectedModelStatusText(forModelID: plan.modelID))
+    }
+
+    private func confirmParakeetModelDownload() -> Bool {
+        presentAlert(
+            title: "Download Parakeet model?",
+            message: "One-time ~461 MB download, about 2-3 minutes. Runs fully on-device after that.",
+            primaryButton: "Download",
+            secondaryButton: "Cancel",
+            style: .informational
+        ) == .alertFirstButtonReturn
     }
 
     @objc private func downloadModel(_ sender: NSMenuItem) {
@@ -738,30 +825,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     @objc private func deleteSelectedModel(_: Any?) {
         let selected = runtime.settingsStore.load().selectedModelID
 
-        guard modelManager.modelExists(id: selected) else {
+        guard let target = modelCatalog.deletionTarget(selectedModelID: selected) else {
             setStatus("No installed model to delete")
             return
         }
 
         // Build confirmation alert matching existing NSAlert style in this file.
-        let catalogModel = LocalModelManager.downloadableModels.first(where: { $0.id == selected })
-        let isBuiltIn = catalogModel != nil
-        let displayName = catalogModel?.displayName
-            ?? selected.replacingOccurrences(of: "ggml-", with: "")
-
-        let modelURL = modelManager.modelURL(id: selected)
-        var sizeNote = ""
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path),
-           let bytes = attrs[.size] as? Int64, bytes > 0
-        {
-            let mb = Double(bytes) / (1024 * 1024)
-            sizeNote = " (\(String(format: "%.0f", mb)) MB)"
-        }
-
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Delete \"\(displayName)\"?"
-        alert.informativeText = ModelDeletionPrompt.informativeText(sizeNote: sizeNote, isBuiltIn: isBuiltIn)
+        alert.messageText = "Delete \"\(target.displayName)\"?"
+        alert.informativeText = ModelDeletionPrompt.informativeText(sizeNote: target.sizeNote, isBuiltIn: target.isBuiltIn)
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -769,28 +842,49 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        do {
-            try modelManager.deleteModel(id: selected)
-            let installed = modelManager.installedModelIDs()
-            if let fallback = installed.first {
-                mutateSettings { settings in
-                    settings.selectedModelID = fallback
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await modelCatalog.delete(target)
+                await MainActor.run {
+                    guard result.deletedModelID != nil else {
+                        self.setStatus("No installed model to delete")
+                        self.refreshModelMenu()
+                        self.refreshPreferencesWindow()
+                        return
+                    }
+                    if self.modelCatalog.preparesOnSelection(modelID: target.modelID) {
+                        self.cancelParakeetPreparation()
+                    }
+                    if let fallback = result.fallbackModelID {
+                        self.mutateSettings { settings in
+                            settings.selectedModelID = fallback
+                            if settings.defaultModelID.isEmpty || settings.defaultModelID == target.modelID {
+                                settings.defaultModelID = fallback
+                            }
+                        }
+                        self.setStatus("Deleted model: \(PreferencesModelState.displayName(forModelID: selected))")
+                    } else {
+                        // No models remain — clear the dangling selection so the menu
+                        // shows a truthful "no model" state and transcription prereq
+                        // checks prompt the user to download.
+                        self.mutateSettings { settings in
+                            settings.selectedModelID = ""
+                            if settings.defaultModelID == target.modelID {
+                                settings.defaultModelID = ""
+                            }
+                        }
+                        self.setStatus("No model installed — download one in Settings → Models")
+                        self.runtime.overlayController.showTransientMessage(
+                            "No model installed — download one in Settings → Models"
+                        )
+                    }
                 }
-                setStatus("Deleted model: \(selected)")
-            } else {
-                // No models remain — clear the dangling selection so the menu
-                // shows a truthful "no model" state and transcription prereq
-                // checks prompt the user to download.
-                mutateSettings { settings in
-                    settings.selectedModelID = ""
+            } catch {
+                await MainActor.run {
+                    self.setStatus("Delete failed: \(self.describe(error))")
                 }
-                setStatus("No model installed — download one in Settings → Models")
-                runtime.overlayController.showTransientMessage(
-                    "No model installed — download one in Settings → Models"
-                )
             }
-        } catch {
-            setStatus("Delete failed: \(describe(error))")
         }
     }
 
@@ -820,7 +914,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
         guard !modelManager.modelExists(downloadableModel: model) else {
-            setStatus("Model already installed: \(model.id)")
+            setStatus("Model already installed: \(PreferencesModelState.displayName(forModelID: model.id))")
             return
         }
 
@@ -832,7 +926,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         modelDownloadGeneration = downloadGeneration
         refreshModelMenu()
         refreshPreferencesWindow()
-        setStatus("Downloading \(model.displayName)...")
+        setStatus("Downloading \(PreferencesModelState.displayName(forModelID: model.id))...")
 
         modelDownloadTask = Task { [weak self] in
             guard let self else { return }
@@ -864,7 +958,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                             $0.defaultModelID = model.id
                         }
                     }
-                    self.setStatus("Downloaded \(model.id)")
+                    self.setStatus("Downloaded \(PreferencesModelState.displayName(forModelID: model.id))")
                 }
             } catch {
                 await MainActor.run {
@@ -877,7 +971,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     _ = self.presentAlert(
                         title: "Model download failed",
                         message: """
-                        Could not download \(model.displayName).
+                        Could not download \(PreferencesModelState.displayName(forModelID: model.id)).
 
                         \(details)
                         """
@@ -898,7 +992,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func downloadProgressText(for model: DownloadableModel, receivedBytes: Int64, totalBytes: Int64?) -> String {
-        let modelName = model.id.replacingOccurrences(of: "ggml-", with: "")
+        let modelName = PreferencesModelState.displayName(forModelID: model.id)
         let receivedMB = formatMegabytes(receivedBytes)
 
         guard let totalBytes, totalBytes > 0 else {
@@ -935,20 +1029,46 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
-        if !FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) {
-            setStatus("whisper-cli missing")
-            presentWhisperMissingAlert()
-            return false
+        let settings = runtime.settingsStore.load()
+        if modelCatalog.preparesOnSelection(modelID: settings.modelID) {
+            if let failureMessage = parakeetPreparationState.failureMessage {
+                presentParakeetSetupFailure(details: failureMessage)
+                return false
+            }
+            switch ParakeetDictationReadiness.evaluate(
+                preparationState: parakeetPreparationState
+            ) {
+            case .ready:
+                return true
+            case let .notReady(message):
+                startSelectedModelPreparationIfNeeded()
+                runtime.overlayController.showTransientMessage(message)
+                setStatus(message)
+                return false
+            }
         }
 
-        let settings = runtime.settingsStore.load()
-        if modelManager.modelExists(id: settings.modelID) {
+        if modelCatalog.isInstalled(modelID: settings.modelID) {
+            guard FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) else {
+                setStatus("whisper-cli missing")
+                presentWhisperMissingAlert()
+                return false
+            }
             return true
         }
 
-        let installed = modelManager.installedModelIDs()
+        let installed = modelCatalog.installedModelIDs()
         if let fallback = installed.first {
             mutateSettings { $0.selectedModelID = fallback }
+            if modelCatalog.preparesOnSelection(modelID: fallback) {
+                startSelectedModelPreparationIfNeeded()
+                return false
+            }
+            guard FileManager.default.isExecutableFile(atPath: runtime.whisperExecutableURL.path) else {
+                setStatus("whisper-cli missing")
+                presentWhisperMissingAlert()
+                return false
+            }
             return true
         }
 
@@ -962,12 +1082,13 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         title: String,
         message: String,
         primaryButton: String = "OK",
-        secondaryButton: String? = nil
+        secondaryButton: String? = nil,
+        style: NSAlert.Style = .warning
     ) -> NSApplication.ModalResponse {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.alertStyle = .warning
+        alert.alertStyle = style
         alert.addButton(withTitle: primaryButton)
         if let secondaryButton {
             alert.addButton(withTitle: secondaryButton)
@@ -1059,8 +1180,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             return
         }
 
-        let recommendedModelName = recommendedModel.id
-            .replacingOccurrences(of: "ggml-", with: "")
+        let recommendedModelName = PreferencesModelState.displayName(forModelID: recommendedModel.id)
 
         let alert = NSAlert()
         alert.messageText = "Set Up Speech Recognition"
@@ -1100,9 +1220,136 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         return LocalModelManager.downloadableModels.first
     }
 
+    private func startSelectedModelPreparationIfNeeded() {
+        let settings = runtime.settingsStore.load()
+        guard modelCatalog.preparesOnSelection(modelID: settings.modelID) else {
+            return
+        }
+        guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
+            return
+        }
+        guard let model = modelCatalog.model(id: settings.modelID) else {
+            return
+        }
+
+        let generation = UUID()
+        parakeetPreparationGeneration = generation
+        preparationRefreshGate.reset()
+        parakeetPreparationState.apply(.started)
+        publishParakeetPreparationState()
+
+        parakeetPreparationTask = Task { [weak self] in
+            do {
+                try await model.prepare(
+                    progressHandler: { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            self?.applyParakeetPreparationEvent(
+                                .progress(ParakeetPreparationProgress(progress)),
+                                generation: generation
+                            )
+                        }
+                    }
+                )
+                await MainActor.run { [weak self] in
+                    self?.applyParakeetPreparationEvent(.ready, generation: generation)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    if error is CancellationError { return }
+                    applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
+                    presentParakeetSetupFailure(details: describe(error))
+                }
+            }
+        }
+    }
+
+    private func cancelParakeetPreparation() {
+        parakeetPreparationTask?.cancel()
+        parakeetPreparationTask = nil
+        parakeetPreparationGeneration = nil
+        parakeetPreparationState = ParakeetPreparationState()
+        preparationRefreshGate.reset()
+        refreshPreferencesWindow()
+    }
+
+    private func applyParakeetPreparationEvent(_ event: ParakeetPreparationEvent, generation: UUID) {
+        guard parakeetPreparationGeneration == generation else { return }
+        parakeetPreparationState.apply(event)
+        if event == .ready || parakeetPreparationState.failureMessage != nil {
+            parakeetPreparationGeneration = nil
+            parakeetPreparationTask = nil
+        }
+        if event == .ready {
+            setStatus("Parakeet ready")
+            // The gate has already baselined this row text, so a gated publish would
+            // skip; reset and refresh explicitly so the installed row lands.
+            preparationRefreshGate.reset()
+            refreshPreferencesWindow()
+        } else {
+            publishParakeetPreparationState()
+        }
+    }
+
+    private func publishParakeetPreparationState() {
+        if let statusText = parakeetPreparationState.statusText {
+            setStatus(statusText)
+        }
+        // Progress callbacks fire ~18x/sec but the window only renders the coarse row text;
+        // skip refreshes that would rebuild an identical snapshot (measured main-thread
+        // saturation during preparation with the preferences window open).
+        guard preparationRefreshGate.shouldRefresh(rowText: parakeetPreparationState.modelRowProgressText) else {
+            return
+        }
+        refreshPreferencesWindow()
+    }
+
+    private func presentParakeetSetupFailure(details: String) {
+        let response = presentAlert(
+            title: "Parakeet setup failed",
+            message: """
+            Scrawl could not download or prepare Parakeet.
+
+            \(details)
+            """,
+            primaryButton: "Switch to Whisper",
+            secondaryButton: "Not Now"
+        )
+        if response == .alertFirstButtonReturn {
+            switchToWhisperFallbackAfterParakeetFailure()
+        }
+    }
+
+    private func switchToWhisperFallbackAfterParakeetFailure() {
+        if let installed = modelCatalog.installedModelIDs().first(where: { !modelCatalog.preparesOnSelection(modelID: $0) }) {
+            mutateSettings {
+                $0.selectedModelID = installed
+                if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
+                    $0.defaultModelID = installed
+                }
+            }
+            setStatus(PreferencesModelState.selectedModelStatusText(forModelID: installed))
+            return
+        }
+
+        guard let recommendedModel = preferredInitialDownloadModel() else {
+            setStatus("No Whisper model available")
+            return
+        }
+        mutateSettings {
+            $0.selectedModelID = recommendedModel.id
+            if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
+                $0.defaultModelID = recommendedModel.id
+            }
+        }
+        startModelDownload(recommendedModel)
+    }
+
     private func applyRecommendedModelDefaultsIfNeeded() {
         let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
-        let recommendedID = runtime.recommendedDefaultModelID
+        let recommendedID = modelCatalog.resolveRecommendedDefaultModelID(
+            preferredModelID: runtime.recommendedDefaultModelID
+        )
 
         // Pre-check: skip the write entirely when nothing needs changing.
         // (There is a tiny TOCTOU between this read and the mutate below, but at startup
@@ -1660,8 +1907,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func refreshSettingsRows() {
         let settings = runtime.settingsStore.load()
-        let modelName = settings.modelID
-            .replacingOccurrences(of: "ggml-", with: "")
+        let modelName = PreferencesModelState.displayName(forModelID: settings.modelID)
         infoLineItem?.title = "Model: \(modelName)"
         hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input..." : "Hotkey: \(settings.hotkey.displayName)"
         setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey…"
@@ -1678,14 +1924,14 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         modelsSubmenu.removeAllItems()
         let settings = runtime.settingsStore.load()
 
-        let installed = modelManager.installedModelIDs()
-        if installed.isEmpty {
+        let installedModelIDs = modelCatalog.installedModelIDs()
+        if installedModelIDs.isEmpty {
             let empty = NSMenuItem(title: "No installed models", action: nil, keyEquivalent: "")
             empty.isEnabled = false
             modelsSubmenu.addItem(empty)
         } else {
-            for modelID in installed {
-                let displayName = modelID.replacingOccurrences(of: "ggml-", with: "")
+            for modelID in installedModelIDs {
+                let displayName = PreferencesModelState.displayName(forModelID: modelID)
                 let item = NSMenuItem(title: displayName, action: #selector(selectInstalledModel(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = modelID
@@ -1708,7 +1954,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             modelsSubmenu.addItem(allInstalled)
         } else {
             for model in downloadable {
-                let item = NSMenuItem(title: model.displayName, action: #selector(downloadModel(_:)), keyEquivalent: "")
+                let item = NSMenuItem(
+                    title: PreferencesModelState.displayName(forModelID: model.id),
+                    action: #selector(downloadModel(_:)),
+                    keyEquivalent: ""
+                )
                 item.target = self
                 item.representedObject = model.id
                 item.isEnabled = !isModelDownloadInProgress
@@ -1720,7 +1970,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let deleteItem = NSMenuItem(title: "Delete Selected Model", action: #selector(deleteSelectedModel(_:)), keyEquivalent: "")
         deleteItem.target = self
-        deleteItem.isEnabled = modelManager.modelExists(id: settings.modelID)
+        deleteItem.isEnabled = modelCatalog.canDeleteModel(selectedModelID: settings.modelID)
         modelsSubmenu.addItem(deleteItem)
     }
 
@@ -1798,6 +2048,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     @MainActor
     @discardableResult
     private func applyStatus(_ text: String, autoClear: Bool = true) -> UInt64 {
+        guard PreparationStatusDeduper.shouldApply(text, latestStatusText: latestStatusText) else {
+            return activeOperationGeneration.currentStatusToken
+        }
         let statusGeneration = activeOperationGeneration.applyStatus()
         statusAutoClearTimer?.invalidate()
         statusAutoClearTimer = nil
@@ -1811,9 +2064,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         statusLineItem?.isHidden = false
         statusLineItem?.title = "Status: \(text)"
+        if !isCapturingHotkey {
+            statusItem?.button?.toolTip = "Scrawl: \(text)"
+        }
 
         let isOngoing = Self.ongoingStatuses.contains(text)
             || text.hasPrefix("Downloading ")
+            || text.hasPrefix("Setting up Parakeet")
+            || text.hasPrefix("Loading Parakeet")
+            || text.hasPrefix("Downloading Parakeet model")
+            || text.hasPrefix("Optimizing Parakeet")
             || text.hasPrefix("Loading model:")
             || text.hasPrefix("Transcribing with ")
             || text.hasPrefix("Retrying on CPU")
@@ -1880,7 +2140,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     private func displayModelName(_ modelID: String) -> String {
-        modelID.replacingOccurrences(of: "ggml-", with: "")
+        PreferencesModelState.displayName(forModelID: modelID)
     }
 
     private func updateStatusIcon() {
@@ -1990,17 +2250,21 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                let provider = runtime.whisperProvider as? any ModelRetainingTranscriptionProvider
             {
                 Task {
-                    if previousSettings.modelID != updatedSettings.modelID {
-                        await provider.shutdown()
+                    if previousSettings.modelID != updatedSettings.modelID,
+                       !self.modelCatalog.preparesOnSelection(modelID: previousSettings.modelID)
+                    {
+                        await provider.shutdown(modelID: previousSettings.modelID)
                     }
                     if previousSettings.modelOffloadPolicy != updatedSettings.modelOffloadPolicy {
                         await provider.setIdleOffloadSeconds(updatedSettings.modelOffloadPolicy.idleSeconds)
                     }
                 }
             }
-            refreshSettingsRows()
-            refreshModelMenu()
-            refreshPreferencesWindow()
+            preferencesRefresh.batch {
+                refreshSettingsRows()
+                refreshModelMenu()
+                refreshPreferencesWindow()
+            }
             // NOTE: hotkey monitors are intentionally NOT rebuilt here — see doc-comment above.
         } catch {
             setStatus("Settings error: \(describe(error))")

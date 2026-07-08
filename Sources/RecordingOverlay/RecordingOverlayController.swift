@@ -23,7 +23,44 @@ public final class RecordingOverlayController: @unchecked Sendable {
     /// (meaning a new show/fade-in arrived before the animation finished).
     private var fadeGeneration = 0
 
+    private var waveformView: NSView?
+    private var barLayers: [CALayer] = []
+    private(set) var barHeights: [CGFloat] = []
+    private var levelTimer: Timer?
+    /// Supplies the current input level in decibels; nil means not capturing.
+    /// Assigned once at app startup (AppUI wires it to the audio capture service).
+    public var levelProvider: (() -> Float?)?
+    /// Test seam: overrides the system Reduce Motion setting when non-nil.
+    var reduceMotionOverride: Bool?
+    var isPollingLevels: Bool {
+        levelTimer != nil
+    }
+
+    var isShowingWaveform: Bool {
+        waveformView?.isHidden == false
+    }
+
+    var isShowingDot: Bool {
+        dotView?.isHidden == false
+    }
+
+    private var isReduceMotionEnabled: Bool {
+        reduceMotionOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    /// Brand coral. Source of truth is `PreferencesPageSupport.accentColor` in AppUI
+    /// (sRGB 0.95, 0.36, 0.30); RecordingOverlay cannot import AppUI, keep in sync.
+    static let coralAccent = NSColor(srgbRed: 0.95, green: 0.36, blue: 0.30, alpha: 1)
+    /// 5 bars of 2.5pt with 2pt gaps = 20.5, rounded up.
+    static let waveformLeadingAccessoryWidth: CGFloat = 21
+    private static let barWidth: CGFloat = 2.5
+    private static let barGap: CGFloat = 2
+
     public init() {}
+
+    deinit {
+        levelTimer?.invalidate()
+    }
 
     public func setState(_ state: RecordingOverlayState) {
         if Thread.isMainThread {
@@ -60,6 +97,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
         case .idle:
             stopIndicatorAnimations()
             dotView.isHidden = true
+            waveformView?.isHidden = true
+            stopLevelPolling()
             symbolView.isHidden = true
             spinner.stopAnimation(nil)
             spinner.isHidden = true
@@ -70,6 +109,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
             titleLabel.stringValue = "Press Hotkey"
             titleLabel.textColor = .labelColor
             dotView.isHidden = true
+            waveformView?.isHidden = true
+            stopLevelPolling()
             spinner.stopAnimation(nil)
             spinner.isHidden = true
             configureSymbolView(
@@ -87,12 +128,24 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
         case .recording:
             titleLabel.stringValue = "Recording"
+            // Semantic color like every other state: the pill material follows the
+            // system appearance, so hardcoded white washes out in light mode.
             titleLabel.textColor = .labelColor
             symbolView.isHidden = true
-            dotView.isHidden = false
             spinner.stopAnimation(nil)
             spinner.isHidden = true
-            startDotPulse()
+            stopIndicatorAnimations()
+            if isReduceMotionEnabled {
+                // Static coral dot: no bars, no pulse, no polling.
+                stopLevelPolling()
+                waveformView?.isHidden = true
+                dotView.isHidden = false
+                dotView.layer?.backgroundColor = Self.coralAccent.cgColor
+            } else {
+                dotView.isHidden = true
+                waveformView?.isHidden = false
+                startLevelPolling()
+            }
             layoutSubviews()
             positionPanel(panel)
             fadeGeneration += 1
@@ -103,6 +156,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
             titleLabel.textColor = .secondaryLabelColor
             stopIndicatorAnimations()
             dotView.isHidden = true
+            waveformView?.isHidden = true
+            stopLevelPolling()
             symbolView.isHidden = true
             spinner.isHidden = false
             spinner.startAnimation(nil)
@@ -146,6 +201,8 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
         stopIndicatorAnimations()
         dotView.isHidden = true
+        waveformView?.isHidden = true
+        stopLevelPolling()
         symbolView.isHidden = true
         spinner.stopAnimation(nil)
         spinner.isHidden = true
@@ -159,13 +216,22 @@ public final class RecordingOverlayController: @unchecked Sendable {
         announce(text)
 
         let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            if state == .idle {
-                fadeOut(panel)
-            }
+            self?.fireTransientDismiss()
         }
         transientDismissWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0.2), execute: workItem)
+    }
+
+    /// Runs when a transient message's display time elapses. Idle → fade the pill out;
+    /// otherwise re-apply the live state so a transient shown mid-recording restores the
+    /// waveform/spinner/symbol instead of leaving stale text with no indicator.
+    func fireTransientDismiss() {
+        guard let panel else { return }
+        if state == .idle {
+            fadeOut(panel)
+        } else {
+            apply(state)
+        }
     }
 
     // MARK: - Pill width computation
@@ -274,16 +340,37 @@ public final class RecordingOverlayController: @unchecked Sendable {
         visual.layer?.cornerRadius = pillHeight / 2
         visual.layer?.masksToBounds = true
         // A hairline edge so the pill stays legible on dark or busy wallpapers, where the
-        // drop shadow alone gives little separation. The .hudWindow material is always dark,
-        // so a faint light stroke reads correctly in both system appearances.
+        // drop shadow alone gives little separation. The faint stroke disappears into the
+        // light-mode material and separates the dark one, so it works in both appearances.
         visual.layer?.borderWidth = 1
         visual.layer?.borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
 
         let dot = NSView(frame: .zero)
         dot.wantsLayer = true
-        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.layer?.backgroundColor = Self.coralAccent.cgColor
         dot.layer?.cornerRadius = 4
         dot.isHidden = true
+
+        let waveform = NSView(frame: .zero)
+        waveform.wantsLayer = true
+        waveform.isHidden = true
+        var layers: [CALayer] = []
+        for index in 0..<WaveformLevel.barCount {
+            let bar = CALayer()
+            bar.backgroundColor = Self.coralAccent.cgColor
+            bar.cornerRadius = Self.barWidth / 2
+            bar.frame = NSRect(
+                x: CGFloat(index) * (Self.barWidth + Self.barGap),
+                y: 0,
+                width: Self.barWidth,
+                height: WaveformLevel.minBarHeight
+            )
+            waveform.layer?.addSublayer(bar)
+            layers.append(bar)
+        }
+        visual.addSubview(waveform)
+        waveformView = waveform
+        barLayers = layers
 
         let symbolView = NSImageView(frame: .zero)
         symbolView.imageScaling = .scaleProportionallyUpOrDown
@@ -347,7 +434,9 @@ public final class RecordingOverlayController: @unchecked Sendable {
         let text = titleLabel.stringValue
 
         // Determine leading accessory width + gap (matches layoutSubviews constants).
-        let leadingAccessoryWidth: CGFloat = if !dotView.isHidden {
+        let leadingAccessoryWidth: CGFloat = if waveformView?.isHidden == false {
+            Self.waveformLeadingAccessoryWidth + 8 // waveform(21) + gap(8)
+        } else if !dotView.isHidden {
             8 + 8 // dotSize(8) + gap(8)
         } else if !symbolView.isHidden {
             15 + 8 // symbolSize(15) + gap(8)
@@ -396,7 +485,22 @@ public final class RecordingOverlayController: @unchecked Sendable {
         // instead of clipping. Shared by every branch so an accessory never caps the label.
         let labelInset = (Self.basePillHeight - Self.pillLineHeight) / 2
 
-        if !dotView.isHidden {
+        if let waveformView, !waveformView.isHidden {
+            waveformView.frame = NSRect(
+                x: padding,
+                y: (h - WaveformLevel.maxBarHeight) / 2,
+                width: Self.waveformLeadingAccessoryWidth,
+                height: WaveformLevel.maxBarHeight
+            )
+
+            let labelX = padding + Self.waveformLeadingAccessoryWidth + 8
+            titleLabel.frame = NSRect(
+                x: labelX,
+                y: labelInset,
+                width: panel.frame.width - labelX - padding,
+                height: h - labelInset * 2
+            )
+        } else if !dotView.isHidden {
             let dotSize: CGFloat = 8
             dotView.frame = NSRect(
                 x: padding,
@@ -458,31 +562,13 @@ public final class RecordingOverlayController: @unchecked Sendable {
 
     // MARK: - Animation
 
-    private func startDotPulse() {
-        guard let dotView, let layer = dotView.layer else {
-            return
-        }
-        stopIndicatorAnimations()
-        // Respect Reduce Motion: leave a fully-visible static dot instead of a looping pulse.
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-
-        let pulse = CABasicAnimation(keyPath: "opacity")
-        pulse.fromValue = 0.3
-        pulse.toValue = 1.0
-        pulse.duration = 0.7
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(pulse, forKey: "pulse")
-    }
-
     private func startSymbolPulse() {
         guard let symbolView, let layer = symbolView.layer else {
             return
         }
         stopIndicatorAnimations()
         // Respect Reduce Motion: leave a fully-visible static symbol instead of a looping pulse.
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        guard !isReduceMotionEnabled else { return }
 
         let opacity = CABasicAnimation(keyPath: "opacity")
         opacity.fromValue = 0.45
@@ -510,6 +596,46 @@ public final class RecordingOverlayController: @unchecked Sendable {
     private func stopIndicatorAnimations() {
         dotView?.layer?.removeAnimation(forKey: "pulse")
         symbolView?.layer?.removeAnimation(forKey: "waiting")
+    }
+
+    // MARK: - Live level waveform
+
+    private func startLevelPolling() {
+        guard levelTimer == nil else { return }
+        barHeights = Array(repeating: WaveformLevel.minBarHeight, count: WaveformLevel.barCount)
+        applyBarHeights()
+        let timer = Timer(timeInterval: 0.04, repeats: true) { [weak self] _ in
+            self?.pollLevelOnce()
+        }
+        // A 25Hz timer doesn't need sub-frame precision; tolerance lets the OS coalesce wakeups.
+        timer.tolerance = 0.008
+        // .common so the bars keep moving while menus or drags track the run loop.
+        RunLoop.main.add(timer, forMode: .common)
+        levelTimer = timer
+    }
+
+    private func stopLevelPolling() {
+        levelTimer?.invalidate()
+        levelTimer = nil
+    }
+
+    /// One metering tick. Internal so tests can drive it without waiting on the timer.
+    func pollLevelOnce() {
+        let level = WaveformLevel.normalizedLevel(fromDecibels: levelProvider?() ?? nil)
+        barHeights = WaveformLevel.nextBarHeights(level: level, previous: barHeights)
+        applyBarHeights()
+    }
+
+    private func applyBarHeights() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (layer, height) in zip(barLayers, barHeights) {
+            var frame = layer.frame
+            frame.origin.y = (WaveformLevel.maxBarHeight - height) / 2
+            frame.size.height = height
+            layer.frame = frame
+        }
+        CATransaction.commit()
     }
 
     private func configureSymbolView(

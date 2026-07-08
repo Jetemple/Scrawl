@@ -19,6 +19,8 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private let tableView = NSTableView()
     private let stateView = NSView()
     private var workspaceGroup: NSView?
+    private var listHeightConstraint: NSLayoutConstraint?
+    private var actionBarView: NSView?
     private let stateTitle = NSTextField(labelWithString: "")
     private let stateDetail = NSTextField(wrappingLabelWithString: "")
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
@@ -31,8 +33,10 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     private var loadErrorDescription: String?
     private var rowsAreTranscriptFirst = true
     private var transcriptTextIsLeftAligned = true
+    private var hasRenderedOnce = false
 
     private(set) var state = State.empty
+    private(set) var contentReloadCount = 0
     var visibleRecordIDs: [UUID] {
         visibleRecords.map(\.id)
     }
@@ -43,6 +47,10 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
 
     var usesGroupedWorkspace: Bool {
         workspaceGroup is PreferencesBackgroundView
+    }
+
+    var usesPinnedActionBar: Bool {
+        actionBarView is PreferencesPinnedActionBarView
     }
 
     var visibleRowsAreTranscriptFirst: Bool {
@@ -74,11 +82,26 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     func update(records: [TranscriptRecord], isEnabled: Bool, loadErrorDescription: String?) {
+        syncToggleState(isEnabled: isEnabled)
+        // Model/permission/hotkey refreshes reach this page with identical history data;
+        // reloading the table and re-measuring every transcript's height each time is a
+        // measured contributor to preferences lag, so skip no-op updates entirely.
+        if hasRenderedOnce,
+           records == self.records,
+           isEnabled == self.isEnabled,
+           loadErrorDescription == self.loadErrorDescription
+        {
+            return
+        }
+        hasRenderedOnce = true
         self.records = records
         self.isEnabled = isEnabled
         self.loadErrorDescription = loadErrorDescription
-        toggle.state = isEnabled ? .on : .off
         applyFilter()
+    }
+
+    func syncToggleState(isEnabled: Bool) {
+        toggle.state = isEnabled ? .on : .off
     }
 
     func setSearchQuery(_ query: String) {
@@ -95,15 +118,16 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard visibleRecords.indices.contains(row) else { return 72 }
-        let width = max(260, tableView.bounds.width - 28)
+        guard visibleRecords.indices.contains(row) else { return 76 }
+        let width = max(260, tableView.bounds.width - 36)
         let text = visibleRecords[row].text as NSString
         let textHeight = text.boundingRect(
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin],
-            attributes: [.font: NSFont.systemFont(ofSize: 13)]
+            attributes: [.font: NSFont.systemFont(ofSize: 14)]
         ).height
-        return max(76, ceil(textHeight) + 50)
+        // top(13) + text + gap(5) + metadata(~15) + bottom(13)
+        return max(80, ceil(textHeight) + 46)
     }
 
     func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
@@ -111,7 +135,8 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         let record = visibleRecords[row]
         let cell = NSTableCellView()
         let text = NSTextField(wrappingLabelWithString: record.text)
-        text.font = .systemFont(ofSize: 13)
+        text.font = .systemFont(ofSize: 14)
+        text.textColor = .labelColor
         text.alignment = .left
         text.maximumNumberOfLines = 0
 
@@ -120,10 +145,10 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             dateStyle: .medium,
             timeStyle: .short
         ))
-        time.font = .systemFont(ofSize: 11, weight: .medium)
+        time.font = .systemFont(ofSize: 12, weight: .medium)
         time.textColor = .secondaryLabelColor
         let metrics = NSTextField(labelWithString: PreferencesContentState.historyMetrics(for: record))
-        metrics.font = .systemFont(ofSize: 11)
+        metrics.font = .systemFont(ofSize: 12)
         metrics.textColor = .tertiaryLabelColor
         metrics.alignment = .right
         let metadata = NSStackView(views: [time, NSView(), metrics])
@@ -134,17 +159,21 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         cell.addSubview(text)
         cell.addSubview(metadata)
         NSLayoutConstraint.activate([
-            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
-            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -10),
-            text.topAnchor.constraint(equalTo: cell.topAnchor, constant: 10),
+            text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: PreferencesPageSupport.rowInset),
+            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -PreferencesPageSupport.rowInset),
+            text.topAnchor.constraint(equalTo: cell.topAnchor, constant: 13),
             metadata.leadingAnchor.constraint(equalTo: text.leadingAnchor),
             metadata.trailingAnchor.constraint(equalTo: text.trailingAnchor),
-            metadata.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 8),
-            metadata.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -9),
+            metadata.topAnchor.constraint(equalTo: text.bottomAnchor, constant: 5),
+            metadata.bottomAnchor.constraint(equalTo: cell.bottomAnchor, constant: -13),
         ])
         rowsAreTranscriptFirst = true
         transcriptTextIsLeftAligned = text.alignment == .left
         return cell
+    }
+
+    func tableView(_: NSTableView, rowViewForRow _: Int) -> NSTableRowView? {
+        PreferencesSelectionRowView()
     }
 
     func tableViewSelectionDidChange(_: Notification) {
@@ -163,9 +192,14 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.usesAutomaticRowHeights = false
+        // `.plain` drops the automatic source-list inset so cell text starts at the shared
+        // row grid instead of ~17pt further right than every other page.
+        tableView.style = .plain
         tableView.backgroundColor = .clear
         tableView.intercellSpacing = .zero
-        tableView.gridStyleMask = []
+        tableView.gridStyleMask = .solidHorizontalGridLineMask
+        tableView.gridColor = PreferencesPageSupport.hairlineColor
+        tableView.selectionHighlightStyle = .regular
         tableView.dataSource = self
         tableView.delegate = self
 
@@ -197,22 +231,39 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
         ])
 
-        let workspace = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
+        let (workspace, listHeight) = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
         workspaceGroup = workspace
+        listHeightConstraint = listHeight
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(
+            leading: [copyButton, repasteButton],
+            trailing: [deleteButton]
+        )
+        actionBarView = actionBar
+        let toggleRow = NSStackView(views: [toggle, NSView()])
+        toggleRow.orientation = .horizontal
+        toggleRow.alignment = .centerY
+        toggleRow.edgeInsets = NSEdgeInsets(
+            top: 11,
+            left: PreferencesPageSupport.rowInset,
+            bottom: 11,
+            right: PreferencesPageSupport.rowInset
+        )
+
         let page = PreferencesPageSupport.makePage(
             title: "History",
-            description: "Recent transcripts stored only on this Mac.",
+            description: "Recent transcripts stored on this Mac.",
             content: [
-                toggle,
+                PreferencesPageSupport.makeGroup(rows: [toggleRow]),
                 searchField,
                 workspace,
-                PreferencesPageSupport.makeActionRow(buttons: [copyButton, repasteButton, deleteButton]),
+                actionBar,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
     }
 
     private func applyFilter() {
+        contentReloadCount += 1
         visibleRecords = PreferencesContentState.filteredHistory(records: records, query: searchField.stringValue)
         selectedID = PreferencesContentState.resolvedHistorySelection(currentID: selectedID, visibleRecords: visibleRecords)
         tableView.reloadData()
@@ -223,6 +274,21 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         }
         updateState()
         updateActionAvailability()
+        updateListHeight()
+    }
+
+    /// Hug the list to its content so the framed region ends just under the last row (or the
+    /// empty-state message) rather than stretching a mostly-empty box.
+    private func updateListHeight() {
+        let contentHeight: CGFloat = if state == .records, !visibleRecords.isEmpty {
+            visibleRecords.indices.reduce(CGFloat(0)) { $0 + self.tableView(tableView, heightOfRow: $1) } + 2
+        } else {
+            150
+        }
+        listHeightConstraint?.constant = min(
+            PreferencesPageSupport.listMaxHeight,
+            max(PreferencesPageSupport.listMinHeight, contentHeight)
+        )
     }
 
     private func updateState() {
