@@ -3,6 +3,11 @@ import Permissions
 import SettingsStore
 
 final class PreferencesGeneralView: NSView {
+    private static let hotkeyHelpLines = [
+        "Press and hold: Record until release.",
+        "Double-tap: Record until you tap again.",
+    ]
+
     private let hotkeyLabel = NSTextField(labelWithString: "")
     private let microphoneLabel = NSTextField(labelWithString: "")
     private let accessibilityLabel = NSTextField(labelWithString: "")
@@ -79,7 +84,12 @@ final class PreferencesGeneralView: NSView {
             description: "Hotkey, permissions, and defaults.",
             content: [
                 PreferencesPageSupport.makeGroup(header: "Transcription", rows: [
-                    PreferencesPageSupport.makeSettingRow(title: "Hotkey", detail: hotkeyLabel, action: hotkeyButton),
+                    PreferencesPageSupport.makeSettingRow(
+                        title: "Hotkey",
+                        detail: hotkeyLabel,
+                        action: hotkeyButton,
+                        helpLines: Self.hotkeyHelpLines
+                    ),
                     PreferencesPageSupport.makeSettingControlRow(
                         title: "Offload model",
                         control: offloadPopup

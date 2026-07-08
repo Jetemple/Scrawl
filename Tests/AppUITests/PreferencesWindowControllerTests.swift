@@ -546,19 +546,30 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testGeneralHotkeyHelpDoesNotAddVisibleRow() throws {
+    func testGeneralHotkeyHelpAppearsUnderHotkeyRow() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot())
         let contentView = try XCTUnwrap(controller.window?.contentView)
+        contentView.layoutSubtreeIfNeeded()
         let hotkeyButton = try XCTUnwrap(contentView.button(titled: "Set Hotkey…"))
         let hotkeyValue = try XCTUnwrap(contentView.textField(withValue: "Right ⌥ Option"))
         let tooltip = "Hold to dictate. Double-tap to lock recording."
+        let holdHelp = "Press and hold: Record until release."
+        let doubleTapHelp = "Double-tap: Record until you tap again."
+        let holdHelpLabel = try XCTUnwrap(contentView.textField(withValue: holdHelp))
+        let doubleTapHelpLabel = try XCTUnwrap(contentView.textField(withValue: doubleTapHelp))
+        let offloadPopup = try XCTUnwrap(contentView.popupButton(selectedTitle: "5 minutes"))
+        let hotkeyFrame = contentView.convert(hotkeyValue.bounds, from: hotkeyValue)
+        let holdHelpFrame = contentView.convert(holdHelpLabel.bounds, from: holdHelpLabel)
+        let doubleTapHelpFrame = contentView.convert(doubleTapHelpLabel.bounds, from: doubleTapHelpLabel)
+        let offloadFrame = contentView.convert(offloadPopup.frame, from: offloadPopup.superview)
 
-        XCTAssertNil(contentView.textField(withValue: tooltip))
-        XCTAssertNil(contentView.textField(withValue: """
-        Hold the hotkey while speaking, then release to transcribe. \
-        Double-tap to keep recording hands-free, then tap again to stop.
-        """))
+        XCTAssertNil(contentView.textField(withValue: "Press and hold to dictate. Double-tap to keep recording, then tap again to stop."))
+        XCTAssertLessThan(holdHelpFrame.minY, hotkeyFrame.minY)
+        XCTAssertLessThan(doubleTapHelpFrame.minY, holdHelpFrame.minY)
+        XCTAssertGreaterThan(doubleTapHelpFrame.minY, offloadFrame.maxY)
+        XCTAssertEqual(holdHelpLabel.font?.pointSize, 11)
+        XCTAssertEqual(doubleTapHelpLabel.font?.pointSize, 11)
         XCTAssertEqual(hotkeyButton.toolTip, tooltip)
         XCTAssertEqual(hotkeyValue.toolTip, tooltip)
     }

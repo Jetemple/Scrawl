@@ -209,7 +209,12 @@ enum PreferencesPageSupport {
         return row
     }
 
-    static func makeSettingRow(title: String, detail: NSTextField, action: NSView? = nil) -> NSView {
+    static func makeSettingRow(
+        title: String,
+        detail: NSTextField,
+        action: NSView? = nil,
+        helpLines: [String] = []
+    ) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13)
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -229,6 +234,10 @@ enum PreferencesPageSupport {
         let trailingSpacer = NSView()
         trailingSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
         trailingSpacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+
+        if !helpLines.isEmpty {
+            return makeSettingHelpRow(titleLabel: titleLabel, detail: detail, action: action, helpLines: helpLines)
+        }
 
         let row = NSStackView()
         row.orientation = .horizontal
@@ -451,4 +460,59 @@ enum PreferencesPageSupport {
         ])
         return view
     }
+}
+
+private func makeSettingHelpRow(
+    titleLabel: NSTextField,
+    detail: NSTextField,
+    action: NSView?,
+    helpLines: [String]
+) -> NSView {
+    let helpLabels = helpLines.map { text in
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }
+
+    let detailStack = NSStackView(views: [detail] + helpLabels)
+    detailStack.orientation = .vertical
+    detailStack.alignment = .leading
+    detailStack.spacing = 2
+    detailStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    detailStack.translatesAutoresizingMaskIntoConstraints = false
+
+    let row = NSView()
+    row.addSubview(titleLabel)
+    row.addSubview(detailStack)
+
+    var constraints = [
+        titleLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: PreferencesPageSupport.rowInset),
+        titleLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: 11),
+        detailStack.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 12),
+        detailStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 11),
+        detailStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -11),
+    ]
+
+    if let action {
+        action.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(action)
+        constraints.append(contentsOf: [
+            action.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -PreferencesPageSupport.rowInset),
+            action.topAnchor.constraint(equalTo: row.topAnchor, constant: 8),
+            detailStack.trailingAnchor.constraint(lessThanOrEqualTo: action.leadingAnchor, constant: -12),
+        ])
+    } else {
+        constraints.append(
+            detailStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: row.trailingAnchor,
+                constant: -PreferencesPageSupport.rowInset
+            )
+        )
+    }
+
+    NSLayoutConstraint.activate(constraints)
+    return row
 }
