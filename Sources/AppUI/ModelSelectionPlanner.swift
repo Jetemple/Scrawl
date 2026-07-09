@@ -11,6 +11,7 @@ enum ModelSelectionConfirmation: Equatable, Sendable {
 
 enum ModelSelectionOutcome: Equatable, Sendable {
     case selected(ModelSelectionPlan)
+    case pendingPreparation(ModelSelectionPlan)
     case cancelled(keptModelID: String)
 }
 
@@ -27,6 +28,7 @@ enum ModelSelectionPlanner {
         requestedModelID: String,
         preparesOnSelection: Bool,
         isInstalled: Bool,
+        isPrepared: Bool,
         confirmation: ModelSelectionConfirmation
     ) -> ModelSelectionOutcome {
         if requiresDownloadConfirmation(preparesOnSelection: preparesOnSelection, isInstalled: isInstalled),
@@ -35,11 +37,14 @@ enum ModelSelectionPlanner {
             return .cancelled(keptModelID: currentModelID)
         }
 
-        return .selected(
-            ModelSelectionPlan(
-                modelID: requestedModelID,
-                shouldPrepareOnSelection: preparesOnSelection
+        if preparesOnSelection, !isPrepared {
+            return .pendingPreparation(
+                ModelSelectionPlan(modelID: requestedModelID, shouldPrepareOnSelection: true)
             )
+        }
+
+        return .selected(
+            ModelSelectionPlan(modelID: requestedModelID, shouldPrepareOnSelection: false)
         )
     }
 }

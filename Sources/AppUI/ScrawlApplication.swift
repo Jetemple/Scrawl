@@ -144,6 +144,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var parakeetPreparationState = ParakeetPreparationState()
     private var parakeetPreparationGeneration: UUID?
     private var parakeetPreparationTask: Task<Void, Never>?
+    /// In-memory only: the model the user asked to switch to that is still preparing. The
+    /// persisted selectedModelID stays on the current working model until preparation succeeds.
+    private var pendingModelID: String?
     private var preparationRefreshGate = PreparationRefreshGate()
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
@@ -771,18 +774,27 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 .notRequired
             }
 
+            let isPrepared = !shouldPrepareOnSelection
+                || isInstalled
+                || parakeetPreparationState.isReady
+
             switch ModelSelectionPlanner.outcome(
                 currentModelID: settings.modelID,
                 requestedModelID: modelID,
                 preparesOnSelection: shouldPrepareOnSelection,
                 isInstalled: isInstalled,
+                isPrepared: isPrepared,
                 confirmation: confirmation
             ) {
             case .cancelled:
                 refreshPreferencesWindow()
             case let .selected(plan):
                 cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
+                pendingModelID = nil
                 completeModelSelection(plan)
+            case let .pendingPreparation(plan):
+                cancelledModelID = nil
+                beginPendingModelPreparation(plan)
             }
         }
     }
@@ -1222,13 +1234,26 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func startSelectedModelPreparationIfNeeded() {
         let settings = runtime.settingsStore.load()
-        guard modelCatalog.preparesOnSelection(modelID: settings.modelID) else {
+        startModelPreparationIfNeeded(modelID: settings.modelID)
+    }
+
+    /// Begins a deferred switch: keep the current selectedModelID, remember the requested model
+    /// as pending, and prepare it. `applyParakeetPreparationEvent(.ready)` commits the switch.
+    private func beginPendingModelPreparation(_ plan: ModelSelectionPlan) {
+        pendingModelID = plan.modelID
+        startModelPreparationIfNeeded(modelID: plan.modelID)
+        setStatus("Setting up \(PreferencesModelState.displayName(forModelID: plan.modelID))…")
+        refreshPreferencesWindow()
+    }
+
+    private func startModelPreparationIfNeeded(modelID: String) {
+        guard modelCatalog.preparesOnSelection(modelID: modelID) else {
             return
         }
         guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
             return
         }
-        guard let model = modelCatalog.model(id: settings.modelID) else {
+        guard let model = modelCatalog.model(id: modelID) else {
             return
         }
 
@@ -1268,6 +1293,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         parakeetPreparationTask?.cancel()
         parakeetPreparationTask = nil
         parakeetPreparationGeneration = nil
+        pendingModelID = nil
         parakeetPreparationState = ParakeetPreparationState()
         preparationRefreshGate.reset()
         refreshPreferencesWindow()
@@ -1279,9 +1305,23 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         if event == .ready || parakeetPreparationState.failureMessage != nil {
             parakeetPreparationGeneration = nil
             parakeetPreparationTask = nil
+            if parakeetPreparationState.failureMessage != nil {
+                pendingModelID = nil
+            }
         }
         if event == .ready {
-            setStatus("Parakeet ready")
+            if let pendingModelID {
+                mutateSettings {
+                    $0.selectedModelID = pendingModelID
+                    if $0.defaultModelID.isEmpty {
+                        $0.defaultModelID = pendingModelID
+                    }
+                }
+                self.pendingModelID = nil
+                setStatus(PreferencesModelState.selectedModelStatusText(forModelID: pendingModelID))
+            } else {
+                setStatus("Parakeet ready")
+            }
             // The gate has already baselined this row text, so a gated publish would
             // skip; reset and refresh explicitly so the installed row lands.
             preparationRefreshGate.reset()
