@@ -72,7 +72,7 @@ struct ParakeetPreparationState: Equatable, Sendable {
         case .preparing(nil):
             "Setting up Parakeet (one-time)…"
         case let .preparing(.some(progress)):
-            Self.label(for: progress, includePercent: true)
+            Self.verboseStatusText(for: progress)
         case let .failed(message):
             "Parakeet setup failed: \(message)"
         }
@@ -143,6 +143,22 @@ struct ParakeetPreparationState: Equatable, Sendable {
                     phase: .optimizing
                 )
             )
+        }
+    }
+
+    /// Menu-bar status copy: the concise phase label plus a reassurance suffix on the two long
+    /// steps (the ~460 MB download and the one-time on-device compile) so neither reads as
+    /// frozen. Prefixes stay "Downloading Parakeet model" / "Optimizing Parakeet" so
+    /// PreparationStatusDeduper still matches. The Models row keeps the plain `label` copy.
+    private static func verboseStatusText(for progress: ParakeetPreparationProgress) -> String {
+        let base = label(for: progress, includePercent: true)
+        switch progress.phase {
+        case .checkingCache:
+            return base
+        case .downloading:
+            return base + " (about 460 MB, one time)"
+        case .optimizing:
+            return base + " (one-time, about 30 sec)"
         }
     }
 
