@@ -97,6 +97,14 @@ public final class ParakeetTranscriptionProvider: ModelRetainingTranscriptionPro
         #endif
     }
 
+    public static func parakeetV3CacheIsComplete() -> Bool {
+        #if arch(arm64)
+            return ParakeetModelSession.parakeetV3CacheIsComplete()
+        #else
+            return false
+        #endif
+    }
+
     public static func parakeetV3CacheSizeBytes() -> Int64? {
         #if arch(arm64)
             return ParakeetModelSession.parakeetV3CacheSizeBytes()
@@ -174,6 +182,10 @@ public struct ParakeetModelCacheDeletionResult: Equatable, Sendable {
 
         static func parakeetV3CacheExists() -> Bool {
             FileManager.default.fileExists(atPath: parakeetV3CacheURL.path)
+        }
+
+        static func parakeetV3CacheIsComplete() -> Bool {
+            AsrModels.modelsExist(at: parakeetV3CacheURL, version: .v3)
         }
 
         static func parakeetV3CacheSizeBytes() -> Int64? {

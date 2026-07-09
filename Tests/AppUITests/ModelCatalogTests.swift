@@ -135,7 +135,7 @@ final class ModelCatalogTests: XCTestCase {
 
     #if arch(arm64)
         func testParakeetManagedModelDeleteClearsCacheAndShutdownsProvider() async throws {
-            let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
+            let cache = SpyParakeetCacheStore(exists: true, isComplete: true, sizeBytes: 461 * 1024 * 1024)
             let provider = SpyRetainingProvider()
             let model = ParakeetManagedModel(cacheStore: cache, provider: provider)
             let catalog = ModelCatalog(models: [model])
@@ -157,7 +157,7 @@ final class ModelCatalogTests: XCTestCase {
         }
 
         func testCachedParakeetStaysInstalledInPreferenceRowsWhilePreparationIsInProgress() throws {
-            let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
+            let cache = SpyParakeetCacheStore(exists: true, isComplete: true, sizeBytes: 461 * 1024 * 1024)
             let model = ParakeetManagedModel(
                 cacheStore: cache,
                 provider: nil,
@@ -179,7 +179,7 @@ final class ModelCatalogTests: XCTestCase {
         }
 
         func testCachedParakeetPreferenceRefreshDoesNotMeasureCacheSize() throws {
-            let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
+            let cache = SpyParakeetCacheStore(exists: true, isComplete: true, sizeBytes: 461 * 1024 * 1024)
             let model = ParakeetManagedModel(cacheStore: cache, provider: nil)
             let catalog = ModelCatalog(models: [model])
 
@@ -195,7 +195,7 @@ final class ModelCatalogTests: XCTestCase {
         }
 
         func testCanDeleteModelDoesNotMeasureParakeetCacheSize() {
-            let cache = SpyParakeetCacheStore(exists: true, sizeBytes: 461 * 1024 * 1024)
+            let cache = SpyParakeetCacheStore(exists: true, isComplete: true, sizeBytes: 461 * 1024 * 1024)
             let model = ParakeetManagedModel(cacheStore: cache, provider: nil)
             let notInstalled = StubManagedModel(
                 id: "ggml-small.en",
@@ -208,6 +208,32 @@ final class ModelCatalogTests: XCTestCase {
             XCTAssertFalse(catalog.canDeleteModel(selectedModelID: "ggml-small.en"))
             XCTAssertFalse(catalog.canDeleteModel(selectedModelID: "ggml-nonexistent"))
             XCTAssertEqual(cache.sizeCallCount, 0, "menu enablement must never walk the cache directory")
+        }
+
+        func testIncompleteParakeetCacheDoesNotRenderInstalled() throws {
+            let cache = SpyParakeetCacheStore(exists: true, isComplete: false, sizeBytes: 32 * 1024 * 1024)
+            let model = ParakeetManagedModel(cacheStore: cache, provider: nil)
+            let catalog = ModelCatalog(models: [model])
+
+            XCTAssertFalse(catalog.isInstalled(modelID: TranscriptionModelID.parakeetV3))
+            XCTAssertNil(model.installedSizeBytes)
+
+            let rows = PreferencesModelState.rows(
+                models: catalog.availableModels,
+                selectedModelID: "ggml-small.en",
+                downloadingModelID: nil
+            )
+            let row = try XCTUnwrap(rows.first)
+            XCTAssertFalse(row.isInstalled)
+            XCTAssertTrue(row.canDownload)
+        }
+
+        func testCompleteParakeetCacheRendersInstalled() throws {
+            let cache = SpyParakeetCacheStore(exists: true, isComplete: true, sizeBytes: 461 * 1024 * 1024)
+            let model = ParakeetManagedModel(cacheStore: cache, provider: nil)
+            let catalog = ModelCatalog(models: [model])
+
+            XCTAssertTrue(catalog.isInstalled(modelID: TranscriptionModelID.parakeetV3))
         }
     #endif
 }
@@ -244,17 +270,23 @@ private final class StubManagedModel: ManagedModel, @unchecked Sendable {
 #if arch(arm64)
     private final class SpyParakeetCacheStore: ParakeetModelCacheStore, @unchecked Sendable {
         var exists: Bool
+        var isComplete: Bool
         var sizeBytes: Int64?
         private(set) var deleteCallCount = 0
         private(set) var sizeCallCount = 0
 
-        init(exists: Bool, sizeBytes: Int64?) {
+        init(exists: Bool, isComplete: Bool, sizeBytes: Int64?) {
             self.exists = exists
+            self.isComplete = isComplete
             self.sizeBytes = sizeBytes
         }
 
         func parakeetCacheExists() -> Bool {
             exists
+        }
+
+        func parakeetCacheIsComplete() -> Bool {
+            isComplete
         }
 
         func parakeetCacheSizeBytes() -> Int64? {
@@ -265,7 +297,7 @@ private final class StubManagedModel: ManagedModel, @unchecked Sendable {
         func deleteParakeetCache() throws {
             deleteCallCount += 1
             exists = false
-            sizeBytes = nil
+            isComplete = false
         }
     }
 

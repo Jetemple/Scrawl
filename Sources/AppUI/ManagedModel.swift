@@ -52,6 +52,7 @@ extension ManagedModel {
 
 protocol ParakeetModelCacheStore: Sendable {
     func parakeetCacheExists() -> Bool
+    func parakeetCacheIsComplete() -> Bool
     func parakeetCacheSizeBytes() -> Int64?
     func deleteParakeetCache() throws
 }
@@ -167,7 +168,7 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
         }
 
         var installState: ManagedModelInstallState {
-            if cacheStore.parakeetCacheExists() {
+            if cacheStore.parakeetCacheIsComplete() {
                 return .installed(sizeBytes: nil)
             }
             if let progress = preparationProgressProvider() {
@@ -177,7 +178,7 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
         }
 
         var installedSizeBytes: Int64? {
-            guard cacheStore.parakeetCacheExists() else { return nil }
+            guard cacheStore.parakeetCacheIsComplete() else { return nil }
             return cacheStore.parakeetCacheSizeBytes()
         }
 
