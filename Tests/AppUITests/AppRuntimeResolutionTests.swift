@@ -13,7 +13,7 @@ import XCTest
 final class AppRuntimeResolutionTests: XCTestCase {
     func testRecommendedDefaultModelIsLightweightEnglishForFastOnboarding() {
         #if arch(arm64)
-            XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "parakeet-v3")
+            XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "ggml-small.en")
         #else
             XCTAssertEqual(AppRuntime.resolveRecommendedDefaultModelID(), "ggml-small.en")
         #endif
