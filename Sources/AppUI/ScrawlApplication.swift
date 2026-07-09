@@ -197,7 +197,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
         setStatus("Idle")
         updateStatusIcon()
-        startSelectedModelPreparationIfNeeded()
+        resolveLaunchModelPreparation()
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -1232,6 +1232,30 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         return LocalModelManager.downloadableModels.first
     }
 
+    private func resolveLaunchModelPreparation() {
+        let settings = runtime.settingsStore.load()
+        let selectedID = settings.modelID
+        let resolution = ModelSelectionPlanner.launchResolution(
+            selectedModelID: selectedID,
+            preparesOnSelection: modelCatalog.preparesOnSelection(modelID: selectedID),
+            isInstalled: modelCatalog.isInstalled(modelID: selectedID),
+            installedFallbackModelID: modelCatalog.installedModelIDs()
+                .first(where: { !modelCatalog.preparesOnSelection(modelID: $0) })
+        )
+        switch resolution {
+        case .prepareSelectedIfNeeded:
+            startSelectedModelPreparationIfNeeded()
+        case let .demoteAndPrepare(fallbackModelID, pendingModelID):
+            // Deliberately leave defaultModelID untouched: the demotion is temporary and
+            // the pending cutover restores the selection the user actually chose.
+            mutateSettings { $0.selectedModelID = fallbackModelID }
+            beginPendingModelPreparation(
+                ModelSelectionPlan(modelID: pendingModelID, shouldPrepareOnSelection: true)
+            )
+            refreshModelMenu()
+        }
+    }
+
     private func startSelectedModelPreparationIfNeeded() {
         let settings = runtime.settingsStore.load()
         startModelPreparationIfNeeded(modelID: settings.modelID)
@@ -1281,7 +1305,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             } catch {
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    if error is CancellationError { return }
+                    // URLSession surfaces a cancelled preparation as URLError(.cancelled),
+                    // not CancellationError; and a superseded generation means the user
+                    // already moved on — neither may raise the failure alert.
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                    guard parakeetPreparationGeneration == generation else { return }
                     applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
                     presentParakeetSetupFailure(details: describe(error))
                 }

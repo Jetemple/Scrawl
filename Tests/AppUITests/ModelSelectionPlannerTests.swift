@@ -83,4 +83,51 @@ final class ModelSelectionPlannerTests: XCTestCase {
             )
         )
     }
+
+    func testLaunchResolutionKeepsWhisperSelection() {
+        let resolution = ModelSelectionPlanner.launchResolution(
+            selectedModelID: "ggml-small.en",
+            preparesOnSelection: false,
+            isInstalled: true,
+            installedFallbackModelID: "ggml-tiny.en"
+        )
+
+        XCTAssertEqual(resolution, .prepareSelectedIfNeeded)
+    }
+
+    func testLaunchResolutionWarmsInstalledParakeetInPlace() {
+        let resolution = ModelSelectionPlanner.launchResolution(
+            selectedModelID: "parakeet-v3",
+            preparesOnSelection: true,
+            isInstalled: true,
+            installedFallbackModelID: "ggml-tiny.en"
+        )
+
+        XCTAssertEqual(resolution, .prepareSelectedIfNeeded)
+    }
+
+    func testLaunchResolutionDemotesMissingParakeetToInstalledFallback() {
+        let resolution = ModelSelectionPlanner.launchResolution(
+            selectedModelID: "parakeet-v3",
+            preparesOnSelection: true,
+            isInstalled: false,
+            installedFallbackModelID: "ggml-tiny.en"
+        )
+
+        XCTAssertEqual(
+            resolution,
+            .demoteAndPrepare(fallbackModelID: "ggml-tiny.en", pendingModelID: "parakeet-v3")
+        )
+    }
+
+    func testLaunchResolutionWithoutFallbackPreparesInPlace() {
+        let resolution = ModelSelectionPlanner.launchResolution(
+            selectedModelID: "parakeet-v3",
+            preparesOnSelection: true,
+            isInstalled: false,
+            installedFallbackModelID: nil
+        )
+
+        XCTAssertEqual(resolution, .prepareSelectedIfNeeded)
+    }
 }
