@@ -43,8 +43,14 @@ enum ModelSelectionPlanner {
             )
         }
 
+        // A `.selected` outcome means the model is ready to use now. Carry `preparesOnSelection`
+        // (not a hardcoded false) so `completeModelSelection` warms up a just-selected Parakeet
+        // whose cache is complete but whose session is cold — and, crucially, does NOT run its
+        // `else { cancelParakeetPreparation() }` branch, which would tear down the ready state
+        // when re-selecting an already-warm Parakeet. Whisper models pass `false` and still
+        // cancel any in-flight Parakeet prep, as before.
         return .selected(
-            ModelSelectionPlan(modelID: requestedModelID, shouldPrepareOnSelection: false)
+            ModelSelectionPlan(modelID: requestedModelID, shouldPrepareOnSelection: preparesOnSelection)
         )
     }
 }

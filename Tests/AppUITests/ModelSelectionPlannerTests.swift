@@ -43,7 +43,7 @@ final class ModelSelectionPlannerTests: XCTestCase {
 
         XCTAssertEqual(
             outcome,
-            .selected(ModelSelectionPlan(modelID: "parakeet-v3", shouldPrepareOnSelection: false))
+            .selected(ModelSelectionPlan(modelID: "parakeet-v3", shouldPrepareOnSelection: true))
         )
     }
 
