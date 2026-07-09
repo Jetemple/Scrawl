@@ -24,7 +24,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/FluidInference/FluidAudio.git",
-            revision: "a95ec26ee05f19b5f6e69c62e1d4fae420537730"
+            revision: "859668e00aacbc49a4a60fce192a271144f9e322"
         )
     ],
     targets: [
