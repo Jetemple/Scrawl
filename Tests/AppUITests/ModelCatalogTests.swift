@@ -228,7 +228,7 @@ final class ModelCatalogTests: XCTestCase {
             XCTAssertTrue(row.canDownload)
         }
 
-        func testCompleteParakeetCacheRendersInstalled() throws {
+        func testCompleteParakeetCacheRendersInstalled() {
             let cache = SpyParakeetCacheStore(exists: true, isComplete: true, sizeBytes: 461 * 1024 * 1024)
             let model = ParakeetManagedModel(cacheStore: cache, provider: nil)
             let catalog = ModelCatalog(models: [model])

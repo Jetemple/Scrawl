@@ -51,17 +51,23 @@ struct ParakeetPreparationState: Equatable, Sendable {
     private var hasMovedPastDownload = false
 
     var isPreparing: Bool {
-        if case .preparing = storage { return true }
+        if case .preparing = storage {
+            return true
+        }
         return false
     }
 
     var isReady: Bool {
-        if case .ready = storage { return true }
+        if case .ready = storage {
+            return true
+        }
         return false
     }
 
     var failureMessage: String? {
-        if case let .failed(message) = storage { return message }
+        if case let .failed(message) = storage {
+            return message
+        }
         return nil
     }
 

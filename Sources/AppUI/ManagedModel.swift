@@ -18,12 +18,16 @@ enum ManagedModelInstallState: Equatable, Sendable {
     case installed(sizeBytes: Int64?)
 
     var isInstalled: Bool {
-        if case .installed = self { return true }
+        if case .installed = self {
+            return true
+        }
         return false
     }
 
     var installedSizeBytes: Int64? {
-        if case let .installed(sizeBytes) = self { return sizeBytes }
+        if case let .installed(sizeBytes) = self {
+            return sizeBytes
+        }
         return nil
     }
 }

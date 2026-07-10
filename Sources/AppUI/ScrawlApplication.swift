@@ -22,7 +22,9 @@ enum AccessibilityPromptDecision: Equatable {
     case openSettings
 
     static func decide(isAuthorized: Bool, hasShownSystemPrompt: Bool) -> AccessibilityPromptDecision {
-        if isAuthorized { return .alreadyAuthorized }
+        if isAuthorized {
+            return .alreadyAuthorized
+        }
         return hasShownSystemPrompt ? .openSettings : .showSystemPrompt
     }
 }
@@ -977,7 +979,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     guard self.modelDownloadGeneration == downloadGeneration else { return }
                     // User-initiated cancel: the quiet "Download cancelled" status
                     // set by cancelModelDownload() is the only user-visible surface.
-                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                        return
+                    }
                     let details = self.describe(error)
                     self.setStatus("Download failed")
                     _ = self.presentAlert(
@@ -1308,7 +1312,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     // URLSession surfaces a cancelled preparation as URLError(.cancelled),
                     // not CancellationError; and a superseded generation means the user
                     // already moved on — neither may raise the failure alert.
-                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                        return
+                    }
                     guard parakeetPreparationGeneration == generation else { return }
                     applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
                     presentParakeetSetupFailure(details: describe(error))
