@@ -130,4 +130,34 @@ final class ModelSelectionPlannerTests: XCTestCase {
 
         XCTAssertEqual(resolution, .prepareSelectedIfNeeded)
     }
+
+    func testParakeetFailureAlertOffersRecoveryWhenParakeetIsSelected() {
+        let plan = ModelSelectionPlanner.parakeetSetupFailureAlertPlan(
+            selectedModelPreparesOnSelection: true
+        )
+
+        XCTAssertEqual(
+            plan,
+            ParakeetSetupFailureAlertPlan(
+                primaryButton: "Switch to Whisper",
+                secondaryButton: "Not Now",
+                runsRecoveryOnPrimary: true
+            )
+        )
+    }
+
+    func testParakeetFailureAlertDoesNotOfferRecoveryWhenWhisperIsAlreadySelected() {
+        let plan = ModelSelectionPlanner.parakeetSetupFailureAlertPlan(
+            selectedModelPreparesOnSelection: false
+        )
+
+        XCTAssertEqual(
+            plan,
+            ParakeetSetupFailureAlertPlan(
+                primaryButton: "OK",
+                secondaryButton: nil,
+                runsRecoveryOnPrimary: false
+            )
+        )
+    }
 }

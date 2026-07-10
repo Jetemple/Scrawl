@@ -122,6 +122,9 @@ struct ParakeetPreparationState: Equatable, Sendable {
     private mutating func apply(_ progress: ParakeetPreparationProgress) {
         switch progress.phase {
         case .checkingCache:
+            guard maxDownloadFraction == nil, !hasMovedPastDownload else {
+                return
+            }
             storage = .preparing(progress)
         case .downloading:
             guard let fraction = progress.fractionCompleted else {
@@ -140,9 +143,7 @@ struct ParakeetPreparationState: Equatable, Sendable {
                 )
             )
         case .optimizing:
-            if maxDownloadFraction != nil {
-                hasMovedPastDownload = true
-            }
+            hasMovedPastDownload = true
             storage = .preparing(
                 ParakeetPreparationProgress(
                     fractionCompleted: nil,
@@ -164,7 +165,7 @@ struct ParakeetPreparationState: Equatable, Sendable {
         case .downloading:
             return base + " (about 460 MB, one time)"
         case .optimizing:
-            return base + " (one-time, about 30 sec)"
+            return base + " (one-time, up to 1 min)"
         }
     }
 

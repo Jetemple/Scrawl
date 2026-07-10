@@ -2385,6 +2385,10 @@ extension StatusBarAppDelegate {
     }
 
     private func presentParakeetSetupFailure(details: String) {
+        let selectedModelID = runtime.settingsStore.load().modelID
+        let alertPlan = ModelSelectionPlanner.parakeetSetupFailureAlertPlan(
+            selectedModelPreparesOnSelection: modelCatalog.preparesOnSelection(modelID: selectedModelID)
+        )
         let response = presentAlert(
             title: "Parakeet setup failed",
             message: """
@@ -2392,10 +2396,10 @@ extension StatusBarAppDelegate {
 
             \(details)
             """,
-            primaryButton: "Switch to Whisper",
-            secondaryButton: "Not Now"
+            primaryButton: alertPlan.primaryButton,
+            secondaryButton: alertPlan.secondaryButton
         )
-        if response == .alertFirstButtonReturn {
+        if alertPlan.runsRecoveryOnPrimary, response == .alertFirstButtonReturn {
             switchToWhisperFallbackAfterParakeetFailure()
         }
     }

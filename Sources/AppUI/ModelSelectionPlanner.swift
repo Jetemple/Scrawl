@@ -23,6 +23,12 @@ enum LaunchModelResolution: Equatable, Sendable {
     case demoteAndPrepare(fallbackModelID: String, pendingModelID: String)
 }
 
+struct ParakeetSetupFailureAlertPlan: Equatable, Sendable {
+    let primaryButton: String
+    let secondaryButton: String?
+    let runsRecoveryOnPrimary: Bool
+}
+
 enum ModelSelectionPlanner {
     static func requiresDownloadConfirmation(
         preparesOnSelection: Bool,
@@ -77,6 +83,24 @@ enum ModelSelectionPlanner {
         // cancel any in-flight Parakeet prep, as before.
         return .selected(
             ModelSelectionPlan(modelID: requestedModelID, shouldPrepareOnSelection: preparesOnSelection)
+        )
+    }
+
+    static func parakeetSetupFailureAlertPlan(
+        selectedModelPreparesOnSelection: Bool
+    ) -> ParakeetSetupFailureAlertPlan {
+        if selectedModelPreparesOnSelection {
+            return ParakeetSetupFailureAlertPlan(
+                primaryButton: "Switch to Whisper",
+                secondaryButton: "Not Now",
+                runsRecoveryOnPrimary: true
+            )
+        }
+
+        return ParakeetSetupFailureAlertPlan(
+            primaryButton: "OK",
+            secondaryButton: nil,
+            runsRecoveryOnPrimary: false
         )
     }
 }
