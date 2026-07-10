@@ -1236,189 +1236,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         return LocalModelManager.downloadableModels.first
     }
 
-    private func resolveLaunchModelPreparation() {
-        let settings = runtime.settingsStore.load()
-        let selectedID = settings.modelID
-        let resolution = ModelSelectionPlanner.launchResolution(
-            selectedModelID: selectedID,
-            preparesOnSelection: modelCatalog.preparesOnSelection(modelID: selectedID),
-            isInstalled: modelCatalog.isInstalled(modelID: selectedID),
-            installedFallbackModelID: modelCatalog.installedModelIDs()
-                .first(where: { !modelCatalog.preparesOnSelection(modelID: $0) })
-        )
-        switch resolution {
-        case .prepareSelectedIfNeeded:
-            startSelectedModelPreparationIfNeeded()
-        case let .demoteAndPrepare(fallbackModelID, pendingModelID):
-            // Deliberately leave defaultModelID untouched: the demotion is temporary and
-            // the pending cutover restores the selection the user actually chose.
-            mutateSettings { $0.selectedModelID = fallbackModelID }
-            beginPendingModelPreparation(
-                ModelSelectionPlan(modelID: pendingModelID, shouldPrepareOnSelection: true)
-            )
-            refreshModelMenu()
-        }
-    }
-
-    private func startSelectedModelPreparationIfNeeded() {
-        let settings = runtime.settingsStore.load()
-        startModelPreparationIfNeeded(modelID: settings.modelID)
-    }
-
-    /// Begins a deferred switch: keep the current selectedModelID, remember the requested model
-    /// as pending, and prepare it. `applyParakeetPreparationEvent(.ready)` commits the switch.
-    private func beginPendingModelPreparation(_ plan: ModelSelectionPlan) {
-        pendingModelID = plan.modelID
-        startModelPreparationIfNeeded(modelID: plan.modelID)
-        setStatus("Setting up \(PreferencesModelState.displayName(forModelID: plan.modelID))…")
-        refreshPreferencesWindow()
-    }
-
-    private func startModelPreparationIfNeeded(modelID: String) {
-        guard modelCatalog.preparesOnSelection(modelID: modelID) else {
-            return
-        }
-        guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
-            return
-        }
-        guard let model = modelCatalog.model(id: modelID) else {
-            return
-        }
-
-        let generation = UUID()
-        parakeetPreparationGeneration = generation
-        preparationRefreshGate.reset()
-        parakeetPreparationState.apply(.started)
-        publishParakeetPreparationState()
-
-        parakeetPreparationTask = Task { [weak self] in
-            do {
-                try await model.prepare(
-                    progressHandler: { [weak self] progress in
-                        Task { @MainActor [weak self] in
-                            self?.applyParakeetPreparationEvent(
-                                .progress(ParakeetPreparationProgress(progress)),
-                                generation: generation
-                            )
-                        }
-                    }
-                )
-                await MainActor.run { [weak self] in
-                    self?.applyParakeetPreparationEvent(.ready, generation: generation)
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    // URLSession surfaces a cancelled preparation as URLError(.cancelled),
-                    // not CancellationError; and a superseded generation means the user
-                    // already moved on — neither may raise the failure alert.
-                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
-                        return
-                    }
-                    guard parakeetPreparationGeneration == generation else { return }
-                    applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
-                    presentParakeetSetupFailure(details: describe(error))
-                }
-            }
-        }
-    }
-
-    private func cancelParakeetPreparation() {
-        parakeetPreparationTask?.cancel()
-        parakeetPreparationTask = nil
-        parakeetPreparationGeneration = nil
-        pendingModelID = nil
-        parakeetPreparationState = ParakeetPreparationState()
-        preparationRefreshGate.reset()
-        refreshPreferencesWindow()
-    }
-
-    private func applyParakeetPreparationEvent(_ event: ParakeetPreparationEvent, generation: UUID) {
-        guard parakeetPreparationGeneration == generation else { return }
-        parakeetPreparationState.apply(event)
-        if event == .ready || parakeetPreparationState.failureMessage != nil {
-            parakeetPreparationGeneration = nil
-            parakeetPreparationTask = nil
-            if parakeetPreparationState.failureMessage != nil {
-                pendingModelID = nil
-            }
-        }
-        if event == .ready {
-            if let pendingModelID {
-                mutateSettings {
-                    $0.selectedModelID = pendingModelID
-                    if $0.defaultModelID.isEmpty {
-                        $0.defaultModelID = pendingModelID
-                    }
-                }
-                self.pendingModelID = nil
-                setStatus(PreferencesModelState.selectedModelStatusText(forModelID: pendingModelID))
-            } else {
-                setStatus("Parakeet ready")
-            }
-            // The gate has already baselined this row text, so a gated publish would
-            // skip; reset and refresh explicitly so the installed row lands.
-            preparationRefreshGate.reset()
-            refreshPreferencesWindow()
-        } else {
-            publishParakeetPreparationState()
-        }
-    }
-
-    private func publishParakeetPreparationState() {
-        if let statusText = parakeetPreparationState.statusText {
-            setStatus(statusText)
-        }
-        // Progress callbacks fire ~18x/sec but the window only renders the coarse row text;
-        // skip refreshes that would rebuild an identical snapshot (measured main-thread
-        // saturation during preparation with the preferences window open).
-        guard preparationRefreshGate.shouldRefresh(rowText: parakeetPreparationState.modelRowProgressText) else {
-            return
-        }
-        refreshPreferencesWindow()
-    }
-
-    private func presentParakeetSetupFailure(details: String) {
-        let response = presentAlert(
-            title: "Parakeet setup failed",
-            message: """
-            Scrawl could not download or prepare Parakeet.
-
-            \(details)
-            """,
-            primaryButton: "Switch to Whisper",
-            secondaryButton: "Not Now"
-        )
-        if response == .alertFirstButtonReturn {
-            switchToWhisperFallbackAfterParakeetFailure()
-        }
-    }
-
-    private func switchToWhisperFallbackAfterParakeetFailure() {
-        if let installed = modelCatalog.installedModelIDs().first(where: { !modelCatalog.preparesOnSelection(modelID: $0) }) {
-            mutateSettings {
-                $0.selectedModelID = installed
-                if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
-                    $0.defaultModelID = installed
-                }
-            }
-            setStatus(PreferencesModelState.selectedModelStatusText(forModelID: installed))
-            return
-        }
-
-        guard let recommendedModel = preferredInitialDownloadModel() else {
-            setStatus("No Whisper model available")
-            return
-        }
-        mutateSettings {
-            $0.selectedModelID = recommendedModel.id
-            if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
-                $0.defaultModelID = recommendedModel.id
-            }
-        }
-        startModelDownload(recommendedModel)
-    }
-
     private func applyRecommendedModelDefaultsIfNeeded() {
         let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
         let recommendedID = modelCatalog.resolveRecommendedDefaultModelID(
@@ -2419,5 +2236,192 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         if !presentTranscriptionGuidanceIfNeeded(for: error) {
             runtime.overlayController.showTransientMessage("Transcription failed — \(describe(error))")
         }
+    }
+}
+
+// MARK: - Parakeet preparation & deferred model cutover
+
+extension StatusBarAppDelegate {
+    private func resolveLaunchModelPreparation() {
+        let settings = runtime.settingsStore.load()
+        let selectedID = settings.modelID
+        let resolution = ModelSelectionPlanner.launchResolution(
+            selectedModelID: selectedID,
+            preparesOnSelection: modelCatalog.preparesOnSelection(modelID: selectedID),
+            isInstalled: modelCatalog.isInstalled(modelID: selectedID),
+            installedFallbackModelID: modelCatalog.installedModelIDs()
+                .first(where: { !modelCatalog.preparesOnSelection(modelID: $0) })
+        )
+        switch resolution {
+        case .prepareSelectedIfNeeded:
+            startSelectedModelPreparationIfNeeded()
+        case let .demoteAndPrepare(fallbackModelID, pendingModelID):
+            // Deliberately leave defaultModelID untouched: the demotion is temporary and
+            // the pending cutover restores the selection the user actually chose.
+            mutateSettings { $0.selectedModelID = fallbackModelID }
+            beginPendingModelPreparation(
+                ModelSelectionPlan(modelID: pendingModelID, shouldPrepareOnSelection: true)
+            )
+            refreshModelMenu()
+        }
+    }
+
+    private func startSelectedModelPreparationIfNeeded() {
+        let settings = runtime.settingsStore.load()
+        startModelPreparationIfNeeded(modelID: settings.modelID)
+    }
+
+    /// Begins a deferred switch: keep the current selectedModelID, remember the requested model
+    /// as pending, and prepare it. `applyParakeetPreparationEvent(.ready)` commits the switch.
+    private func beginPendingModelPreparation(_ plan: ModelSelectionPlan) {
+        pendingModelID = plan.modelID
+        startModelPreparationIfNeeded(modelID: plan.modelID)
+        setStatus("Setting up \(PreferencesModelState.displayName(forModelID: plan.modelID))…")
+        refreshPreferencesWindow()
+    }
+
+    private func startModelPreparationIfNeeded(modelID: String) {
+        guard modelCatalog.preparesOnSelection(modelID: modelID) else {
+            return
+        }
+        guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
+            return
+        }
+        guard let model = modelCatalog.model(id: modelID) else {
+            return
+        }
+
+        let generation = UUID()
+        parakeetPreparationGeneration = generation
+        preparationRefreshGate.reset()
+        parakeetPreparationState.apply(.started)
+        publishParakeetPreparationState()
+
+        parakeetPreparationTask = Task { [weak self] in
+            do {
+                try await model.prepare(
+                    progressHandler: { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            self?.applyParakeetPreparationEvent(
+                                .progress(ParakeetPreparationProgress(progress)),
+                                generation: generation
+                            )
+                        }
+                    }
+                )
+                await MainActor.run { [weak self] in
+                    self?.applyParakeetPreparationEvent(.ready, generation: generation)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    // URLSession surfaces a cancelled preparation as URLError(.cancelled),
+                    // not CancellationError; and a superseded generation means the user
+                    // already moved on — neither may raise the failure alert.
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                        return
+                    }
+                    guard parakeetPreparationGeneration == generation else { return }
+                    applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
+                    presentParakeetSetupFailure(details: describe(error))
+                }
+            }
+        }
+    }
+
+    private func cancelParakeetPreparation() {
+        parakeetPreparationTask?.cancel()
+        parakeetPreparationTask = nil
+        parakeetPreparationGeneration = nil
+        pendingModelID = nil
+        parakeetPreparationState = ParakeetPreparationState()
+        preparationRefreshGate.reset()
+        refreshPreferencesWindow()
+    }
+
+    private func applyParakeetPreparationEvent(_ event: ParakeetPreparationEvent, generation: UUID) {
+        guard parakeetPreparationGeneration == generation else { return }
+        parakeetPreparationState.apply(event)
+        if event == .ready || parakeetPreparationState.failureMessage != nil {
+            parakeetPreparationGeneration = nil
+            parakeetPreparationTask = nil
+            if parakeetPreparationState.failureMessage != nil {
+                pendingModelID = nil
+            }
+        }
+        if event == .ready {
+            if let pendingModelID {
+                mutateSettings {
+                    $0.selectedModelID = pendingModelID
+                    if $0.defaultModelID.isEmpty {
+                        $0.defaultModelID = pendingModelID
+                    }
+                }
+                self.pendingModelID = nil
+                setStatus(PreferencesModelState.selectedModelStatusText(forModelID: pendingModelID))
+            } else {
+                setStatus("Parakeet ready")
+            }
+            // The gate has already baselined this row text, so a gated publish would
+            // skip; reset and refresh explicitly so the installed row lands.
+            preparationRefreshGate.reset()
+            refreshPreferencesWindow()
+        } else {
+            publishParakeetPreparationState()
+        }
+    }
+
+    private func publishParakeetPreparationState() {
+        if let statusText = parakeetPreparationState.statusText {
+            setStatus(statusText)
+        }
+        // Progress callbacks fire ~18x/sec but the window only renders the coarse row text;
+        // skip refreshes that would rebuild an identical snapshot (measured main-thread
+        // saturation during preparation with the preferences window open).
+        guard preparationRefreshGate.shouldRefresh(rowText: parakeetPreparationState.modelRowProgressText) else {
+            return
+        }
+        refreshPreferencesWindow()
+    }
+
+    private func presentParakeetSetupFailure(details: String) {
+        let response = presentAlert(
+            title: "Parakeet setup failed",
+            message: """
+            Scrawl could not download or prepare Parakeet.
+
+            \(details)
+            """,
+            primaryButton: "Switch to Whisper",
+            secondaryButton: "Not Now"
+        )
+        if response == .alertFirstButtonReturn {
+            switchToWhisperFallbackAfterParakeetFailure()
+        }
+    }
+
+    private func switchToWhisperFallbackAfterParakeetFailure() {
+        if let installed = modelCatalog.installedModelIDs().first(where: { !modelCatalog.preparesOnSelection(modelID: $0) }) {
+            mutateSettings {
+                $0.selectedModelID = installed
+                if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
+                    $0.defaultModelID = installed
+                }
+            }
+            setStatus(PreferencesModelState.selectedModelStatusText(forModelID: installed))
+            return
+        }
+
+        guard let recommendedModel = preferredInitialDownloadModel() else {
+            setStatus("No Whisper model available")
+            return
+        }
+        mutateSettings {
+            $0.selectedModelID = recommendedModel.id
+            if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
+                $0.defaultModelID = recommendedModel.id
+            }
+        }
+        startModelDownload(recommendedModel)
     }
 }
