@@ -40,6 +40,10 @@ brew install --cask scrawl
 
 Upgrade later with `brew upgrade --cask scrawl`. Whisper models need the `whisper-cpp` binary (`brew install whisper-cpp`); Parakeet v3 on Apple Silicon needs nothing extra.
 
+**Direct download**
+
+Grab `Scrawl-<version>.dmg` from the [latest release](https://github.com/Jetemple/Scrawl/releases/latest), open it, and drag Scrawl to Applications. The app is signed and notarized. Check for new versions any time from the menu bar: Scrawl icon, then "Check for Updates".
+
 **From source**
 
 Needs the Xcode command line tools. Install `whisper-cpp` too if you want Whisper models or bring-your-own ggml models.
