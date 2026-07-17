@@ -3,13 +3,19 @@ import Foundation
 
 public enum AudioLevelAnalyzer {
     public static func isLikelySilent(samples: [Int16], minimumRMS: Double) -> Bool {
-        rootMeanSquare(samples: samples) < minimumRMS
+        rootMeanSquare(samples: samples[...]) < minimumRMS
     }
 
     public static func isLikelySilent(fileURL: URL, minimumRMS: Double) throws -> Bool {
         let samples = try readInt16Samples(fileURL: fileURL)
         guard !samples.isEmpty else { return true }
-        return rootMeanSquare(samples: samples) < minimumRMS
+        return isLikelySilent(samples: samples, minimumRMS: minimumRMS)
+    }
+
+    /// Decodes the file to normalized Int16 samples once, so callers running several
+    /// analyses (silence + active duration) pay for a single read instead of one per check.
+    public static func samples(fromFileURL fileURL: URL) throws -> [Int16] {
+        try readInt16Samples(fileURL: fileURL)
     }
 
     /// Returns the longest consecutive duration during which audio energy exceeds `activeRMS`.
@@ -30,7 +36,7 @@ public enum AudioLevelAnalyzer {
 
         while offset < samples.count {
             let end = min(offset + windowSize, samples.count)
-            let window = Array(samples[offset..<end])
+            let window = samples[offset..<end]
             if rootMeanSquare(samples: window) >= activeRMS {
                 currentActiveSeconds += Double(window.count) / sampleRate
                 longestActiveSeconds = max(longestActiveSeconds, currentActiveSeconds)
@@ -57,7 +63,7 @@ public enum AudioLevelAnalyzer {
         var offset = 0
         while offset < samples.count {
             let end = min(offset + windowSize, samples.count)
-            let window = Array(samples[offset..<end])
+            let window = samples[offset..<end]
             if rootMeanSquare(samples: window) >= activeRMS {
                 activeSeconds += Double(window.count) / sampleRate
             }
@@ -126,9 +132,7 @@ public enum AudioLevelAnalyzer {
             var samples: [Int16] = []
             samples.reserveCapacity(frameLength * Int(buffer.format.channelCount))
             for channel in 0..<Int(buffer.format.channelCount) {
-                for frame in 0..<frameLength {
-                    samples.append(channels[channel][frame])
-                }
+                samples.append(contentsOf: UnsafeBufferPointer(start: channels[channel], count: frameLength))
             }
             return samples
         }
@@ -137,8 +141,8 @@ public enum AudioLevelAnalyzer {
             var samples: [Int16] = []
             samples.reserveCapacity(frameLength * Int(buffer.format.channelCount))
             for channel in 0..<Int(buffer.format.channelCount) {
-                for frame in 0..<frameLength {
-                    let clamped = max(-1.0, min(1.0, channels[channel][frame]))
+                for value in UnsafeBufferPointer(start: channels[channel], count: frameLength) {
+                    let clamped = max(-1.0, min(1.0, value))
                     samples.append(Int16(clamped * Float(Int16.max)))
                 }
             }
@@ -148,14 +152,16 @@ public enum AudioLevelAnalyzer {
         return []
     }
 
-    private static func rootMeanSquare(samples: [Int16]) -> Double {
+    /// Takes a slice so per-window callers scan in place instead of copying each window.
+    private static func rootMeanSquare(samples: ArraySlice<Int16>) -> Double {
         guard !samples.isEmpty else {
             return 0
         }
 
-        let sumOfSquares = samples.reduce(0.0) { partial, sample in
+        var sumOfSquares = 0.0
+        for sample in samples {
             let normalized = Double(sample) / Double(Int16.max)
-            return partial + normalized * normalized
+            sumOfSquares += normalized * normalized
         }
         return sqrt(sumOfSquares / Double(samples.count))
     }

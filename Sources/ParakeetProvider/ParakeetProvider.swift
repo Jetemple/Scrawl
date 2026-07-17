@@ -97,6 +97,14 @@ public final class ParakeetTranscriptionProvider: ModelRetainingTranscriptionPro
         #endif
     }
 
+    public static func parakeetV3CacheIsComplete() -> Bool {
+        #if arch(arm64)
+            return ParakeetModelSession.parakeetV3CacheIsComplete()
+        #else
+            return false
+        #endif
+    }
+
     public static func parakeetV3CacheSizeBytes() -> Int64? {
         #if arch(arm64)
             return ParakeetModelSession.parakeetV3CacheSizeBytes()
@@ -174,6 +182,10 @@ public struct ParakeetModelCacheDeletionResult: Equatable, Sendable {
 
         static func parakeetV3CacheExists() -> Bool {
             FileManager.default.fileExists(atPath: parakeetV3CacheURL.path)
+        }
+
+        static func parakeetV3CacheIsComplete() -> Bool {
+            AsrModels.modelsExist(at: parakeetV3CacheURL, version: .v3)
         }
 
         static func parakeetV3CacheSizeBytes() -> Int64? {
@@ -277,15 +289,17 @@ public struct ParakeetModelCacheDeletionResult: Equatable, Sendable {
             switch progress.phase {
             case .listing:
                 return ModelPreparationProgress(fractionCompleted: nil, phase: .checkingCache)
-            case let .downloading(completedFiles, totalFiles):
+            case let .downloading(_, totalFiles):
                 guard totalFiles > 0 else {
                     return ModelPreparationProgress(fractionCompleted: nil, phase: .checkingCache)
                 }
-                let fileFraction = Double(completedFiles) / Double(totalFiles)
-                return ModelPreparationProgress(
-                    fractionCompleted: fileFraction.clampedToUnitInterval,
-                    phase: .downloading
-                )
+                // FluidAudio reports byte-weighted progress in [0, 0.5] for the download half
+                // (DownloadUtils emits 0.5 * bytesDownloaded / totalBytes). Rescale to [0, 1] so
+                // the bar climbs with real bytes through the one large model file, instead of
+                // freezing until a whole file completes (completedFiles/totalFiles sat at ~26%
+                // for minutes while the big Encoder weight downloaded).
+                let byteFraction = (progress.fractionCompleted * 2).clampedToUnitInterval
+                return ModelPreparationProgress(fractionCompleted: byteFraction, phase: .downloading)
             case .compiling:
                 return ModelPreparationProgress(fractionCompleted: nil, phase: .optimizing)
             }

@@ -464,8 +464,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         // Microphone, Accessibility, and the hotkey control now all live on General (the
         // default tab), so no section switch is needed before clicking them.
-        try XCTUnwrap(contentView.button(titled: "Request")).performClick(nil)
-        try XCTUnwrap(contentView.button(titled: "Open Prompt")).performClick(nil)
+        try XCTUnwrap(contentView.button(withIdentifier: "grant-microphone-access")).performClick(nil)
+        try XCTUnwrap(contentView.button(withIdentifier: "grant-accessibility-access")).performClick(nil)
         try XCTUnwrap(contentView.button(titled: "Set Hotkey…")).performClick(nil)
         controller.selectSection(.about)
         try XCTUnwrap(contentView.button(titled: "Open Project Page")).performClick(nil)
@@ -483,7 +483,9 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let contentView = try XCTUnwrap(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
 
-        let titleMinXs = try ["Hotkey", "Offload model", "Microphone", "Accessibility"].map { title -> CGFloat in
+        // "Offload after" now shares its row with "Max recording" (a deliberate two-up
+        // exception), so the leading column is anchored by that row's leading title.
+        let titleMinXs = try ["Hotkey", "Max recording", "Microphone", "Accessibility"].map { title -> CGFloat in
             let field = try XCTUnwrap(contentView.textField(withValue: title))
             return contentView.convert(field.bounds, from: field).minX.rounded()
         }
@@ -511,7 +513,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
 
         let controls: [NSView] = try [
             XCTUnwrap(contentView.button(titled: "Set Hotkey…")),
-            XCTUnwrap(contentView.button(titled: "Open Prompt")),
+            XCTUnwrap(contentView.button(withIdentifier: "grant-accessibility-access")),
         ]
         let trailingEdges = controls.map { control in
             contentView.convert(control.frame, from: control.superview).maxX.rounded()
@@ -524,18 +526,21 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testGeneralOffloadPopupAlignsUnderHotkeyValue() throws {
+    func testGeneralRecordingAndOffloadShareOneRow() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot())
         let contentView = try XCTUnwrap(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
 
-        let hotkeyValue = try XCTUnwrap(contentView.textField(withValue: "Right ⌥ Option"))
-        let offloadPopup = try XCTUnwrap(contentView.popupButton(selectedTitle: "5 minutes"))
-        let hotkeyMinX = contentView.convert(hotkeyValue.bounds, from: hotkeyValue).minX.rounded()
-        let offloadMinX = contentView.convert(offloadPopup.frame, from: offloadPopup.superview).minX.rounded()
+        // "Max recording" and "Offload after" sit side by side in one two-up row:
+        // same vertical position, with the offload pair to the right of the recording pair.
+        let recording = try XCTUnwrap(contentView.textField(withValue: "Max recording"))
+        let offload = try XCTUnwrap(contentView.textField(withValue: "Offload after"))
+        let recordingFrame = contentView.convert(recording.bounds, from: recording)
+        let offloadFrame = contentView.convert(offload.bounds, from: offload)
 
-        XCTAssertEqual(offloadMinX, hotkeyMinX, accuracy: 2)
+        XCTAssertEqual(recordingFrame.midY.rounded(), offloadFrame.midY.rounded(), accuracy: 1)
+        XCTAssertGreaterThan(offloadFrame.minX, recordingFrame.maxX)
     }
 
     @MainActor
@@ -868,7 +873,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.selectSection(.models)
         XCTAssertNotNil(contentView.textField(withValue: "On-device transcription models."))
         controller.selectSection(.dictionary)
-        XCTAssertNotNil(contentView.textField(withValue: "Preferred terms for names and phrases."))
+        XCTAssertNotNil(contentView.textField(withValue: "Names, jargon, and acronyms Scrawl should get right."))
         XCTAssertNil(contentView.textField(withValue: "Preferred names, terms, and phrases that help Whisper recognize your language."))
     }
 
@@ -996,6 +1001,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         openProjectPage: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
+        setMaxRecordingDuration: @escaping (MaxRecordingDuration) -> Void = { _ in },
         setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
         setLaunchAtLogin: @escaping (Bool) -> Void = { _ in },
         copyTranscript: @escaping (UUID) -> Void = { _ in },
@@ -1023,6 +1029,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
             requestMicrophone: requestMicrophone,
             requestAccessibility: requestAccessibility,
             setModelOffloadPolicy: setModelOffloadPolicy,
+            setMaxRecordingDuration: setMaxRecordingDuration,
             setKeepTranscriptsInClipboardHistory: setKeepTranscriptsInClipboardHistory,
             setLaunchAtLogin: setLaunchAtLogin,
             setTranscriptHistoryEnabled: setTranscriptHistoryEnabled,
@@ -1043,6 +1050,13 @@ private extension NSView {
             return button
         }
         return subviews.lazy.compactMap { $0.button(titled: title) }.first
+    }
+
+    func button(withIdentifier identifier: String) -> NSButton? {
+        if let button = self as? NSButton, button.identifier?.rawValue == identifier, !button.isEffectivelyHidden {
+            return button
+        }
+        return subviews.lazy.compactMap { $0.button(withIdentifier: identifier) }.first
     }
 
     func popupButton(selectedTitle title: String) -> NSPopUpButton? {

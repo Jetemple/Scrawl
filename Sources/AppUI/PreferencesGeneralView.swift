@@ -11,16 +11,18 @@ final class PreferencesGeneralView: NSView {
     private let hotkeyLabel = NSTextField(labelWithString: "")
     private let microphoneLabel = NSTextField(labelWithString: "")
     private let accessibilityLabel = NSTextField(labelWithString: "")
-    private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
-    private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
+    private let microphoneButton = NSButton(title: "Grant Access…", target: nil, action: nil)
+    private let accessibilityButton = NSButton(title: "Grant Access…", target: nil, action: nil)
     private let hotkeyButton = NSButton(title: "Set Hotkey…", target: nil, action: nil)
     private let offloadPopup = NSPopUpButton()
+    private let maxRecordingPopup = NSPopUpButton()
     private let clipboardHistoryCheckbox = NSButton(checkboxWithTitle: "Keep transcripts in clipboard history", target: nil, action: nil)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Launch at login", target: nil, action: nil)
     private let setHotkey: () -> Void
     private let requestMicrophone: () -> Void
     private let requestAccessibility: () -> Void
     private let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
+    private let setMaxRecordingDuration: (MaxRecordingDuration) -> Void
     private let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
     private let setLaunchAtLogin: (Bool) -> Void
 
@@ -38,6 +40,7 @@ final class PreferencesGeneralView: NSView {
         requestMicrophone: @escaping () -> Void,
         requestAccessibility: @escaping () -> Void,
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void,
+        setMaxRecordingDuration: @escaping (MaxRecordingDuration) -> Void = { _ in },
         setKeepTranscriptsInClipboardHistory: @escaping (Bool) -> Void = { _ in },
         setLaunchAtLogin: @escaping (Bool) -> Void = { _ in }
     ) {
@@ -45,6 +48,7 @@ final class PreferencesGeneralView: NSView {
         self.requestMicrophone = requestMicrophone
         self.requestAccessibility = requestAccessibility
         self.setModelOffloadPolicy = setModelOffloadPolicy
+        self.setMaxRecordingDuration = setMaxRecordingDuration
         self.setKeepTranscriptsInClipboardHistory = setKeepTranscriptsInClipboardHistory
         self.setLaunchAtLogin = setLaunchAtLogin
         super.init(frame: .zero)
@@ -55,8 +59,11 @@ final class PreferencesGeneralView: NSView {
 
         microphoneButton.target = self
         microphoneButton.action = #selector(requestMicrophoneAccess(_:))
+        // The two grant buttons share a title, so tests address them by identifier.
+        microphoneButton.identifier = NSUserInterfaceItemIdentifier("grant-microphone-access")
         accessibilityButton.target = self
         accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
+        accessibilityButton.identifier = NSUserInterfaceItemIdentifier("grant-accessibility-access")
         hotkeyButton.target = self
         hotkeyButton.action = #selector(setHotkeyAction(_:))
         let hotkeyUsageHint = "Hold to dictate. Double-tap to lock recording."
@@ -66,6 +73,13 @@ final class PreferencesGeneralView: NSView {
         offloadPopup.controlSize = .small
         offloadPopup.target = self
         offloadPopup.action = #selector(modelOffloadChanged(_:))
+        offloadPopup.toolTip = "Frees memory by unloading the idle model after this long. The next dictation loads it again."
+
+        maxRecordingPopup.addItems(withTitles: MaxRecordingDuration.allCases.map(\.displayName))
+        maxRecordingPopup.controlSize = .small
+        maxRecordingPopup.target = self
+        maxRecordingPopup.action = #selector(maxRecordingChanged(_:))
+        maxRecordingPopup.toolTip = "Recordings stop automatically after this long, so a missed release can't record forever."
 
         clipboardHistoryCheckbox.target = self
         clipboardHistoryCheckbox.action = #selector(clipboardHistoryChanged(_:))
@@ -90,9 +104,11 @@ final class PreferencesGeneralView: NSView {
                         action: hotkeyButton,
                         helpLines: Self.hotkeyHelpLines
                     ),
-                    PreferencesPageSupport.makeSettingControlRow(
-                        title: "Offload model",
-                        control: offloadPopup
+                    Self.makeTwoControlRow(
+                        leadingTitle: "Max recording",
+                        leadingControl: maxRecordingPopup,
+                        trailingTitle: "Offload after",
+                        trailingControl: offloadPopup
                     ),
                 ]),
                 PreferencesPageSupport.makeGroup(header: "Permissions", rows: [
@@ -120,7 +136,7 @@ final class PreferencesGeneralView: NSView {
         isCapturingHotkey: Bool,
         launchAtLoginEnabled: Bool
     ) {
-        hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input..." : settings.hotkey.displayName
+        hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input…" : settings.hotkey.displayName
         hotkeyButton.title = isCapturingHotkey ? "Cancel Capture" : "Set Hotkey…"
         updatePermissionLabel(microphoneLabel, status: microphoneStatus)
         updatePermissionLabel(accessibilityLabel, status: accessibilityStatus)
@@ -128,6 +144,7 @@ final class PreferencesGeneralView: NSView {
         microphoneButton.isHidden = microphoneStatus == .authorized
         accessibilityButton.isHidden = accessibilityStatus == .authorized
         offloadPopup.selectItem(at: ModelOffloadPolicy.allCases.firstIndex(of: settings.modelOffloadPolicy) ?? 0)
+        maxRecordingPopup.selectItem(at: MaxRecordingDuration.allCases.firstIndex(of: settings.maxRecordingDuration) ?? 0)
         clipboardHistoryCheckbox.state = settings.keepTranscriptsInClipboardHistory ? .on : .off
         launchAtLoginCheckbox.state = launchAtLoginEnabled ? .on : .off
     }
@@ -158,6 +175,45 @@ final class PreferencesGeneralView: NSView {
             }
             return NSColor(srgbRed: 0.14, green: 0.48, blue: 0.24, alpha: 1)
         }
+    }
+
+    /// Two labeled controls sharing one row. Each label hugs its own control; a greedy
+    /// spacer between the pairs takes the slack so the trailing pair sits at the row's
+    /// right edge, and both pairs compress gracefully at the window's minimum width.
+    private static func makeTwoControlRow(
+        leadingTitle: String,
+        leadingControl: NSView,
+        trailingTitle: String,
+        trailingControl: NSView
+    ) -> NSView {
+        func label(_ title: String) -> NSTextField {
+            let label = NSTextField(labelWithString: title)
+            label.font = .systemFont(ofSize: 13)
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentHuggingPriority(.required, for: .horizontal)
+            label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            return label
+        }
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+
+        let row = NSStackView(views: [
+            label(leadingTitle), leadingControl, spacer, label(trailingTitle), trailingControl,
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = 8
+        row.setCustomSpacing(16, after: leadingControl)
+        row.edgeInsets = NSEdgeInsets(
+            top: 11,
+            left: PreferencesPageSupport.rowInset,
+            bottom: 11,
+            right: PreferencesPageSupport.rowInset
+        )
+        return row
     }
 
     private static func makeCompactCheckboxRow(_ checkbox: NSButton) -> NSView {
@@ -199,6 +255,11 @@ final class PreferencesGeneralView: NSView {
     @objc private func modelOffloadChanged(_ sender: NSPopUpButton) {
         guard sender.indexOfSelectedItem >= 0 else { return }
         setModelOffloadPolicy(ModelOffloadPolicy.allCases[sender.indexOfSelectedItem])
+    }
+
+    @objc private func maxRecordingChanged(_ sender: NSPopUpButton) {
+        guard sender.indexOfSelectedItem >= 0 else { return }
+        setMaxRecordingDuration(MaxRecordingDuration.allCases[sender.indexOfSelectedItem])
     }
 
     @objc private func clipboardHistoryChanged(_ sender: NSButton) {

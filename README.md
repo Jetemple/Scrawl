@@ -24,7 +24,7 @@
 
 ## What it does
 
-Hold your hotkey (Right Option ⌥ by default), speak, and release. Scrawl transcribes on-device and pastes the result into whatever app you're using. Or double-tap to record hands-free, then tap again to stop.
+Hold your hotkey (Right Option ⌥ by default, rebindable in Settings), speak, and release. Scrawl transcribes on-device and pastes the result into whatever app you're using. Or double-tap to record hands-free, then tap again to stop.
 
 ## Install
 
@@ -38,7 +38,11 @@ brew trust jetemple/tap          # trust the third-party tap (one-time)
 brew install --cask scrawl
 ```
 
-Upgrade later with `brew upgrade --cask scrawl`.
+Upgrade later with `brew upgrade --cask scrawl`. Whisper models need the `whisper-cpp` binary (`brew install whisper-cpp`); Parakeet v3 on Apple Silicon needs nothing extra.
+
+**Direct download**
+
+Grab `Scrawl-<version>.dmg` from the [latest release](https://github.com/Jetemple/Scrawl/releases/latest), open it, and drag Scrawl to Applications. The app is signed and notarized. Check for new versions any time from the menu bar: Scrawl icon, then "Check for Updates".
 
 **From source**
 
@@ -50,15 +54,16 @@ cd Scrawl && make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```
 
-On first launch, grant Microphone and Accessibility. On Apple Silicon, use Parakeet v3 for the recommended fully local setup. To use Whisper instead, install `whisper-cpp`, then open the menubar's Models menu and download one: `small.en` (470 MB) is a fast, English-only default; `medium` (1.5 GB) handles other languages; `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option ⌥, and talk.
+On first launch, grant Microphone and Accessibility. Scrawl starts with Whisper `small.en` (466 MB), a fast English-only model; it needs the `whisper-cpp` binary (`brew install whisper-cpp`). On Apple Silicon, the Models menu also offers Parakeet v3: one click, no extra binary, and your current model keeps working until the download finishes. Other Whisper sizes live in the same menu: `medium` (1.5 GB) handles other languages, `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option ⌥, and talk.
 
 ## Features
 
 - **Fully local.** Audio never leaves your Mac.
 - **Pastes at the cursor.** Straight into the focused field, or the clipboard if an app blocks it.
-- **Apple Silicon default.** Parakeet v3 is the recommended on-device model on arm64 Macs.
+- **Parakeet v3 on Apple Silicon.** One-click download, no extra binary. Scrawl keeps your current model active until the new one is ready.
 - **Bring your own Whisper model.** Download a built-in size (tiny/small/medium/large-v3-turbo), or load any whisper.cpp ggml model.
-- **Stays warm.** Keeps the model in memory between recordings, unloads it after idle. GPU by default, CPU fallback.
+- **Stays warm.** Keeps the model in memory between recordings, unloads it after an idle delay you pick. GPU by default, CPU fallback.
+- **Never records forever.** Recordings stop themselves at a limit you set (1 to 10 minutes), so a stuck key can't run your mic all day.
 - **Custom vocabulary.** Teach it the names, jargon, and acronyms you use.
 - **Local history.** Last 100 transcripts, searchable, on-device. One switch wipes them.
 - **Launch at login.** Start Scrawl in the menu bar when you sign in, from Settings → General.
@@ -106,6 +111,8 @@ Some app has macOS Secure Keyboard Entry on, often a terminal or password manage
 ```bash
 make build      # build
 make test       # run tests
+make lint       # SwiftLint
+make format     # apply SwiftFormat (format-check to verify only)
 make doctor     # check toolchain and dependencies
 make run        # run this source build
 make run-debug  # same, plus manual record/stop controls for diagnostics
@@ -118,7 +125,7 @@ Environment overrides:
 ```bash
 SCRAWL_WHISPER_EXECUTABLE=/path/to/whisper-cli make run   # custom whisper binary
 SCRAWL_MODELS_DIR=/path/to/models make run                # custom models directory
-SCRAWL_WHISPER_THREADS=8 make run                         # cap threads (auto-selects up to 8)
+SCRAWL_WHISPER_THREADS=8 make run                         # whisper thread count (default: auto, 4 to 8)
 SCRAWL_DISABLE_GPU=1 make run                             # force CPU-only
 ```
 

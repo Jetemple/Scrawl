@@ -18,7 +18,7 @@ final class ParakeetPreparationStateTests: XCTestCase {
 
         state.apply(.progress(.init(ModelPreparationProgress(fractionCompleted: 0.75, phase: .optimizing))))
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac…")
+        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac… (one-time, up to 1 min)")
         XCTAssertEqual(state.modelRowProgressText, "Preparing")
 
         state.apply(.ready)
@@ -34,19 +34,19 @@ final class ParakeetPreparationStateTests: XCTestCase {
         state.apply(.started)
         state.apply(.progress(.init(fractionCompleted: 0.50, phase: .downloading)))
         XCTAssertTrue(state.isPreparing)
-        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 50%")
+        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 50% (about 460 MB, one time)")
         XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model — 50%")
 
         state.apply(.progress(.init(fractionCompleted: 0.25, phase: .downloading)))
-        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 50%")
+        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 50% (about 460 MB, one time)")
         XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model — 50%")
 
         state.apply(.progress(.init(fractionCompleted: 1.0, phase: .downloading)))
-        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 100%")
+        XCTAssertEqual(state.statusText, "Downloading Parakeet model — 100% (about 460 MB, one time)")
         XCTAssertEqual(state.modelRowProgressText, "Downloading Parakeet model — 100%")
 
         state.apply(.progress(.init(fractionCompleted: nil, phase: .optimizing)))
-        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac…")
+        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac… (one-time, up to 1 min)")
         XCTAssertEqual(state.modelRowProgressText, "Preparing")
 
         state.apply(.ready)
@@ -54,6 +54,30 @@ final class ParakeetPreparationStateTests: XCTestCase {
         XCTAssertTrue(state.isReady)
         XCTAssertNil(state.statusText)
         XCTAssertNil(state.modelRowProgressText)
+    }
+
+    func testLateCacheCheckAfterDownloadDoesNotMoveStatusBackToLoading() {
+        var state = ParakeetPreparationState()
+
+        state.apply(.started)
+        state.apply(.progress(.init(fractionCompleted: 1.0, phase: .downloading)))
+        state.apply(.progress(.init(fractionCompleted: nil, phase: .optimizing)))
+        state.apply(.progress(.init(fractionCompleted: nil, phase: .checkingCache)))
+
+        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac… (one-time, up to 1 min)")
+        XCTAssertEqual(state.modelRowProgressText, "Preparing")
+    }
+
+    func testLateCacheCheckDuringCachedCompileDoesNotMoveStatusBackToLoading() {
+        var state = ParakeetPreparationState()
+
+        state.apply(.started)
+        state.apply(.progress(.init(fractionCompleted: nil, phase: .checkingCache)))
+        state.apply(.progress(.init(fractionCompleted: nil, phase: .optimizing)))
+        state.apply(.progress(.init(fractionCompleted: nil, phase: .checkingCache)))
+
+        XCTAssertEqual(state.statusText, "Optimizing Parakeet for your Mac… (one-time, up to 1 min)")
+        XCTAssertEqual(state.modelRowProgressText, "Preparing")
     }
 
     func testEarlyDictationWhenPreparingShowsNotReadyMessage() {

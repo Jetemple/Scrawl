@@ -207,7 +207,16 @@ final class LocalModelManager: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let files = try? FileManager.default.contentsOfDirectory(at: modelsDirectoryURL, includingPropertiesForKeys: nil) else {
+        let files: [URL]
+        do {
+            files = try FileManager.default.contentsOfDirectory(at: modelsDirectoryURL, includingPropertiesForKeys: nil)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            // Normal before the first download; the directory is created on demand.
+            return []
+        } catch {
+            // Any other failure (permissions, I/O) would silently present as
+            // "no models installed" — leave a trace instead.
+            print("[Scrawl] Could not read models directory: \(error.localizedDescription)")
             return []
         }
 

@@ -8,25 +8,6 @@ import TextOutput
 import TranscriptHistoryStore
 import TranscriptionCore
 
-/// Pure decision for how to guide the user toward granting Accessibility, given the
-/// current authorization state and whether the macOS system prompt has already been
-/// shown this session. Side-effect-free so it is unit-testable.
-///
-/// The macOS prompt (shown by `AXIsProcessTrustedWithOptions(prompt:)`) already includes
-/// an "Open System Settings" button and only appears once per TCC record, so the first
-/// request must show the prompt *only* — opening Settings as well pops the notification
-/// AND the Settings page at once. Settings is the fallback for a later, still-denied retry.
-enum AccessibilityPromptDecision: Equatable {
-    case alreadyAuthorized
-    case showSystemPrompt
-    case openSettings
-
-    static func decide(isAuthorized: Bool, hasShownSystemPrompt: Bool) -> AccessibilityPromptDecision {
-        if isAuthorized { return .alreadyAuthorized }
-        return hasShownSystemPrompt ? .openSettings : .showSystemPrompt
-    }
-}
-
 public final class ScrawlApplication {
     public init() {}
 
@@ -144,6 +125,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var parakeetPreparationState = ParakeetPreparationState()
     private var parakeetPreparationGeneration: UUID?
     private var parakeetPreparationTask: Task<Void, Never>?
+    /// In-memory only: the model the user asked to switch to that is still preparing. The
+    /// persisted selectedModelID stays on the current working model until preparation succeeds.
+    private var pendingModelID: String?
     private var preparationRefreshGate = PreparationRefreshGate()
     private var latestStatusText = ""
     private var activeOperationGeneration = ActiveOperationGeneration()
@@ -194,7 +178,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         updateRecordingActionRows()
         setStatus("Idle")
         updateStatusIcon()
-        startSelectedModelPreparationIfNeeded()
+        resolveLaunchModelPreparation()
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -218,12 +202,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     func menuWillOpen(_: NSMenu) {
-        reconcileAccessibilityAuthorization()
-        refreshSettingsRows()
-        refreshModelMenu()
-        refreshHistoryMenu()
-        updatePermissionRows()
-        updateRecordingActionRows()
+        // Batched like mutateSettings: several of these end in refreshPreferencesWindow(),
+        // which rebuilds the full window snapshot when Preferences is open.
+        preferencesRefresh.batch {
+            reconcileAccessibilityAuthorization()
+            refreshSettingsRows()
+            refreshModelMenu()
+            refreshHistoryMenu()
+            updatePermissionRows()
+            updateRecordingActionRows()
+        }
     }
 
     @objc private func requestMicrophonePermission(_: Any?) {
@@ -294,6 +282,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 },
                 setModelOffloadPolicy: { [weak self] policy in
                     self?.setModelOffloadPolicy(policy)
+                },
+                setMaxRecordingDuration: { [weak self] duration in
+                    self?.mutateSettings { $0.maxRecordingDuration = duration }
                 },
                 setKeepTranscriptsInClipboardHistory: { [weak self] keep in
                     self?.mutateSettings { $0.keepTranscriptsInClipboardHistory = keep }
@@ -771,18 +762,27 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 .notRequired
             }
 
+            let isPrepared = !shouldPrepareOnSelection
+                || isInstalled
+                || parakeetPreparationState.isReady
+
             switch ModelSelectionPlanner.outcome(
                 currentModelID: settings.modelID,
                 requestedModelID: modelID,
                 preparesOnSelection: shouldPrepareOnSelection,
                 isInstalled: isInstalled,
+                isPrepared: isPrepared,
                 confirmation: confirmation
             ) {
             case .cancelled:
                 refreshPreferencesWindow()
             case let .selected(plan):
                 cancelledModelID = nil // Choosing a model clears any stale "Download cancelled" badge.
+                pendingModelID = nil
                 completeModelSelection(plan)
+            case let .pendingPreparation(plan):
+                cancelledModelID = nil
+                beginPendingModelPreparation(plan)
             }
         }
     }
@@ -965,7 +965,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                     guard self.modelDownloadGeneration == downloadGeneration else { return }
                     // User-initiated cancel: the quiet "Download cancelled" status
                     // set by cancelModelDownload() is the only user-visible surface.
-                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                        return
+                    }
                     let details = self.describe(error)
                     self.setStatus("Download failed")
                     _ = self.presentAlert(
@@ -1220,131 +1222,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         return LocalModelManager.downloadableModels.first
     }
 
-    private func startSelectedModelPreparationIfNeeded() {
-        let settings = runtime.settingsStore.load()
-        guard modelCatalog.preparesOnSelection(modelID: settings.modelID) else {
-            return
-        }
-        guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
-            return
-        }
-        guard let model = modelCatalog.model(id: settings.modelID) else {
-            return
-        }
-
-        let generation = UUID()
-        parakeetPreparationGeneration = generation
-        preparationRefreshGate.reset()
-        parakeetPreparationState.apply(.started)
-        publishParakeetPreparationState()
-
-        parakeetPreparationTask = Task { [weak self] in
-            do {
-                try await model.prepare(
-                    progressHandler: { [weak self] progress in
-                        Task { @MainActor [weak self] in
-                            self?.applyParakeetPreparationEvent(
-                                .progress(ParakeetPreparationProgress(progress)),
-                                generation: generation
-                            )
-                        }
-                    }
-                )
-                await MainActor.run { [weak self] in
-                    self?.applyParakeetPreparationEvent(.ready, generation: generation)
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    if error is CancellationError { return }
-                    applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
-                    presentParakeetSetupFailure(details: describe(error))
-                }
-            }
-        }
-    }
-
-    private func cancelParakeetPreparation() {
-        parakeetPreparationTask?.cancel()
-        parakeetPreparationTask = nil
-        parakeetPreparationGeneration = nil
-        parakeetPreparationState = ParakeetPreparationState()
-        preparationRefreshGate.reset()
-        refreshPreferencesWindow()
-    }
-
-    private func applyParakeetPreparationEvent(_ event: ParakeetPreparationEvent, generation: UUID) {
-        guard parakeetPreparationGeneration == generation else { return }
-        parakeetPreparationState.apply(event)
-        if event == .ready || parakeetPreparationState.failureMessage != nil {
-            parakeetPreparationGeneration = nil
-            parakeetPreparationTask = nil
-        }
-        if event == .ready {
-            setStatus("Parakeet ready")
-            // The gate has already baselined this row text, so a gated publish would
-            // skip; reset and refresh explicitly so the installed row lands.
-            preparationRefreshGate.reset()
-            refreshPreferencesWindow()
-        } else {
-            publishParakeetPreparationState()
-        }
-    }
-
-    private func publishParakeetPreparationState() {
-        if let statusText = parakeetPreparationState.statusText {
-            setStatus(statusText)
-        }
-        // Progress callbacks fire ~18x/sec but the window only renders the coarse row text;
-        // skip refreshes that would rebuild an identical snapshot (measured main-thread
-        // saturation during preparation with the preferences window open).
-        guard preparationRefreshGate.shouldRefresh(rowText: parakeetPreparationState.modelRowProgressText) else {
-            return
-        }
-        refreshPreferencesWindow()
-    }
-
-    private func presentParakeetSetupFailure(details: String) {
-        let response = presentAlert(
-            title: "Parakeet setup failed",
-            message: """
-            Scrawl could not download or prepare Parakeet.
-
-            \(details)
-            """,
-            primaryButton: "Switch to Whisper",
-            secondaryButton: "Not Now"
-        )
-        if response == .alertFirstButtonReturn {
-            switchToWhisperFallbackAfterParakeetFailure()
-        }
-    }
-
-    private func switchToWhisperFallbackAfterParakeetFailure() {
-        if let installed = modelCatalog.installedModelIDs().first(where: { !modelCatalog.preparesOnSelection(modelID: $0) }) {
-            mutateSettings {
-                $0.selectedModelID = installed
-                if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
-                    $0.defaultModelID = installed
-                }
-            }
-            setStatus(PreferencesModelState.selectedModelStatusText(forModelID: installed))
-            return
-        }
-
-        guard let recommendedModel = preferredInitialDownloadModel() else {
-            setStatus("No Whisper model available")
-            return
-        }
-        mutateSettings {
-            $0.selectedModelID = recommendedModel.id
-            if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
-                $0.defaultModelID = recommendedModel.id
-            }
-        }
-        startModelDownload(recommendedModel)
-    }
-
     private func applyRecommendedModelDefaultsIfNeeded() {
         let hasStoredSettings = runtime.settingsStore.hasStoredSettings()
         let recommendedID = modelCatalog.resolveRecommendedDefaultModelID(
@@ -1454,6 +1331,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         NSApplication.shared.terminate(nil)
     }
 
+    @objc private func checkForUpdates(_: Any?) {
+        UpdateChecker.checkAndPresent()
+    }
+
     private func setupStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.title = ""
@@ -1546,6 +1427,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setHotkeyItem.target = self
         menu.addItem(setHotkeyItem)
         self.setHotkeyItem = setHotkeyItem
+
+        let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        checkForUpdatesItem.target = self
+        menu.addItem(checkForUpdatesItem)
 
         let quitItem = NSMenuItem(title: "Quit Scrawl", action: #selector(quit(_:)), keyEquivalent: "q")
         quitItem.target = self
@@ -1909,7 +1794,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let settings = runtime.settingsStore.load()
         let modelName = PreferencesModelState.displayName(forModelID: settings.modelID)
         infoLineItem?.title = "Model: \(modelName)"
-        hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input..." : "Hotkey: \(settings.hotkey.displayName)"
+        hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input…" : "Hotkey: \(settings.hotkey.displayName)"
         setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey…"
         setHotkeyItem?.state = isCapturingHotkey ? .on : .off
         statusItem?.button?.toolTip = isCapturingHotkey ? "Scrawl: waiting for hotkey input" : "Scrawl: Hotkey \(settings.hotkey.displayName)"
@@ -1924,7 +1809,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         modelsSubmenu.removeAllItems()
         let settings = runtime.settingsStore.load()
 
-        let installedModelIDs = modelCatalog.installedModelIDs()
+        // One catalog snapshot per refresh. Each catalog query rebuilds the model list
+        // and re-stats the disk (models-directory listing plus the Parakeet cache check),
+        // and this runs on every settings mutation — so derive every menu section from
+        // a single pass instead of querying the catalog per section.
+        let catalogModels = modelCatalog.availableModels
+        let installedModelIDs = catalogModels.filter(\.installState.isInstalled).map(\.id)
         if installedModelIDs.isEmpty {
             let empty = NSMenuItem(title: "No installed models", action: nil, keyEquivalent: "")
             empty.isEnabled = false
@@ -1942,7 +1832,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         modelsSubmenu.addItem(.separator())
 
-        let downloadable = LocalModelManager.downloadableModels.filter { !modelManager.modelExists(downloadableModel: $0) }
+        let downloadable = LocalModelManager.downloadableModels.filter {
+            LocalModelManager.resolvedInstalledModelID(for: $0, inInstalledIDs: installedModelIDs) == nil
+        }
 
         let downloadableHeader = NSMenuItem(title: "Download", action: nil, keyEquivalent: "")
         downloadableHeader.isEnabled = false
@@ -1970,9 +1862,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let deleteItem = NSMenuItem(title: "Delete Selected Model", action: #selector(deleteSelectedModel(_:)), keyEquivalent: "")
         deleteItem.target = self
-        deleteItem.isEnabled = modelCatalog.canDeleteModel(selectedModelID: settings.modelID)
+        deleteItem.isEnabled = installedModelIDs.contains(settings.modelID)
         modelsSubmenu.addItem(deleteItem)
     }
+
+    /// DateFormatter construction is expensive; the history menu rebuilds with up to
+    /// 100 rows, so share one instance (menu refreshes are main-thread only).
+    private static let historyTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
     private func refreshHistoryMenu() {
         guard let historySubmenu else {
@@ -2002,9 +1902,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             historySubmenu.addItem(empty)
         case let .records(records):
             for record in records {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "HH:mm:ss"
-                let prefix = formatter.string(from: record.createdAt)
+                let prefix = Self.historyTimestampFormatter.string(from: record.createdAt)
                 let shortened = record.text.count > 70 ? String(record.text.prefix(67)) + "..." : record.text
                 let title = "[\(prefix)] \(shortened)"
                 let item = NSMenuItem(title: title, action: #selector(repasteTranscript(_:)), keyEquivalent: "")
@@ -2189,7 +2087,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func scheduleSafetyStopTimer() {
         recordingSafetyTimer?.invalidate()
-        recordingSafetyTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: false) { [weak self] _ in
+        let timeout = runtime.settingsStore.load().maxRecordingDuration.seconds
+        recordingSafetyTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
             guard let self, recordingOrigin != nil else {
                 return
             }
@@ -2235,8 +2134,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     /// Hotkey monitors are intentionally NOT rebuilt here.  Only `applyHotkey` changes the
     /// hotkey, so rebuilding on every mutate (model select, download completion, launch
     /// defaults) was needless churn — and worse, `teardownHotkeyHandling` resets the gesture
-    /// state machine, which could strand an in-progress recording until the 90 s safety
-    /// timeout.  The rebuild lives in `applyHotkey`, the one place the hotkey actually changes.
+    /// state machine, which could strand an in-progress recording until the recording
+    /// safety timeout.  The rebuild lives in `applyHotkey`, the one place the hotkey actually changes.
     private func mutateSettings(_ transform: (inout AppSettings) -> Void) {
         do {
             var previousSettings: AppSettings?
@@ -2345,5 +2244,196 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         if !presentTranscriptionGuidanceIfNeeded(for: error) {
             runtime.overlayController.showTransientMessage("Transcription failed — \(describe(error))")
         }
+    }
+}
+
+// MARK: - Parakeet preparation & deferred model cutover
+
+extension StatusBarAppDelegate {
+    private func resolveLaunchModelPreparation() {
+        let settings = runtime.settingsStore.load()
+        let selectedID = settings.modelID
+        let resolution = ModelSelectionPlanner.launchResolution(
+            selectedModelID: selectedID,
+            preparesOnSelection: modelCatalog.preparesOnSelection(modelID: selectedID),
+            isInstalled: modelCatalog.isInstalled(modelID: selectedID),
+            installedFallbackModelID: modelCatalog.installedModelIDs()
+                .first(where: { !modelCatalog.preparesOnSelection(modelID: $0) })
+        )
+        switch resolution {
+        case .prepareSelectedIfNeeded:
+            startSelectedModelPreparationIfNeeded()
+        case let .demoteAndPrepare(fallbackModelID, pendingModelID):
+            // Deliberately leave defaultModelID untouched: the demotion is temporary and
+            // the pending cutover restores the selection the user actually chose.
+            mutateSettings { $0.selectedModelID = fallbackModelID }
+            beginPendingModelPreparation(
+                ModelSelectionPlan(modelID: pendingModelID, shouldPrepareOnSelection: true)
+            )
+            refreshModelMenu()
+        }
+    }
+
+    private func startSelectedModelPreparationIfNeeded() {
+        let settings = runtime.settingsStore.load()
+        startModelPreparationIfNeeded(modelID: settings.modelID)
+    }
+
+    /// Begins a deferred switch: keep the current selectedModelID, remember the requested model
+    /// as pending, and prepare it. `applyParakeetPreparationEvent(.ready)` commits the switch.
+    private func beginPendingModelPreparation(_ plan: ModelSelectionPlan) {
+        pendingModelID = plan.modelID
+        startModelPreparationIfNeeded(modelID: plan.modelID)
+        setStatus("Setting up \(PreferencesModelState.displayName(forModelID: plan.modelID))…")
+        refreshPreferencesWindow()
+    }
+
+    private func startModelPreparationIfNeeded(modelID: String) {
+        guard modelCatalog.preparesOnSelection(modelID: modelID) else {
+            return
+        }
+        guard !parakeetPreparationState.isPreparing, !parakeetPreparationState.isReady else {
+            return
+        }
+        guard let model = modelCatalog.model(id: modelID) else {
+            return
+        }
+
+        let generation = UUID()
+        parakeetPreparationGeneration = generation
+        preparationRefreshGate.reset()
+        parakeetPreparationState.apply(.started)
+        publishParakeetPreparationState()
+
+        parakeetPreparationTask = Task { [weak self] in
+            do {
+                try await model.prepare(
+                    progressHandler: { [weak self] progress in
+                        Task { @MainActor [weak self] in
+                            self?.applyParakeetPreparationEvent(
+                                .progress(ParakeetPreparationProgress(progress)),
+                                generation: generation
+                            )
+                        }
+                    }
+                )
+                await MainActor.run { [weak self] in
+                    self?.applyParakeetPreparationEvent(.ready, generation: generation)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    // URLSession surfaces a cancelled preparation as URLError(.cancelled),
+                    // not CancellationError; and a superseded generation means the user
+                    // already moved on — neither may raise the failure alert.
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                        return
+                    }
+                    guard parakeetPreparationGeneration == generation else { return }
+                    applyParakeetPreparationEvent(.failed(describe(error)), generation: generation)
+                    presentParakeetSetupFailure(details: describe(error))
+                }
+            }
+        }
+    }
+
+    private func cancelParakeetPreparation() {
+        parakeetPreparationTask?.cancel()
+        parakeetPreparationTask = nil
+        parakeetPreparationGeneration = nil
+        pendingModelID = nil
+        parakeetPreparationState = ParakeetPreparationState()
+        preparationRefreshGate.reset()
+        refreshPreferencesWindow()
+    }
+
+    private func applyParakeetPreparationEvent(_ event: ParakeetPreparationEvent, generation: UUID) {
+        guard parakeetPreparationGeneration == generation else { return }
+        parakeetPreparationState.apply(event)
+        if event == .ready || parakeetPreparationState.failureMessage != nil {
+            parakeetPreparationGeneration = nil
+            parakeetPreparationTask = nil
+            if parakeetPreparationState.failureMessage != nil {
+                pendingModelID = nil
+            }
+        }
+        if event == .ready {
+            if let pendingModelID {
+                mutateSettings {
+                    $0.selectedModelID = pendingModelID
+                    if $0.defaultModelID.isEmpty {
+                        $0.defaultModelID = pendingModelID
+                    }
+                }
+                self.pendingModelID = nil
+                setStatus(PreferencesModelState.selectedModelStatusText(forModelID: pendingModelID))
+            } else {
+                setStatus("Parakeet ready")
+            }
+            // The gate has already baselined this row text, so a gated publish would
+            // skip; reset and refresh explicitly so the installed row lands.
+            preparationRefreshGate.reset()
+            refreshPreferencesWindow()
+        } else {
+            publishParakeetPreparationState()
+        }
+    }
+
+    private func publishParakeetPreparationState() {
+        if let statusText = parakeetPreparationState.statusText {
+            setStatus(statusText)
+        }
+        // Progress callbacks fire ~18x/sec but the window only renders the coarse row text;
+        // skip refreshes that would rebuild an identical snapshot (measured main-thread
+        // saturation during preparation with the preferences window open).
+        guard preparationRefreshGate.shouldRefresh(rowText: parakeetPreparationState.modelRowProgressText) else {
+            return
+        }
+        refreshPreferencesWindow()
+    }
+
+    private func presentParakeetSetupFailure(details: String) {
+        let selectedModelID = runtime.settingsStore.load().modelID
+        let alertPlan = ModelSelectionPlanner.parakeetSetupFailureAlertPlan(
+            selectedModelPreparesOnSelection: modelCatalog.preparesOnSelection(modelID: selectedModelID)
+        )
+        let response = presentAlert(
+            title: "Parakeet setup failed",
+            message: """
+            Scrawl could not download or prepare Parakeet.
+
+            \(details)
+            """,
+            primaryButton: alertPlan.primaryButton,
+            secondaryButton: alertPlan.secondaryButton
+        )
+        if alertPlan.runsRecoveryOnPrimary, response == .alertFirstButtonReturn {
+            switchToWhisperFallbackAfterParakeetFailure()
+        }
+    }
+
+    private func switchToWhisperFallbackAfterParakeetFailure() {
+        if let installed = modelCatalog.installedModelIDs().first(where: { !modelCatalog.preparesOnSelection(modelID: $0) }) {
+            mutateSettings {
+                $0.selectedModelID = installed
+                if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
+                    $0.defaultModelID = installed
+                }
+            }
+            setStatus(PreferencesModelState.selectedModelStatusText(forModelID: installed))
+            return
+        }
+
+        guard let recommendedModel = preferredInitialDownloadModel() else {
+            setStatus("No Whisper model available")
+            return
+        }
+        mutateSettings {
+            $0.selectedModelID = recommendedModel.id
+            if $0.defaultModelID.isEmpty || modelCatalog.preparesOnSelection(modelID: $0.defaultModelID) {
+                $0.defaultModelID = recommendedModel.id
+            }
+        }
+        startModelDownload(recommendedModel)
     }
 }

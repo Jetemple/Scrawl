@@ -219,15 +219,12 @@ public struct AppRuntime {
     }
 
     static func resolveRecommendedDefaultModelID() -> String {
-        #if arch(arm64)
-            return TranscriptionModelID.parakeetV3
-        #else
-            // First-run onboarding favors a fast, lightweight download. `small.en` (466 MB) is far
-            // smaller and faster than the multilingual `medium` (1.5 GB), and the app is English-only
-            // today, so `medium` would be strictly heavier with no benefit. Larger/multilingual models
-            // remain one-click upgrades in the Models menu.
-            return "ggml-small.en"
-        #endif
+        // First-run onboarding favors a fast, lightweight model that works immediately.
+        // `small.en` (466 MB) downloads quickly and is usable the moment it lands; Parakeet is
+        // offered as a one-click upgrade in the Models menu, where deferred cutover keeps the
+        // current model active until Parakeet finishes preparing. Defaulting a fresh Apple
+        // Silicon install to Parakeet would strand the user with no working model during setup.
+        "ggml-small.en"
     }
 
     private static func parseEnvironmentBool(_ rawValue: String) -> Bool? {

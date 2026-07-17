@@ -18,12 +18,16 @@ enum ManagedModelInstallState: Equatable, Sendable {
     case installed(sizeBytes: Int64?)
 
     var isInstalled: Bool {
-        if case .installed = self { return true }
+        if case .installed = self {
+            return true
+        }
         return false
     }
 
     var installedSizeBytes: Int64? {
-        if case let .installed(sizeBytes) = self { return sizeBytes }
+        if case let .installed(sizeBytes) = self {
+            return sizeBytes
+        }
         return nil
     }
 }
@@ -52,6 +56,7 @@ extension ManagedModel {
 
 protocol ParakeetModelCacheStore: Sendable {
     func parakeetCacheExists() -> Bool
+    func parakeetCacheIsComplete() -> Bool
     func parakeetCacheSizeBytes() -> Int64?
     func deleteParakeetCache() throws
 }
@@ -167,7 +172,7 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
         }
 
         var installState: ManagedModelInstallState {
-            if cacheStore.parakeetCacheExists() {
+            if cacheStore.parakeetCacheIsComplete() {
                 return .installed(sizeBytes: nil)
             }
             if let progress = preparationProgressProvider() {
@@ -177,7 +182,7 @@ final class WhisperGgmlModel: ManagedModel, @unchecked Sendable {
         }
 
         var installedSizeBytes: Int64? {
-            guard cacheStore.parakeetCacheExists() else { return nil }
+            guard cacheStore.parakeetCacheIsComplete() else { return nil }
             return cacheStore.parakeetCacheSizeBytes()
         }
 

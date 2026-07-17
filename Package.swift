@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "Scrawl",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
     ],
     products: [
         .executable(name: "ScrawlApp", targets: ["ScrawlApp"]),
@@ -19,19 +19,19 @@ let package = Package(
         .library(name: "TranscriptHistoryStore", targets: ["TranscriptHistoryStore"]),
         .library(name: "SettingsStore", targets: ["SettingsStore"]),
         .library(name: "Permissions", targets: ["Permissions"]),
-        .library(name: "RecordingOverlay", targets: ["RecordingOverlay"])
+        .library(name: "RecordingOverlay", targets: ["RecordingOverlay"]),
     ],
     dependencies: [
         .package(
             url: "https://github.com/FluidInference/FluidAudio.git",
-            revision: "a95ec26ee05f19b5f6e69c62e1d4fae420537730"
-        )
+            revision: "859668e00aacbc49a4a60fce192a271144f9e322"
+        ),
     ],
     targets: [
         .executableTarget(
             name: "ScrawlApp",
             dependencies: [
-                "AppUI"
+                "AppUI",
             ],
             linkerSettings: [
                 // Embed the app Info.plist into the executable so `Bundle.main` reports the
@@ -42,8 +42,8 @@ let package = Package(
                     "-Xlinker", "-sectcreate",
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
-                    "-Xlinker", "Config/ScrawlApp-Info.plist"
-                ])
+                    "-Xlinker", "Config/ScrawlApp-Info.plist",
+                ]),
             ]
         ),
         .target(
@@ -59,7 +59,7 @@ let package = Package(
                 "TranscriptHistoryStore",
                 "TranscriptionCore",
                 "ParakeetProvider",
-                "WhisperCppProvider"
+                "WhisperCppProvider",
             ]
         ),
         .target(name: "HotkeyEngine"),
@@ -69,13 +69,13 @@ let package = Package(
             name: "ParakeetProvider",
             dependencies: [
                 "TranscriptionCore",
-                .product(name: "FluidAudio", package: "FluidAudio")
+                .product(name: "FluidAudio", package: "FluidAudio"),
             ]
         ),
         .target(
             name: "WhisperCppProvider",
             dependencies: [
-                "TranscriptionCore"
+                "TranscriptionCore",
             ]
         ),
         .target(name: "TextOutput"),
@@ -90,72 +90,72 @@ let package = Package(
                 "AppUI",
                 "DictionaryStore",
                 "TranscriptHistoryStore",
-                "SettingsStore"
+                "SettingsStore",
             ]
         ),
         .testTarget(
             name: "HotkeyEngineTests",
             dependencies: [
-                "HotkeyEngine"
+                "HotkeyEngine",
             ]
         ),
         .testTarget(
             name: "AudioCaptureTests",
             dependencies: [
-                "AudioCapture"
+                "AudioCapture",
             ]
         ),
         .testTarget(
             name: "DictionaryStoreTests",
             dependencies: [
-                "DictionaryStore"
+                "DictionaryStore",
             ]
         ),
         .testTarget(
             name: "TranscriptHistoryStoreTests",
             dependencies: [
-                "TranscriptHistoryStore"
+                "TranscriptHistoryStore",
             ]
         ),
         .testTarget(
             name: "SettingsStoreTests",
             dependencies: [
-                "SettingsStore"
+                "SettingsStore",
             ]
         ),
         .testTarget(
             name: "WhisperCppProviderTests",
             dependencies: [
-                "WhisperCppProvider"
+                "WhisperCppProvider",
             ]
         ),
         .testTarget(
             name: "ParakeetProviderTests",
             dependencies: [
-                "ParakeetProvider"
+                "ParakeetProvider",
             ],
             resources: [
-                .copy("Fixtures/clip5.wav")
+                .copy("Fixtures/clip5.wav"),
             ]
         ),
         .testTarget(
             name: "RoutingTranscriptionProviderTests",
             dependencies: [
                 "ParakeetProvider",
-                "TranscriptionCore"
+                "TranscriptionCore",
             ]
         ),
         .testTarget(
             name: "TextOutputTests",
             dependencies: [
-                "TextOutput"
+                "TextOutput",
             ]
         ),
         .testTarget(
             name: "RecordingOverlayTests",
             dependencies: [
-                "RecordingOverlay"
+                "RecordingOverlay",
             ]
-        )
+        ),
     ]
 )
