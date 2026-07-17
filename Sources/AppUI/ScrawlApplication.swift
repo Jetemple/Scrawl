@@ -223,12 +223,16 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     }
 
     func menuWillOpen(_: NSMenu) {
-        reconcileAccessibilityAuthorization()
-        refreshSettingsRows()
-        refreshModelMenu()
-        refreshHistoryMenu()
-        updatePermissionRows()
-        updateRecordingActionRows()
+        // Batched like mutateSettings: several of these end in refreshPreferencesWindow(),
+        // which rebuilds the full window snapshot when Preferences is open.
+        preferencesRefresh.batch {
+            reconcileAccessibilityAuthorization()
+            refreshSettingsRows()
+            refreshModelMenu()
+            refreshHistoryMenu()
+            updatePermissionRows()
+            updateRecordingActionRows()
+        }
     }
 
     @objc private func requestMicrophonePermission(_: Any?) {
@@ -1815,7 +1819,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         modelsSubmenu.removeAllItems()
         let settings = runtime.settingsStore.load()
 
-        let installedModelIDs = modelCatalog.installedModelIDs()
+        // One catalog snapshot per refresh. Each catalog query rebuilds the model list
+        // and re-stats the disk (models-directory listing plus the Parakeet cache check),
+        // and this runs on every settings mutation — so derive every menu section from
+        // a single pass instead of querying the catalog per section.
+        let catalogModels = modelCatalog.availableModels
+        let installedModelIDs = catalogModels.filter(\.installState.isInstalled).map(\.id)
         if installedModelIDs.isEmpty {
             let empty = NSMenuItem(title: "No installed models", action: nil, keyEquivalent: "")
             empty.isEnabled = false
@@ -1833,7 +1842,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         modelsSubmenu.addItem(.separator())
 
-        let downloadable = LocalModelManager.downloadableModels.filter { !modelManager.modelExists(downloadableModel: $0) }
+        let downloadable = LocalModelManager.downloadableModels.filter {
+            LocalModelManager.resolvedInstalledModelID(for: $0, inInstalledIDs: installedModelIDs) == nil
+        }
 
         let downloadableHeader = NSMenuItem(title: "Download", action: nil, keyEquivalent: "")
         downloadableHeader.isEnabled = false
@@ -1861,9 +1872,17 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         let deleteItem = NSMenuItem(title: "Delete Selected Model", action: #selector(deleteSelectedModel(_:)), keyEquivalent: "")
         deleteItem.target = self
-        deleteItem.isEnabled = modelCatalog.canDeleteModel(selectedModelID: settings.modelID)
+        deleteItem.isEnabled = installedModelIDs.contains(settings.modelID)
         modelsSubmenu.addItem(deleteItem)
     }
+
+    /// DateFormatter construction is expensive; the history menu rebuilds with up to
+    /// 100 rows, so share one instance (menu refreshes are main-thread only).
+    private static let historyTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
     private func refreshHistoryMenu() {
         guard let historySubmenu else {
@@ -1893,9 +1912,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             historySubmenu.addItem(empty)
         case let .records(records):
             for record in records {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "HH:mm:ss"
-                let prefix = formatter.string(from: record.createdAt)
+                let prefix = Self.historyTimestampFormatter.string(from: record.createdAt)
                 let shortened = record.text.count > 70 ? String(record.text.prefix(67)) + "..." : record.text
                 let title = "[\(prefix)] \(shortened)"
                 let item = NSMenuItem(title: title, action: #selector(repasteTranscript(_:)), keyEquivalent: "")

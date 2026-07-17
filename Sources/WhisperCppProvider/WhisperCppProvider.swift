@@ -174,7 +174,12 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
                 return
             }
             stderrCapture.append(data)
-            progressReporter.observeCLIOutput(stderrCapture.string())
+            // string() re-decodes the whole accumulated buffer, so scanning it per chunk
+            // is quadratic in stderr size. The only thing observed is the first
+            // transcribing marker; stop decoding once it has been seen.
+            if progressReporter.isAwaitingTranscribingMarker {
+                progressReporter.observeCLIOutput(stderrCapture.string())
+            }
         }
 
         process.standardOutput = stdoutHandle
@@ -260,7 +265,9 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
             case .executionFailed: return .shutdownAndFallback
             }
         }
-        if error is CancellationError { return .rethrow }
+        if error is CancellationError {
+            return .rethrow
+        }
         return .shutdownAndFallback
     }
 
@@ -537,6 +544,12 @@ private final class TranscriptionProgressReporter: @unchecked Sendable {
                 elapsedMS: Int(Date().timeIntervalSince(startedAt) * 1000)
             )
         )
+    }
+
+    var isAwaitingTranscribingMarker: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !didEmitTranscribing
     }
 
     func observeCLIOutput(_ output: String) {
