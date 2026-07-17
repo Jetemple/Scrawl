@@ -157,6 +157,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setupStatusItem()
         observeWorkspaceActivations()
         cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        if cachedAccessibilityAuthorized {
+            noteAccessibilityAuthorized()
+        }
         setupHotkeyHandling()
 
         // Feed real mic levels to the recording pill's waveform (nil when not capturing).
@@ -1131,9 +1134,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         switch AccessibilityPromptDecision.decide(
             isAuthorized: isAuthorized,
-            hasShownSystemPrompt: hasPromptedAccessibilityForHotkeyAttempt
+            hasShownSystemPrompt: hasPromptedAccessibilityForHotkeyAttempt,
+            wasPreviouslyAuthorized: runtime.settingsStore.load().hasEverAuthorizedAccessibility
         ) {
         case .alreadyAuthorized:
+            noteAccessibilityAuthorized()
             hasPromptedAccessibilityForHotkeyAttempt = false
             updatePermissionRows()
             teardownHotkeyHandling()
@@ -1149,6 +1154,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
             updatePermissionRows()
             if cachedAccessibilityAuthorized {
+                noteAccessibilityAuthorized()
                 hasPromptedAccessibilityForHotkeyAttempt = false
                 teardownHotkeyHandling()
                 setupHotkeyHandling()
@@ -1162,7 +1168,26 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             openAccessibilitySettings()
             runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
             setStatus("Enable Accessibility in System Settings")
+
+        case .openSettingsForStaleGrant:
+            // Replacing the bundle (brew upgrade, DMG drag-over) can leave the old TCC
+            // grant visible in System Settings while the new binary is not trusted, and
+            // the system prompt never reappears. Only re-toggling the entry fixes it.
+            openAccessibilitySettings()
+            runtime.overlayController.showTransientMessage("Turn Scrawl off and on in the Accessibility list")
+            setStatus("Re-toggle Scrawl in Accessibility settings")
         }
+    }
+
+    /// Persists that an Accessibility grant was observed, so a later lost
+    /// authorization can be recognized as a stale TCC record rather than a
+    /// never-granted state. Bypasses `mutateSettings` — this flag never affects
+    /// model retention or settings rows.
+    private func noteAccessibilityAuthorized() {
+        guard !runtime.settingsStore.load().hasEverAuthorizedAccessibility else {
+            return
+        }
+        try? runtime.settingsStore.mutate { $0.hasEverAuthorizedAccessibility = true }
     }
 
     private func openAccessibilitySettings() {
@@ -1312,6 +1337,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         cachedAccessibilityAuthorized = isAuthorized
         if isAuthorized {
+            noteAccessibilityAuthorized()
             hasPromptedAccessibilityForHotkeyAttempt = false
         }
         updatePermissionRows()
