@@ -304,6 +304,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 setModelOffloadPolicy: { [weak self] policy in
                     self?.setModelOffloadPolicy(policy)
                 },
+                setMaxRecordingDuration: { [weak self] duration in
+                    self?.mutateSettings { $0.maxRecordingDuration = duration }
+                },
                 setKeepTranscriptsInClipboardHistory: { [weak self] keep in
                     self?.mutateSettings { $0.keepTranscriptsInClipboardHistory = keep }
                 },
@@ -2097,7 +2100,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     private func scheduleSafetyStopTimer() {
         recordingSafetyTimer?.invalidate()
-        recordingSafetyTimer = Timer.scheduledTimer(withTimeInterval: 90, repeats: false) { [weak self] _ in
+        let timeout = runtime.settingsStore.load().maxRecordingDuration.seconds
+        recordingSafetyTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
             guard let self, recordingOrigin != nil else {
                 return
             }
@@ -2143,8 +2147,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     /// Hotkey monitors are intentionally NOT rebuilt here.  Only `applyHotkey` changes the
     /// hotkey, so rebuilding on every mutate (model select, download completion, launch
     /// defaults) was needless churn — and worse, `teardownHotkeyHandling` resets the gesture
-    /// state machine, which could strand an in-progress recording until the 90 s safety
-    /// timeout.  The rebuild lives in `applyHotkey`, the one place the hotkey actually changes.
+    /// state machine, which could strand an in-progress recording until the recording
+    /// safety timeout.  The rebuild lives in `applyHotkey`, the one place the hotkey actually changes.
     private func mutateSettings(_ transform: (inout AppSettings) -> Void) {
         do {
             var previousSettings: AppSettings?

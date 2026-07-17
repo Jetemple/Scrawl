@@ -39,6 +39,7 @@ final class PreferencesWindowController: NSWindowController {
         let requestMicrophone: () -> Void
         let requestAccessibility: () -> Void
         let setModelOffloadPolicy: (ModelOffloadPolicy) -> Void
+        let setMaxRecordingDuration: (MaxRecordingDuration) -> Void
         let setKeepTranscriptsInClipboardHistory: (Bool) -> Void
         let setLaunchAtLogin: (Bool) -> Void
         let setTranscriptHistoryEnabled: (Bool) -> Void
@@ -233,6 +234,7 @@ final class PreferencesWindowController: NSWindowController {
             requestMicrophone: actions.requestMicrophone,
             requestAccessibility: actions.requestAccessibility,
             setModelOffloadPolicy: actions.setModelOffloadPolicy,
+            setMaxRecordingDuration: actions.setMaxRecordingDuration,
             setKeepTranscriptsInClipboardHistory: actions.setKeepTranscriptsInClipboardHistory,
             setLaunchAtLogin: actions.setLaunchAtLogin
         )

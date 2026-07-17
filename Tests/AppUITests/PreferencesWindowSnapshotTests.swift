@@ -136,6 +136,7 @@ private enum PreferencesWindowSnapshotWriter {
             requestMicrophone: {},
             requestAccessibility: {},
             setModelOffloadPolicy: { _ in },
+            setMaxRecordingDuration: { _ in },
             setKeepTranscriptsInClipboardHistory: { _ in },
             setLaunchAtLogin: { _ in },
             setTranscriptHistoryEnabled: { _ in },

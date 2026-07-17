@@ -28,6 +28,37 @@ public enum ModelOffloadPolicy: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Upper bound on a single recording. A safety backstop that force-stops a
+/// recording which never received its stop event (e.g. a missed key-up), so it
+/// sits deliberately above a realistic dictation length rather than at it.
+public enum MaxRecordingDuration: String, Codable, CaseIterable, Sendable {
+    case oneMinute
+    case twoMinutes
+    case threeMinutes
+    case fiveMinutes
+    case tenMinutes
+
+    public var seconds: TimeInterval {
+        switch self {
+        case .oneMinute: 60
+        case .twoMinutes: 120
+        case .threeMinutes: 180
+        case .fiveMinutes: 300
+        case .tenMinutes: 600
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .oneMinute: "1 minute"
+        case .twoMinutes: "2 minutes"
+        case .threeMinutes: "3 minutes"
+        case .fiveMinutes: "5 minutes"
+        case .tenMinutes: "10 minutes"
+        }
+    }
+}
+
 public struct HotkeySetting: Codable, Equatable, Sendable {
     public var keyCode: UInt16
     public var isModifierKey: Bool
@@ -56,6 +87,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// `org.nspasteboard.TransientType` / `ConcealedType` markers so clipboard
     /// managers (e.g. Raycast, Paste) can record them.  Defaults to `false`.
     public var keepTranscriptsInClipboardHistory: Bool
+    /// Safety backstop that force-stops a recording after this long. Defaults to
+    /// 5 minutes: comfortably above a typical dictation so real recordings finish
+    /// cleanly, while still bounding a recording whose stop event never arrived.
+    public var maxRecordingDuration: MaxRecordingDuration
 
     public init(
         defaultModelID: String = "ggml-small.en",
@@ -65,7 +100,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         modelsDirectoryPath: String? = nil,
         isTranscriptHistoryEnabled: Bool = true,
         modelOffloadPolicy: ModelOffloadPolicy = .fiveMinutes,
-        keepTranscriptsInClipboardHistory: Bool = false
+        keepTranscriptsInClipboardHistory: Bool = false,
+        maxRecordingDuration: MaxRecordingDuration = .fiveMinutes
     ) {
         self.defaultModelID = defaultModelID
         self.selectedModelID = selectedModelID
@@ -75,6 +111,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.isTranscriptHistoryEnabled = isTranscriptHistoryEnabled
         self.modelOffloadPolicy = modelOffloadPolicy
         self.keepTranscriptsInClipboardHistory = keepTranscriptsInClipboardHistory
+        self.maxRecordingDuration = maxRecordingDuration
     }
 
     public var modelID: String {
@@ -91,6 +128,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case isTranscriptHistoryEnabled
         case modelOffloadPolicy
         case keepTranscriptsInClipboardHistory
+        case maxRecordingDuration
     }
 
     public init(from decoder: Decoder) throws {
@@ -103,6 +141,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         isTranscriptHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .isTranscriptHistoryEnabled) ?? true
         modelOffloadPolicy = try container.decodeIfPresent(ModelOffloadPolicy.self, forKey: .modelOffloadPolicy) ?? .fiveMinutes
         keepTranscriptsInClipboardHistory = try container.decodeIfPresent(Bool.self, forKey: .keepTranscriptsInClipboardHistory) ?? false
+        maxRecordingDuration = try container.decodeIfPresent(MaxRecordingDuration.self, forKey: .maxRecordingDuration) ?? .fiveMinutes
 
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
             self.hotkey = hotkey
@@ -122,6 +161,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try container.encode(isTranscriptHistoryEnabled, forKey: .isTranscriptHistoryEnabled)
         try container.encode(modelOffloadPolicy, forKey: .modelOffloadPolicy)
         try container.encode(keepTranscriptsInClipboardHistory, forKey: .keepTranscriptsInClipboardHistory)
+        try container.encode(maxRecordingDuration, forKey: .maxRecordingDuration)
     }
 }
 
