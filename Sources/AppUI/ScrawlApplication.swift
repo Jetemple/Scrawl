@@ -1807,7 +1807,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         let settings = runtime.settingsStore.load()
         let modelName = PreferencesModelState.displayName(forModelID: settings.modelID)
         infoLineItem?.title = "Model: \(modelName)"
-        hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input..." : "Hotkey: \(settings.hotkey.displayName)"
+        hotkeyLineItem?.title = isCapturingHotkey ? "Hotkey: Waiting for input…" : "Hotkey: \(settings.hotkey.displayName)"
         setHotkeyItem?.title = isCapturingHotkey ? "Cancel Hotkey Capture" : "Set Hotkey…"
         setHotkeyItem?.state = isCapturingHotkey ? .on : .off
         statusItem?.button?.toolTip = isCapturingHotkey ? "Scrawl: waiting for hotkey input" : "Scrawl: Hotkey \(settings.hotkey.displayName)"

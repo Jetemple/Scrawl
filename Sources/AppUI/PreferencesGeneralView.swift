@@ -11,8 +11,8 @@ final class PreferencesGeneralView: NSView {
     private let hotkeyLabel = NSTextField(labelWithString: "")
     private let microphoneLabel = NSTextField(labelWithString: "")
     private let accessibilityLabel = NSTextField(labelWithString: "")
-    private let microphoneButton = NSButton(title: "Request", target: nil, action: nil)
-    private let accessibilityButton = NSButton(title: "Open Prompt", target: nil, action: nil)
+    private let microphoneButton = NSButton(title: "Grant Access…", target: nil, action: nil)
+    private let accessibilityButton = NSButton(title: "Grant Access…", target: nil, action: nil)
     private let hotkeyButton = NSButton(title: "Set Hotkey…", target: nil, action: nil)
     private let offloadPopup = NSPopUpButton()
     private let maxRecordingPopup = NSPopUpButton()
@@ -59,8 +59,11 @@ final class PreferencesGeneralView: NSView {
 
         microphoneButton.target = self
         microphoneButton.action = #selector(requestMicrophoneAccess(_:))
+        // The two grant buttons share a title, so tests address them by identifier.
+        microphoneButton.identifier = NSUserInterfaceItemIdentifier("grant-microphone-access")
         accessibilityButton.target = self
         accessibilityButton.action = #selector(requestAccessibilityAccess(_:))
+        accessibilityButton.identifier = NSUserInterfaceItemIdentifier("grant-accessibility-access")
         hotkeyButton.target = self
         hotkeyButton.action = #selector(setHotkeyAction(_:))
         let hotkeyUsageHint = "Hold to dictate. Double-tap to lock recording."
@@ -70,6 +73,7 @@ final class PreferencesGeneralView: NSView {
         offloadPopup.controlSize = .small
         offloadPopup.target = self
         offloadPopup.action = #selector(modelOffloadChanged(_:))
+        offloadPopup.toolTip = "Frees memory by unloading the idle model after this long. The next dictation loads it again."
 
         maxRecordingPopup.addItems(withTitles: MaxRecordingDuration.allCases.map(\.displayName))
         maxRecordingPopup.controlSize = .small
@@ -132,7 +136,7 @@ final class PreferencesGeneralView: NSView {
         isCapturingHotkey: Bool,
         launchAtLoginEnabled: Bool
     ) {
-        hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input..." : settings.hotkey.displayName
+        hotkeyLabel.stringValue = isCapturingHotkey ? "Waiting for input…" : settings.hotkey.displayName
         hotkeyButton.title = isCapturingHotkey ? "Cancel Capture" : "Set Hotkey…"
         updatePermissionLabel(microphoneLabel, status: microphoneStatus)
         updatePermissionLabel(accessibilityLabel, status: accessibilityStatus)

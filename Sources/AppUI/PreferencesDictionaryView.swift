@@ -173,7 +173,7 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         actionBarView = actionBar
         let page = PreferencesPageSupport.makePage(
             title: "Dictionary",
-            description: "Preferred terms for names and phrases.",
+            description: "Names, jargon, and acronyms Scrawl should get right.",
             content: [
                 termField,
                 searchField,
@@ -191,8 +191,12 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         actions.save(nil, value, value) { [weak self] result in
             guard let self else { return }
             termField.isEnabled = state != .unavailable
-            if case .success = result { termField.stringValue = "" }
-            if case let .failure(error) = result { NSAlert(error: error).runModal() }
+            if case .success = result {
+                termField.stringValue = ""
+            }
+            if case let .failure(error) = result {
+                NSAlert(error: error).runModal()
+            }
         }
     }
 
@@ -335,7 +339,9 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         actions.delete(selectedValues) { result in
-            if case let .failure(error) = result { NSAlert(error: error).runModal() }
+            if case let .failure(error) = result {
+                NSAlert(error: error).runModal()
+            }
         }
     }
 }
@@ -343,6 +349,10 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
 private final class DeleteKeyTableView: NSTableView {
     var onDelete: (() -> Void)?
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 51 || event.keyCode == 117 { onDelete?() } else { super.keyDown(with: event) }
+        if event.keyCode == 51 || event.keyCode == 117 {
+            onDelete?()
+        } else {
+            super.keyDown(with: event)
+        }
     }
 }
