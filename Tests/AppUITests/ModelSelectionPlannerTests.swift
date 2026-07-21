@@ -160,4 +160,31 @@ final class ModelSelectionPlannerTests: XCTestCase {
             )
         )
     }
+
+    func testSelectingWhisperKeepsAnotherModelsInFlightSetupDownload() {
+        XCTAssertFalse(
+            ModelSelectionPlanner.shouldCancelPreparationOnSelection(
+                shouldPrepareOnSelection: false,
+                isPreparationInFlight: true
+            )
+        )
+    }
+
+    func testSelectingWhisperClearsStalePreparationStateWhenNothingIsInFlight() {
+        XCTAssertTrue(
+            ModelSelectionPlanner.shouldCancelPreparationOnSelection(
+                shouldPrepareOnSelection: false,
+                isPreparationInFlight: false
+            )
+        )
+    }
+
+    func testSelectingAPreparingModelNeverCancelsItsOwnPreparation() {
+        XCTAssertFalse(
+            ModelSelectionPlanner.shouldCancelPreparationOnSelection(
+                shouldPrepareOnSelection: true,
+                isPreparationInFlight: false
+            )
+        )
+    }
 }

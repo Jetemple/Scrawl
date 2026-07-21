@@ -755,7 +755,10 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         }
         if plan.shouldPrepareOnSelection {
             startSelectedModelPreparationIfNeeded()
-        } else {
+        } else if ModelSelectionPlanner.shouldCancelPreparationOnSelection(
+            shouldPrepareOnSelection: false,
+            isPreparationInFlight: parakeetPreparationState.isPreparing
+        ) {
             cancelParakeetPreparation()
         }
         setStatus(PreferencesModelState.selectedModelStatusText(forModelID: plan.modelID))
