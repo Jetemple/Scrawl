@@ -147,6 +147,12 @@ final class PreferencesModelsView: NSView {
     private let scrollContainer = NSView()
     private let modelPicker = NSPopUpButton()
     private let filterField = NSSearchField()
+    /// Temporarily shelved: the curated download list covers the practical whisper.cpp
+    /// sizes, so the import/reveal affordances mostly added clutter. The models-folder
+    /// scan still honors hand-dropped ggml-*.bin files; flipping this back on is the
+    /// whole revert.
+    private static let showsBringYourOwnModel = false
+
     private let addButton = NSButton(title: "Add Model…", target: nil, action: nil)
     private let revealButton = NSButton(title: "Reveal Models Folder", target: nil, action: nil)
     private let deleteButton = NSButton(title: "Delete Selected", target: nil, action: nil)
@@ -363,7 +369,7 @@ final class PreferencesModelsView: NSView {
         cancelButton.isHidden = true
 
         let actionBar = PreferencesPageSupport.makePinnedActionBar(
-            leading: [addButton, revealButton],
+            leading: Self.showsBringYourOwnModel ? [addButton, revealButton] : [],
             trailing: [deleteButton, cancelButton],
             leadingInset: rowContentLeftInset,
             trailingInset: rowContentRightInset
@@ -392,32 +398,28 @@ final class PreferencesModelsView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Page chrome shared in spirit with every other page: a title + subtitle header, then a
-    /// toolbar strip carrying the current-model picker and filter, then the scrolling list and
-    /// pinned actions. Keeping the header identical to the other pages is what makes the
+    /// Page chrome shared in spirit with every other page: a toolbar strip carrying the
+    /// current-model picker and filter, then the scrolling list and pinned actions inside
+    /// one grouped card. Sharing the card language with the other pages is what makes the
     /// Models tab stop looking like a different app.
     private func makeModelsPage(listContent: NSView, actionBar: NSView, helpRow: NSView) -> NSView {
-        let header = PreferencesPageSupport.makePageHeader(
-            title: "Models",
-            description: "On-device transcription models."
-        )
-
         // Toolbar strip: active-model picker on the left, filter on the right, aligned to the
         // same content grid as the rows below.
         let toolbar = NSStackView(views: [modelPicker, NSView(), filterField])
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
         toolbar.spacing = 12
-        toolbar.edgeInsets = NSEdgeInsets(top: 0, left: rowContentLeftInset, bottom: 0, right: rowContentRightInset)
 
-        let stack = NSStackView(views: [header, toolbar, listContent, actionBar, helpRow])
+        let card = PreferencesPageSupport.makeCard(rows: [listContent, actionBar])
+
+        let stack = NSStackView(views: Self.showsBringYourOwnModel ? [toolbar, card, helpRow] : [toolbar, card])
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
         // `.width` alignment alone does not stretch a child whose content prefers a
         // narrower width (the scroll list), so pin each row to the stack width explicitly.
-        for item in [header, toolbar, listContent, actionBar, helpRow] {
+        for item in stack.arrangedSubviews {
             item.setContentHuggingPriority(.defaultLow, for: .horizontal)
             item.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
@@ -541,7 +543,7 @@ final class PreferencesModelsView: NSView {
         let header = NSStackView(views: [label, NSView()])
         header.orientation = .horizontal
         header.alignment = .centerY
-        header.edgeInsets = NSEdgeInsets(top: isFirstSection ? 4 : 22, left: rowContentLeftInset, bottom: 6, right: rowContentRightInset)
+        header.edgeInsets = NSEdgeInsets(top: isFirstSection ? 10 : 22, left: rowContentLeftInset, bottom: 6, right: rowContentRightInset)
         appendModelsRow(header)
 
         appendModelsRow(makeColumnHeaderRow())
@@ -894,11 +896,7 @@ final class PreferencesModelsView: NSView {
     }
 
     private func makeSeparatorRow() -> NSView {
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
-        return separator
+        PreferencesPageSupport.makeInsetSeparator()
     }
 
     private func collectColumnHeaderTitles(in view: NSView, into titles: inout [String]) {

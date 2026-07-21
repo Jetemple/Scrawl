@@ -421,9 +421,9 @@ final class PreferencesWindowController: NSWindowController {
 private extension PreferencesWindowController.Section {
     var windowContentWidth: CGFloat {
         switch self {
-        case .general:
+        case .general, .dictionary:
             560
-        case .models, .dictionary, .history, .about:
+        case .models, .history, .about:
             740
         }
     }

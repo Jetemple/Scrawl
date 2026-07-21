@@ -187,6 +187,20 @@ private enum PreferencesWindowSnapshotWriter {
             recordingDurationMS: 19500,
             transcriptionLatencyMS: 920
         ),
+        // Long dictation stress case: rows must clamp instead of ballooning.
+        TranscriptRecord(
+            id: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!,
+            createdAt: Date(timeIntervalSince1970: 1_782_617_200),
+            text: "Okay so for the standup notes, yesterday I finished wiring the download progress"
+                + " reporting into the models page and started looking at the first-word truncation"
+                + " bug in the Parakeet engine, which I think is related to how we trim the leading"
+                + " silence before handing the buffer to the decoder. Today I want to write a"
+                + " regression test that feeds a clip with a hard onset and asserts the first token"
+                + " survives, and if that lands I will pick up the deferred cutover work on the"
+                + " anti-lockout branch. No blockers, although the notarization queue was slow again.",
+            recordingDurationMS: 148_000,
+            transcriptionLatencyMS: 5100
+        ),
     ]
 
     private static let dictionaryEntries = [

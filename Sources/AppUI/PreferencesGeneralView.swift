@@ -81,6 +81,14 @@ final class PreferencesGeneralView: NSView {
         maxRecordingPopup.action = #selector(maxRecordingChanged(_:))
         maxRecordingPopup.toolTip = "Recordings stop automatically after this long, so a missed release can't record forever."
 
+        // Each popup sizes to its own widest menu item ("10 minutes" vs "15 minutes"),
+        // which leaves the stacked pair at visibly different widths; pin both to the wider.
+        let popupWidth = ceil(max(offloadPopup.intrinsicContentSize.width, maxRecordingPopup.intrinsicContentSize.width))
+        for popup in [offloadPopup, maxRecordingPopup] {
+            popup.translatesAutoresizingMaskIntoConstraints = false
+            popup.widthAnchor.constraint(equalToConstant: popupWidth).isActive = true
+        }
+
         clipboardHistoryCheckbox.target = self
         clipboardHistoryCheckbox.action = #selector(clipboardHistoryChanged(_:))
         clipboardHistoryCheckbox.font = .systemFont(ofSize: 13)
@@ -94,8 +102,6 @@ final class PreferencesGeneralView: NSView {
         let launchAtLoginRow = Self.makeCompactCheckboxRow(launchAtLoginCheckbox)
 
         let page = PreferencesPageSupport.makePage(
-            title: "General",
-            description: "Hotkey, permissions, and defaults.",
             content: [
                 PreferencesPageSupport.makeGroup(header: "Transcription", rows: [
                     PreferencesPageSupport.makeSettingRow(
@@ -104,12 +110,8 @@ final class PreferencesGeneralView: NSView {
                         action: hotkeyButton,
                         helpLines: Self.hotkeyHelpLines
                     ),
-                    Self.makeTwoControlRow(
-                        leadingTitle: "Max recording",
-                        leadingControl: maxRecordingPopup,
-                        trailingTitle: "Offload after",
-                        trailingControl: offloadPopup
-                    ),
+                    PreferencesPageSupport.makeSettingControlRow(title: "Max recording length", control: maxRecordingPopup),
+                    PreferencesPageSupport.makeSettingControlRow(title: "Offload model after", control: offloadPopup),
                 ]),
                 PreferencesPageSupport.makeGroup(header: "Permissions", rows: [
                     PreferencesPageSupport.makeSettingRow(title: "Microphone", detail: microphoneLabel, action: microphoneButton),
@@ -175,45 +177,6 @@ final class PreferencesGeneralView: NSView {
             }
             return NSColor(srgbRed: 0.14, green: 0.48, blue: 0.24, alpha: 1)
         }
-    }
-
-    /// Two labeled controls sharing one row. Each label hugs its own control; a greedy
-    /// spacer between the pairs takes the slack so the trailing pair sits at the row's
-    /// right edge, and both pairs compress gracefully at the window's minimum width.
-    private static func makeTwoControlRow(
-        leadingTitle: String,
-        leadingControl: NSView,
-        trailingTitle: String,
-        trailingControl: NSView
-    ) -> NSView {
-        func label(_ title: String) -> NSTextField {
-            let label = NSTextField(labelWithString: title)
-            label.font = .systemFont(ofSize: 13)
-            label.lineBreakMode = .byTruncatingTail
-            label.setContentHuggingPriority(.required, for: .horizontal)
-            label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-            return label
-        }
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-
-        let row = NSStackView(views: [
-            label(leadingTitle), leadingControl, spacer, label(trailingTitle), trailingControl,
-        ])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.distribution = .fill
-        row.spacing = 8
-        row.setCustomSpacing(16, after: leadingControl)
-        row.edgeInsets = NSEdgeInsets(
-            top: 11,
-            left: PreferencesPageSupport.rowInset,
-            bottom: 11,
-            right: PreferencesPageSupport.rowInset
-        )
-        return row
     }
 
     private static func makeCompactCheckboxRow(_ checkbox: NSButton) -> NSView {

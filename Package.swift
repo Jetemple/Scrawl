@@ -60,6 +60,9 @@ let package = Package(
                 "TranscriptionCore",
                 "ParakeetProvider",
                 "WhisperCppProvider",
+            ],
+            resources: [
+                .copy("Resources/AboutAppIcon.png"),
             ]
         ),
         .target(name: "HotkeyEngine"),

@@ -117,28 +117,49 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
         visibleRecords.count
     }
 
+    /// Measuring with the same label configuration the cells use keeps the height
+    /// answer and the rendered wrap in exact agreement; any drift shows up as clipped
+    /// metadata or phantom gaps between rows.
+    private static let measuringTranscriptLabel = makeTranscriptLabel(text: "")
+
+    private static let metadataLineHeight: CGFloat = {
+        let label = NSTextField(labelWithString: "Ag")
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        return ceil(label.intrinsicContentSize.height)
+    }()
+
+    private static func makeTranscriptLabel(text: String) -> NSTextField {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = .labelColor
+        label.alignment = .left
+        // Long dictations clamp so one paste can't swallow the list; Copy and the
+        // tooltip still carry the full text.
+        label.maximumNumberOfLines = 3
+        label.cell?.truncatesLastVisibleLine = true
+        return label
+    }
+
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard visibleRecords.indices.contains(row) else { return 76 }
-        let width = max(260, tableView.bounds.width - 36)
-        let text = visibleRecords[row].text as NSString
-        let textHeight = text.boundingRect(
-            with: NSSize(width: width, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin],
-            attributes: [.font: NSFont.systemFont(ofSize: 14)]
-        ).height
-        // top(13) + text + gap(5) + metadata(~15) + bottom(13)
-        return max(80, ceil(textHeight) + 46)
+        let textHeight: CGFloat
+        if visibleRecords.indices.contains(row) {
+            let label = Self.measuringTranscriptLabel
+            label.stringValue = visibleRecords[row].text
+            label.preferredMaxLayoutWidth = max(260, tableView.bounds.width - 2 * PreferencesPageSupport.rowInset)
+            textHeight = ceil(label.intrinsicContentSize.height)
+        } else {
+            textHeight = Self.metadataLineHeight
+        }
+        // Mirrors the cell constraints: top(13) + text + gap(5) + metadata + bottom(13)
+        return 13 + textHeight + 5 + Self.metadataLineHeight + 13
     }
 
     func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard visibleRecords.indices.contains(row) else { return nil }
         let record = visibleRecords[row]
         let cell = NSTableCellView()
-        let text = NSTextField(wrappingLabelWithString: record.text)
-        text.font = .systemFont(ofSize: 14)
-        text.textColor = .labelColor
-        text.alignment = .left
-        text.maximumNumberOfLines = 0
+        let text = Self.makeTranscriptLabel(text: record.text)
+        text.toolTip = record.text
 
         let time = NSTextField(labelWithString: DateFormatter.localizedString(
             from: record.createdAt,
@@ -231,14 +252,18 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
         ])
 
-        let (workspace, listHeight) = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
-        workspaceGroup = workspace
-        listHeightConstraint = listHeight
         let actionBar = PreferencesPageSupport.makePinnedActionBar(
             leading: [copyButton, repasteButton],
             trailing: [deleteButton]
         )
         actionBarView = actionBar
+        let (workspace, listHeight) = PreferencesPageSupport.makeListWorkspace(
+            scrollView: scrollView,
+            stateView: stateView,
+            actionBar: actionBar
+        )
+        workspaceGroup = workspace
+        listHeightConstraint = listHeight
         let toggleRow = NSStackView(views: [toggle, NSView()])
         toggleRow.orientation = .horizontal
         toggleRow.alignment = .centerY
@@ -249,14 +274,20 @@ final class PreferencesHistoryView: NSView, NSTableViewDataSource, NSTableViewDe
             right: PreferencesPageSupport.rowInset
         )
 
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        let searchRow = NSStackView(views: [NSView(), searchField])
+        searchRow.orientation = .horizontal
+        searchRow.alignment = .centerY
+
         let page = PreferencesPageSupport.makePage(
-            title: "History",
-            description: "Recent transcripts stored on this Mac.",
             content: [
-                PreferencesPageSupport.makeGroup(rows: [toggleRow]),
-                searchField,
+                PreferencesPageSupport.makeGroup(
+                    footer: "Recent transcripts stored on this Mac.",
+                    rows: [toggleRow]
+                ),
+                searchRow,
                 workspace,
-                actionBar,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)
