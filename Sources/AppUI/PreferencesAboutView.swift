@@ -2,9 +2,14 @@ import AppKit
 
 final class PreferencesAboutView: NSView {
     private let openProjectPage: () -> Void
+    private let checkForUpdates: () -> Void
 
-    init(openProjectPage: @escaping () -> Void) {
+    private let updateButton = NSButton()
+    private var availableUpdate: UpdateRelease?
+
+    init(openProjectPage: @escaping () -> Void, checkForUpdates: @escaping () -> Void) {
         self.openProjectPage = openProjectPage
+        self.checkForUpdates = checkForUpdates
         super.init(frame: .zero)
 
         let iconView = NSImageView(image: Self.appIcon())
@@ -23,6 +28,8 @@ final class PreferencesAboutView: NSView {
         versionLabel.font = .systemFont(ofSize: 13)
         versionLabel.textColor = .secondaryLabelColor
 
+        configureUpdateButton()
+
         let taglineLabel = NSTextField(labelWithString: "Private, local-first speech transcription.")
         taglineLabel.font = .systemFont(ofSize: 13)
 
@@ -30,20 +37,26 @@ final class PreferencesAboutView: NSView {
         privacyLabel.font = .systemFont(ofSize: 13)
         privacyLabel.textColor = .secondaryLabelColor
 
-        let projectButton = NSButton(title: "Open Project Page", target: nil, action: nil)
+        let projectButton = NSButton(title: "Open Project Page", target: self, action: #selector(openProjectPageAction(_:)))
         projectButton.bezelStyle = .rounded
-        projectButton.target = self
-        projectButton.action = #selector(openProjectPageAction(_:))
+
+        let updatesButton = NSButton(title: "Check for Updates…", target: self, action: #selector(checkForUpdatesAction(_:)))
+        updatesButton.bezelStyle = .rounded
+
+        let buttonRow = NSStackView(views: [projectButton, updatesButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.spacing = 10
 
         let stack = NSStackView(views: [
-            iconView, nameLabel, versionLabel, taglineLabel, privacyLabel, projectButton,
+            iconView, nameLabel, versionLabel, updateButton, taglineLabel, privacyLabel, buttonRow,
         ])
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 4
         stack.setCustomSpacing(10, after: iconView)
         stack.setCustomSpacing(2, after: nameLabel)
-        stack.setCustomSpacing(16, after: versionLabel)
+        stack.setCustomSpacing(6, after: versionLabel)
+        stack.setCustomSpacing(16, after: updateButton)
         stack.setCustomSpacing(18, after: privacyLabel)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -70,8 +83,48 @@ final class PreferencesAboutView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// Shows or hides the coral "Update available" link under the version line.
+    /// The row collapses out of the stack when the build is current.
+    func update(availableUpdate release: UpdateRelease?) {
+        availableUpdate = release
+        if let release {
+            updateButton.attributedTitle = Self.updateTitle(for: release)
+            updateButton.isHidden = false
+        } else {
+            updateButton.isHidden = true
+        }
+    }
+
+    private func configureUpdateButton() {
+        updateButton.isBordered = false
+        updateButton.bezelStyle = .inline
+        updateButton.setButtonType(.momentaryChange)
+        updateButton.target = self
+        updateButton.action = #selector(openAvailableUpdateAction(_:))
+        updateButton.isHidden = true
+    }
+
+    private static func updateTitle(for release: UpdateRelease) -> NSAttributedString {
+        NSAttributedString(
+            string: "Update available: \(release.version) — View Release",
+            attributes: [
+                .foregroundColor: PreferencesPageSupport.accentColor,
+                .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+            ]
+        )
+    }
+
     @objc private func openProjectPageAction(_: NSButton) {
         openProjectPage()
+    }
+
+    @objc private func checkForUpdatesAction(_: NSButton) {
+        checkForUpdates()
+    }
+
+    @objc private func openAvailableUpdateAction(_: NSButton) {
+        guard let availableUpdate else { return }
+        NSWorkspace.shared.open(availableUpdate.pageURL)
     }
 
     /// Outside the installed app, Bundle.main belongs to the host process (swift run,
@@ -81,14 +134,7 @@ final class PreferencesAboutView: NSView {
         return Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
     }
 
-    /// The bundled copy (derived from Config/AppIcon.png) keeps the page from showing
-    /// the generic system icon when there is no .app bundle, e.g. `swift run` or tests.
     private static func appIcon() -> NSImage {
-        if let url = Bundle.module.url(forResource: "AboutAppIcon", withExtension: "png"),
-           let image = NSImage(contentsOf: url)
-        {
-            return image
-        }
-        return NSImage(named: NSImage.applicationIconName) ?? NSImage()
+        ScrawlBrandIcon.image()
     }
 }

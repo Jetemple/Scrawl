@@ -382,6 +382,20 @@ enum PreferencesPageSupport {
             stack.topAnchor.constraint(equalTo: row.topAnchor),
             stack.bottomAnchor.constraint(equalTo: row.bottomAnchor),
         ])
+
+        // The outer centerY stack compresses to just its edge insets when asked for its
+        // fitting height, because the buttons live in a nested stack whose height only
+        // propagates as a breakable constraint. Pin the bar to at least the tallest
+        // button plus insets so the footer always reserves the button's full height —
+        // and stays a constant height whether the "delete" or "cancel" button is shown,
+        // avoiding a resize jump when they swap.
+        let verticalInset = stack.edgeInsets.top + stack.edgeInsets.bottom
+        for button in leading + trailing {
+            row.heightAnchor.constraint(
+                greaterThanOrEqualTo: button.heightAnchor,
+                constant: verticalInset
+            ).isActive = true
+        }
         return row
     }
 

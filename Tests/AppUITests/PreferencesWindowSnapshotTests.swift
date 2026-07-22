@@ -21,6 +21,7 @@ final class PreferencesWindowSnapshotTests: XCTestCase {
             "preferences-models.png",
             "preferences-history.png",
             "preferences-dictionary.png",
+            "preferences-about-update.png",
             "preferences-minimum-width.png",
         ] {
             let url = outputDirectory.appendingPathComponent(name)
@@ -42,6 +43,16 @@ private enum PreferencesWindowSnapshotWriter {
         try writeSnapshot(named: "preferences-dictionary.png", section: .dictionary, snapshot: snapshot, to: outputDirectory)
         try writeSnapshot(named: "preferences-about.png", section: .about, snapshot: snapshot, to: outputDirectory)
         try writeSnapshot(
+            named: "preferences-about-update.png",
+            section: .about,
+            snapshot: snapshot,
+            availableUpdate: UpdateRelease(
+                version: "0.0.14",
+                pageURL: URL(string: "https://github.com/Jetemple/Scrawl/releases/tag/v0.0.14")!
+            ),
+            to: outputDirectory
+        )
+        try writeSnapshot(
             named: "preferences-minimum-width.png",
             section: .models,
             snapshot: snapshot,
@@ -55,6 +66,7 @@ private enum PreferencesWindowSnapshotWriter {
         named fileName: String,
         section: PreferencesWindowController.Section,
         snapshot: PreferencesWindowController.Snapshot,
+        availableUpdate: UpdateRelease? = nil,
         contentSize: NSSize? = nil,
         to outputDirectory: URL
     ) throws {
@@ -72,6 +84,7 @@ private enum PreferencesWindowSnapshotWriter {
         }
 
         controller.update(snapshot: snapshot)
+        controller.showAvailableUpdate(availableUpdate)
         controller.selectSection(section)
 
         guard let contentView = window.contentView else {
@@ -146,7 +159,8 @@ private enum PreferencesWindowSnapshotWriter {
             saveDictionaryEntry: { _, _, _, completion in completion(.success(())) },
             deleteDictionaryEntries: { _, completion in completion(.success(())) },
             recoverDictionary: { completion in completion(.success(())) },
-            openProjectPage: {}
+            openProjectPage: {},
+            checkForUpdates: {}
         )
     }
 

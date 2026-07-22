@@ -8,6 +8,16 @@ struct UpdateRelease: Equatable {
 enum UpdateCheckOutcome: Equatable {
     case upToDate(currentVersion: String)
     case updateAvailable(UpdateRelease)
+
+    /// The release to surface, or nil when the running build is current. Lets
+    /// callers fold a check result straight into the cached "update available"
+    /// state that drives the menu and About indicators.
+    var availableRelease: UpdateRelease? {
+        switch self {
+        case .upToDate: nil
+        case let .updateAvailable(release): release
+        }
+    }
 }
 
 /// Asks GitHub for the newest published release and compares it against the
@@ -21,6 +31,21 @@ final class UpdateChecker {
     }
 
     static let latestReleaseURL = URL(string: "https://api.github.com/repos/Jetemple/Scrawl/releases/latest")!
+
+    /// How long a background check result stays fresh before another is due.
+    static let backgroundCheckInterval: TimeInterval = 24 * 60 * 60
+
+    /// Gates the automatic check so it runs at most once a day: always on the
+    /// first launch (no prior check), then once the interval has elapsed. The
+    /// manual "Check for Updates…" path ignores this and always runs.
+    static func shouldCheck(
+        lastCheckDate: Date?,
+        now: Date,
+        interval: TimeInterval = UpdateChecker.backgroundCheckInterval
+    ) -> Bool {
+        guard let lastCheckDate else { return true }
+        return now.timeIntervalSince(lastCheckDate) >= interval
+    }
 
     private let currentVersion: String
     private let fetch: Fetch
@@ -105,21 +130,12 @@ final class UpdateChecker {
     }
 }
 
-/// The user-initiated flow behind the "Check for Updates…" menu item. Lives
-/// here rather than on the status-bar delegate to keep the alert plumbing next
-/// to the checker it reports on.
-extension UpdateChecker {
-    static func checkAndPresent() {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
-        UpdateChecker(currentVersion: version).check { result in
-            DispatchQueue.main.async {
-                present(result)
-            }
-        }
-    }
-
-    private static func present(_ result: Result<UpdateCheckOutcome, Error>) {
+/// The modal shown when the user explicitly asks to check. Background checks
+/// stay silent and only refresh the menu/About indicators.
+enum UpdateCheckPresenter {
+    static func present(_ result: Result<UpdateCheckOutcome, Error>) {
         let alert = NSAlert()
+        alert.icon = ScrawlBrandIcon.image()
         switch result {
         case let .success(.upToDate(currentVersion)):
             alert.messageText = "Scrawl Is Up to Date"

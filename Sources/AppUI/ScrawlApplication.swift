@@ -49,7 +49,19 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     private var startManualItem: NSMenuItem?
     private var stopManualItem: NSMenuItem?
     private var setHotkeyItem: NSMenuItem?
-    private var preferencesWindowController: PreferencesWindowController?
+    var preferencesWindowController: PreferencesWindowController?
+
+    var updateAvailableItem: NSMenuItem?
+    var updateCheckTimer: Timer?
+    let updateCheckStore = UpdateCheckStore()
+    lazy var updateCheckCoordinator: UpdateCheckCoordinator = {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        let coordinator = UpdateCheckCoordinator(currentVersion: version, store: updateCheckStore)
+        coordinator.onAvailableReleaseChange = { [weak self] release in
+            self?.applyAvailableUpdate(release)
+        }
+        return coordinator
+    }()
 
     private var modelsSubmenu: NSMenu?
     private var historySubmenu: NSMenu?
@@ -138,6 +150,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         setStatus("Idle")
         updateStatusIcon()
         resolveLaunchModelPreparation()
+        startUpdateChecking()
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -156,6 +169,8 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         stopObservingWorkspaceActivations()
         statusAutoClearTimer?.invalidate()
         statusAutoClearTimer = nil
+        updateCheckTimer?.invalidate()
+        updateCheckTimer = nil
         DelegateRetainer.shared.instanceLock?.release()
         DelegateRetainer.shared.instanceLock = nil
     }
@@ -197,6 +212,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     @objc private func openPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
             preferencesWindowController = makePreferencesWindowController()
+            preferencesWindowController?.showAvailableUpdate(updateCheckCoordinator.availableRelease)
         }
         // A "Download cancelled" badge from an earlier session is stale by the time Settings
         // is reopened; clear it so a freshly-opened window doesn't show an alarming leftover.
@@ -280,6 +296,9 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                 openProjectPage: {
                     guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
                     NSWorkspace.shared.open(url)
+                },
+                checkForUpdates: { [weak self] in
+                    self?.updateCheckCoordinator.checkNow()
                 }
             )
         )
@@ -1316,10 +1335,6 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         NSApplication.shared.terminate(nil)
     }
 
-    @objc private func checkForUpdates(_: Any?) {
-        UpdateChecker.checkAndPresent()
-    }
-
     private func setupStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.title = ""
@@ -1412,6 +1427,12 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         setHotkeyItem.target = self
         menu.addItem(setHotkeyItem)
         self.setHotkeyItem = setHotkeyItem
+
+        let updateAvailableItem = NSMenuItem(title: "", action: #selector(openAvailableUpdate(_:)), keyEquivalent: "")
+        updateAvailableItem.target = self
+        updateAvailableItem.isHidden = true
+        menu.addItem(updateAvailableItem)
+        self.updateAvailableItem = updateAvailableItem
 
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         checkForUpdatesItem.target = self

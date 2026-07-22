@@ -286,6 +286,19 @@ final class PreferencesWindowControllerTests: XCTestCase {
         XCTAssertEqual(contentMinX, PreferencesPageSupport.rowInset, accuracy: 0.5)
     }
 
+    /// Regression: the bar's fitting height once collapsed to just its edge insets
+    /// because the trailing button's height only propagated as a breakable constraint,
+    /// so the window sized itself too short and clipped "Delete Selected"/"Cancel
+    /// Download" against the card's bottom edge.
+    @MainActor
+    func testPinnedActionBarFittingHeightReservesTrailingButton() {
+        let button = NSButton(title: "Delete Selected", target: nil, action: nil)
+        PreferencesPageSupport.configureSecondaryButton(button)
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(leading: [], trailing: [button])
+
+        XCTAssertGreaterThanOrEqual(actionBar.fittingSize.height, button.fittingSize.height)
+    }
+
     @MainActor
     func testHistoryPageShowsDisabledAndUnavailableStates() {
         let controller = PreferencesWindowController(actions: makeActions())
@@ -983,6 +996,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         revealModelsFolder: @escaping () -> Void = {},
         openModelSource: @escaping () -> Void = {},
         openProjectPage: @escaping () -> Void = {},
+        checkForUpdates: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
         setMaxRecordingDuration: @escaping (MaxRecordingDuration) -> Void = { _ in },
@@ -1023,7 +1037,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
             saveDictionaryEntry: saveDictionaryEntry,
             deleteDictionaryEntries: deleteDictionaryEntries,
             recoverDictionary: recoverDictionary,
-            openProjectPage: openProjectPage
+            openProjectPage: openProjectPage,
+            checkForUpdates: checkForUpdates
         )
     }
 }

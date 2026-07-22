@@ -50,6 +50,7 @@ final class PreferencesWindowController: NSWindowController {
         let deleteDictionaryEntries: (Set<String>, @escaping (Result<Void, Error>) -> Void) -> Void
         let recoverDictionary: (@escaping (Result<Void, Error>) -> Void) -> Void
         let openProjectPage: () -> Void
+        let checkForUpdates: () -> Void
     }
 
     struct Snapshot: Equatable {
@@ -258,7 +259,10 @@ final class PreferencesWindowController: NSWindowController {
             delete: actions.deleteDictionaryEntries,
             recover: actions.recoverDictionary
         ))
-        aboutView = PreferencesAboutView(openProjectPage: actions.openProjectPage)
+        aboutView = PreferencesAboutView(
+            openProjectPage: actions.openProjectPage,
+            checkForUpdates: actions.checkForUpdates
+        )
 
         // Fixed-size window: every page has a designed size (compact General, wider
         // workbench pages), so user resizing only creates layouts nobody designed.
@@ -293,6 +297,12 @@ final class PreferencesWindowController: NSWindowController {
         }
         window?.makeKeyAndOrderFront(sender)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    /// Reflects the cached update-check state onto the About page. Driven by the
+    /// update coordinator, independent of the settings snapshot.
+    func showAvailableUpdate(_ release: UpdateRelease?) {
+        aboutView.update(availableUpdate: release)
     }
 
     func update(snapshot: Snapshot) {
