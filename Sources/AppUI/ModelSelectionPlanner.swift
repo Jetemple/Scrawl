@@ -77,13 +77,23 @@ enum ModelSelectionPlanner {
 
         // A `.selected` outcome means the model is ready to use now. Carry `preparesOnSelection`
         // (not a hardcoded false) so `completeModelSelection` warms up a just-selected Parakeet
-        // whose cache is complete but whose session is cold — and, crucially, does NOT run its
-        // `else { cancelParakeetPreparation() }` branch, which would tear down the ready state
-        // when re-selecting an already-warm Parakeet. Whisper models pass `false` and still
-        // cancel any in-flight Parakeet prep, as before.
+        // whose cache is complete but whose session is cold — and does not tear down the ready
+        // state when re-selecting an already-warm Parakeet.
         return .selected(
             ModelSelectionPlan(modelID: requestedModelID, shouldPrepareOnSelection: preparesOnSelection)
         )
+    }
+
+    /// Selecting a whisper model must not kill another model's in-flight setup download —
+    /// the user is picking something to dictate with now, not abandoning the download.
+    /// Dropping `pendingModelID` alone cancels the automatic cutover, so the explicit
+    /// choice sticks and the prepared model just lands as installed. Stale ready/failed
+    /// preparation state with nothing in flight is still cleared, as before.
+    static func shouldCancelPreparationOnSelection(
+        shouldPrepareOnSelection: Bool,
+        isPreparationInFlight: Bool
+    ) -> Bool {
+        !shouldPrepareOnSelection && !isPreparationInFlight
     }
 
     static func parakeetSetupFailureAlertPlan(

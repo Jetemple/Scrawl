@@ -30,10 +30,19 @@ final class PreferencesBackgroundView: NSView {
                 layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
                 layer?.borderWidth = 0
             case .group:
-                layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-                layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.28).cgColor
+                // System Settings-style card: lighter than the window in both appearances.
+                // `controlBackgroundColor` goes the wrong way in dark mode (darker than the
+                // window), so the elevation is spelled out per appearance instead.
+                let isDark = NSAppearance.currentDrawing().bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                layer?.backgroundColor = isDark
+                    ? NSColor.white.withAlphaComponent(0.07).cgColor
+                    : NSColor.white.cgColor
+                layer?.borderColor = NSColor.separatorColor.withAlphaComponent(isDark ? 0.45 : 0.3).cgColor
                 layer?.borderWidth = 0.5
-                layer?.cornerRadius = 8
+                layer?.cornerRadius = 10
+                layer?.cornerCurve = .continuous
+                // Square scroll/table content must not poke past the rounded corners.
+                layer?.masksToBounds = true
             }
         }
     }
@@ -60,7 +69,7 @@ final class PreferencesSelectionRowView: NSTableRowView {
             dx: PreferencesPageSupport.selectionPillHorizontalInset,
             dy: PreferencesPageSupport.selectionPillVerticalInset
         )
-        let path = NSBezierPath(roundedRect: rect, xRadius: 9, yRadius: 9)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             PreferencesPageSupport.selectionTint.setFill()
             path.fill()
@@ -71,14 +80,11 @@ final class PreferencesSelectionRowView: NSTableRowView {
 enum PreferencesPageSupport {
     static let pageHorizontalInset: CGFloat = 28
     static let pageVerticalInset: CGFloat = 24
-    static let pageSectionSpacing: CGFloat = 18
+    static let pageSectionSpacing: CGFloat = 20
 
-    /// The single leading/trailing content inset every row on every page shares, so the
-    /// primary column lines up down the tabs. The page title outdents to the stack edge;
-    /// row content (and section headers) sit one `rowInset` in.
+    /// The single leading/trailing content inset every card row shares, so text lines up
+    /// down the tabs and the inset row separators start at the same edge.
     static let rowInset: CGFloat = 14
-    /// Fixed width of the label column on key/value rows, so titles align across pages.
-    static let labelColumnWidth: CGFloat = 132
     static let selectionPillHorizontalInset: CGFloat = 8
     static let selectionPillVerticalInset: CGFloat = 3
 
@@ -86,17 +92,16 @@ enum PreferencesPageSupport {
     static let accentColor = NSColor(srgbRed: 0.95, green: 0.36, blue: 0.30, alpha: 1)
 
     /// Shared coral wash behind a selected row. Kept in one place so the History, Dictionary,
-    /// and Models selection pills read identically. The saturated accent needs only a whisper
-    /// of alpha in light mode to read as a highlight without shouting; dark mode needs more
-    /// for the wash to stay visible at all.
+    /// and Models selection pills read identically. Strong enough to read as a deliberate
+    /// selection, soft enough that black text stays comfortable on top of it.
     static var selectionTint: NSColor {
         NSColor(name: nil) { appearance in
-            let alpha: CGFloat = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.14 : 0.09
+            let alpha: CGFloat = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.18 : 0.12
             return accentColor.withAlphaComponent(alpha)
         }
     }
 
-    /// Hairline color shared by every workbench rule (group frames, row dividers, list frames).
+    /// Hairline color shared by every rule (row dividers, table grids).
     static var hairlineColor: NSColor {
         .separatorColor.withAlphaComponent(0.5)
     }
@@ -112,15 +117,14 @@ enum PreferencesPageSupport {
         ])
     }
 
-    static func makePage(title: String, description: String, content: [NSView]) -> NSView {
+    /// A preferences page: sections stacked on the plain window background. The toolbar tab
+    /// already names the page, so there is no in-page title.
+    static func makePage(content: [NSView]) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = pageSectionSpacing
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let header = makePageHeader(title: title, description: description)
-        stack.addArrangedSubview(header)
-        header.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         for item in content {
             item.setContentHuggingPriority(.defaultLow, for: .horizontal)
             stack.addArrangedSubview(item)
@@ -138,63 +142,54 @@ enum PreferencesPageSupport {
         return container
     }
 
-    static func makePageHeader(title: String, description: String) -> NSView {
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.alignment = .left
+    /// An inset rounded card with an optional section label above and caption below —
+    /// the System Settings grouped-form section. Rows are separated by inset hairlines.
+    static func makeGroup(header: String? = nil, footer: String? = nil, rows: [NSView]) -> NSView {
+        let card = makeCard(rows: rows)
+        guard header != nil || footer != nil else { return card }
 
-        let descriptionLabel = NSTextField(wrappingLabelWithString: description)
-        descriptionLabel.font = .systemFont(ofSize: 12)
-        descriptionLabel.textColor = .secondaryLabelColor
-        descriptionLabel.alignment = .left
-
-        let container = NSView()
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(titleLabel)
-        container.addSubview(descriptionLabel)
-        NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            titleLabel.topAnchor.constraint(equalTo: container.topAnchor),
-            descriptionLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            descriptionLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            descriptionLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
-        return container
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.spacing = 6
+        if let header {
+            stack.addArrangedSubview(makeSectionHeaderRow(header))
+        }
+        card.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        stack.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        if let footer {
+            stack.addArrangedSubview(makeCaptionRow(footer))
+        }
+        return stack
     }
 
-    /// A flat "workbench" group: an optional section header over a hairline-framed run of
-    /// rows on the plain window background — no white card. Full-width top and bottom rules
-    /// plus inter-row dividers make it read as a table section that matches the Models page.
-    static func makeGroup(header: String? = nil, rows: [NSView]) -> NSView {
+    /// The bare card: rows on the elevated surface with inset separators between them.
+    /// Use `makeGroup` unless the card needs custom surroundings.
+    static func makeCard(rows: [NSView]) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .width
         stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        // A single flat stack so `.width` alignment stretches every row to full width.
-        // (Nesting the rows one level deeper broke the width propagation and shoved
-        // content to the right.)
-        if let header {
-            stack.addArrangedSubview(makeSectionHeaderRow(header))
-        }
-        stack.addArrangedSubview(makeSeparator())
-        for (index, row) in rows.enumerated() {
+        /// `.width` alignment alone leaves a child at its natural width (right-aligned),
+        /// so every row is pinned to the stack width explicitly.
+        func append(_ row: NSView) {
+            row.setContentHuggingPriority(.defaultLow, for: .horizontal)
             stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        for (index, row) in rows.enumerated() {
+            append(row)
             if index < rows.count - 1 {
-                stack.addArrangedSubview(makeSeparator())
+                append(makeInsetSeparator())
             }
         }
-        stack.addArrangedSubview(makeSeparator())
-        return stack
+        let card = PreferencesBackgroundView(style: .group)
+        fill(card, with: stack)
+        return card
     }
 
-    /// A workbench section header: a semibold label indented to the shared row grid, with a
-    /// little breathing room before the framed rows below it.
+    /// A section label sitting above its card, indented to the card's text grid.
     static func makeSectionHeaderRow(_ title: String) -> NSView {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -205,10 +200,26 @@ enum PreferencesPageSupport {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 0
-        row.edgeInsets = NSEdgeInsets(top: 0, left: rowInset, bottom: 7, right: rowInset)
+        row.edgeInsets = NSEdgeInsets(top: 0, left: rowInset, bottom: 1, right: rowInset)
         return row
     }
 
+    /// A small secondary caption aligned to the card text grid — section footers and
+    /// page intros.
+    static func makeCaptionRow(_ text: String) -> NSView {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = .systemFont(ofSize: 11)
+        label.textColor = .secondaryLabelColor
+
+        let row = NSStackView(views: [label])
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.edgeInsets = NSEdgeInsets(top: 0, left: rowInset, bottom: 0, right: rowInset)
+        return row
+    }
+
+    /// A card row: title (with optional help captions) on the leading edge, value and
+    /// control on the trailing edge, per the grouped-form convention.
     static func makeSettingRow(
         title: String,
         detail: NSTextField,
@@ -218,62 +229,77 @@ enum PreferencesPageSupport {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13)
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.widthAnchor.constraint(equalToConstant: labelColumnWidth).isActive = true
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabelColor
         detail.lineBreakMode = .byTruncatingTail
         detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        // Keep the value snug against its title; the trailing spacer, not the value,
-        // absorbs the row's slack.
         detail.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
-        // Greedy spacer keeps sparse rows from centering and gives action controls a
-        // stable trailing column.
-        let trailingSpacer = NSView()
-        trailingSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        trailingSpacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        // Greedy spacer pushes the value and control to the trailing edge.
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
-        if !helpLines.isEmpty {
-            return makeSettingHelpRow(titleLabel: titleLabel, detail: detail, action: action, helpLines: helpLines)
+        let header = NSStackView()
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.distribution = .fill
+        header.spacing = 8
+        header.addArrangedSubview(titleLabel)
+        header.addArrangedSubview(spacer)
+        header.addArrangedSubview(detail)
+        if let action {
+            header.addArrangedSubview(action)
         }
 
+        if helpLines.isEmpty {
+            header.edgeInsets = NSEdgeInsets(top: 10, left: rowInset, bottom: 10, right: rowInset)
+            return header
+        }
+
+        // Help captions run full-width beneath the title line so the trailing
+        // controls stay aligned with the title instead of a taller text block.
         let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.distribution = .fill
-        row.spacing = 12
-        row.edgeInsets = NSEdgeInsets(top: 11, left: rowInset, bottom: 11, right: rowInset)
-        row.addArrangedSubview(titleLabel)
-        row.addArrangedSubview(detail)
-        row.addArrangedSubview(trailingSpacer)
-        if let action {
-            row.addArrangedSubview(action)
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.spacing = 2
+        row.edgeInsets = NSEdgeInsets(top: 10, left: rowInset, bottom: 11, right: rowInset)
+        row.addArrangedSubview(header)
+        row.setCustomSpacing(5, after: header)
+        header.widthAnchor.constraint(equalTo: row.widthAnchor, constant: -2 * rowInset).isActive = true
+        for text in helpLines {
+            let label = NSTextField(labelWithString: text)
+            label.font = .systemFont(ofSize: 11)
+            label.textColor = .secondaryLabelColor
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            row.addArrangedSubview(label)
         }
         return row
     }
 
+    /// A card row with just a title and a trailing control (popup, switch, stepper).
     static func makeSettingControlRow(title: String, control: NSView) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13)
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.widthAnchor.constraint(equalToConstant: labelColumnWidth).isActive = true
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        let trailingSpacer = NSView()
-        trailingSpacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        trailingSpacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
 
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
         row.distribution = .fill
-        row.spacing = 12
-        row.edgeInsets = NSEdgeInsets(top: 11, left: rowInset, bottom: 11, right: rowInset)
+        row.spacing = 8
+        row.edgeInsets = NSEdgeInsets(top: 8, left: rowInset, bottom: 8, right: rowInset)
         row.addArrangedSubview(titleLabel)
+        row.addArrangedSubview(spacer)
         row.addArrangedSubview(control)
-        row.addArrangedSubview(trailingSpacer)
         return row
     }
 
@@ -283,6 +309,20 @@ enum PreferencesPageSupport {
         separator.translatesAutoresizingMaskIntoConstraints = false
         separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
         return separator
+    }
+
+    /// A row divider that starts at the card's text grid instead of running full-bleed.
+    static func makeInsetSeparator() -> NSView {
+        let separator = makeSeparator()
+        let row = NSView()
+        row.addSubview(separator)
+        NSLayoutConstraint.activate([
+            separator.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: rowInset),
+            separator.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -rowInset),
+            separator.topAnchor.constraint(equalTo: row.topAnchor),
+            separator.bottomAnchor.constraint(equalTo: row.bottomAnchor),
+        ])
+        return row
     }
 
     static func makeRoundedBackground() -> NSView {
@@ -298,35 +338,12 @@ enum PreferencesPageSupport {
         button.controlSize = .small
     }
 
-    static func makeButtonRow(_ button: NSButton) -> NSView {
-        makeActionRow(buttons: [button])
-    }
-
     static func makeSectionLabel(_ title: String) -> NSTextField {
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 12, weight: .semibold)
         label.textColor = .secondaryLabelColor
         label.lineBreakMode = .byTruncatingTail
         return label
-    }
-
-    static func makeActionRow(buttons: [NSButton]) -> NSView {
-        let stack = NSStackView(views: buttons + [NSView()])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: rowInset, bottom: 0, right: rowInset)
-
-        let row = NSView()
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: row.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: row.bottomAnchor),
-        ])
-        return row
     }
 
     static func makePinnedActionBar(
@@ -350,9 +367,9 @@ enum PreferencesPageSupport {
         stack.alignment = .centerY
         stack.spacing = 12
         stack.edgeInsets = NSEdgeInsets(
-            top: 10,
+            top: 8,
             left: leadingInset ?? rowInset,
-            bottom: 0,
+            bottom: 8,
             right: trailingInset ?? rowInset
         )
 
@@ -365,23 +382,40 @@ enum PreferencesPageSupport {
             stack.topAnchor.constraint(equalTo: row.topAnchor),
             stack.bottomAnchor.constraint(equalTo: row.bottomAnchor),
         ])
+
+        // The outer centerY stack compresses to just its edge insets when asked for its
+        // fitting height, because the buttons live in a nested stack whose height only
+        // propagates as a breakable constraint. Pin the bar to at least the tallest
+        // button plus insets so the footer always reserves the button's full height —
+        // and stays a constant height whether the "delete" or "cancel" button is shown,
+        // avoiding a resize jump when they swap.
+        let verticalInset = stack.edgeInsets.top + stack.edgeInsets.bottom
+        for button in leading + trailing {
+            row.heightAnchor.constraint(
+                greaterThanOrEqualTo: button.heightAnchor,
+                constant: verticalInset
+            ).isActive = true
+        }
         return row
     }
 
-    /// Minimum and maximum height of a flat list workspace. The view drives the exact height
-    /// (via the returned constraint) to hug its content, clamped to this range.
+    /// Minimum and maximum height of a list card's scrolling region. The view drives the
+    /// exact height (via the returned constraint) to hug its content, clamped to this range.
     static let listMinHeight: CGFloat = 96
     static let listMaxHeight: CGFloat = 300
 
-    /// A flat, hairline-framed list area on the plain window background — no white well.
-    /// Top and bottom rules frame the scrolling list (or its empty-state message) so it reads
-    /// as the same kind of table section as the key/value groups and the Models page.
+    /// A list inside a card: the scrolling table (or its empty-state message) on the
+    /// elevated surface, with the page's action bar as the card's footer.
     ///
-    /// Returns the group plus its height constraint: the owning view sets `.constant` to the
-    /// list's content height after each reload so the bottom rule hugs the last row instead of
-    /// leaving a mostly-empty framed region. The constraint sits just below required, so a tight
-    /// window can still compress it without breaking layout.
-    static func makeListWorkspace(scrollView: NSScrollView, stateView: NSView) -> (view: NSView, heightConstraint: NSLayoutConstraint) {
+    /// Returns the card plus the list region's height constraint: the owning view sets
+    /// `.constant` to the list's content height after each reload so the card hugs the last
+    /// row instead of leaving a mostly-empty region. The constraint sits just below
+    /// required, so a tight window can still compress it without breaking layout.
+    static func makeListWorkspace(
+        scrollView: NSScrollView,
+        stateView: NSView,
+        actionBar: NSView? = nil
+    ) -> (view: NSView, heightConstraint: NSLayoutConstraint) {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.verticalScrollElasticity = .none
@@ -391,7 +425,12 @@ enum PreferencesPageSupport {
         stateView.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(scrollView)
         content.addSubview(stateView)
+        let contentHeight = content.heightAnchor.constraint(equalToConstant: listMinHeight)
+        contentHeight.priority = NSLayoutConstraint.Priority(999)
         NSLayoutConstraint.activate([
+            contentHeight,
+            content.heightAnchor.constraint(lessThanOrEqualToConstant: listMaxHeight),
+            content.heightAnchor.constraint(greaterThanOrEqualToConstant: listMinHeight),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: content.topAnchor),
@@ -402,37 +441,8 @@ enum PreferencesPageSupport {
             stateView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
 
-        // Flat (window-background) surface — invisible against the pane — kept as a
-        // PreferencesBackgroundView so shared "grouped workspace" checks still hold.
-        let group = makeContentBackground()
-        let topRule = makeSeparator()
-        let bottomRule = makeSeparator()
-        content.translatesAutoresizingMaskIntoConstraints = false
-        group.addSubview(topRule)
-        group.addSubview(content)
-        group.addSubview(bottomRule)
-        // Hug the list's content height (set by the owner after each reload), clamped to
-        // [listMinHeight, listMaxHeight]. The hug is just under required so a tight window can
-        // still compress it; the bounds stay required so a short list never leaves a big
-        // empty framed region and a long one scrolls.
-        let contentHeight = group.heightAnchor.constraint(equalToConstant: listMinHeight)
-        contentHeight.priority = NSLayoutConstraint.Priority(999)
-        NSLayoutConstraint.activate([
-            contentHeight,
-            group.heightAnchor.constraint(lessThanOrEqualToConstant: listMaxHeight),
-            group.heightAnchor.constraint(greaterThanOrEqualToConstant: listMinHeight),
-            topRule.leadingAnchor.constraint(equalTo: group.leadingAnchor),
-            topRule.trailingAnchor.constraint(equalTo: group.trailingAnchor),
-            topRule.topAnchor.constraint(equalTo: group.topAnchor),
-            content.leadingAnchor.constraint(equalTo: group.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: group.trailingAnchor),
-            content.topAnchor.constraint(equalTo: topRule.bottomAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomRule.topAnchor),
-            bottomRule.leadingAnchor.constraint(equalTo: group.leadingAnchor),
-            bottomRule.trailingAnchor.constraint(equalTo: group.trailingAnchor),
-            bottomRule.bottomAnchor.constraint(equalTo: group.bottomAnchor),
-        ])
-        return (group, contentHeight)
+        let card = makeCard(rows: actionBar.map { [content, $0] } ?? [content])
+        return (card, contentHeight)
     }
 
     static func makeEmptyState(title: String, detail: String) -> NSView {
@@ -460,59 +470,4 @@ enum PreferencesPageSupport {
         ])
         return view
     }
-}
-
-private func makeSettingHelpRow(
-    titleLabel: NSTextField,
-    detail: NSTextField,
-    action: NSView?,
-    helpLines: [String]
-) -> NSView {
-    let helpLabels = helpLines.map { text in
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 11)
-        label.textColor = .secondaryLabelColor
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return label
-    }
-
-    let detailStack = NSStackView(views: [detail] + helpLabels)
-    detailStack.orientation = .vertical
-    detailStack.alignment = .leading
-    detailStack.spacing = 2
-    detailStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    detailStack.translatesAutoresizingMaskIntoConstraints = false
-
-    let row = NSView()
-    row.addSubview(titleLabel)
-    row.addSubview(detailStack)
-
-    var constraints = [
-        titleLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: PreferencesPageSupport.rowInset),
-        titleLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: 11),
-        detailStack.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 12),
-        detailStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 11),
-        detailStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -11),
-    ]
-
-    if let action {
-        action.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(action)
-        constraints.append(contentsOf: [
-            action.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -PreferencesPageSupport.rowInset),
-            action.topAnchor.constraint(equalTo: row.topAnchor, constant: 8),
-            detailStack.trailingAnchor.constraint(lessThanOrEqualTo: action.leadingAnchor, constant: -12),
-        ])
-    } else {
-        constraints.append(
-            detailStack.trailingAnchor.constraint(
-                lessThanOrEqualTo: row.trailingAnchor,
-                constant: -PreferencesPageSupport.rowInset
-            )
-        )
-    }
-
-    NSLayoutConstraint.activate(constraints)
-    return row
 }

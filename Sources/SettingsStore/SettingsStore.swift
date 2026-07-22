@@ -91,6 +91,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// 5 minutes: comfortably above a typical dictation so real recordings finish
     /// cleanly, while still bounding a recording whose stop event never arrived.
     public var maxRecordingDuration: MaxRecordingDuration
+    /// Set once the app has ever observed an Accessibility grant. Lets the app tell
+    /// "never granted" apart from "grant went stale after the bundle was replaced"
+    /// (brew upgrade / DMG drag-over), where System Settings still shows Scrawl as
+    /// enabled but `AXIsProcessTrusted()` is false and no system prompt will appear.
+    public var hasEverAuthorizedAccessibility: Bool
 
     public init(
         defaultModelID: String = "ggml-small.en",
@@ -101,7 +106,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         isTranscriptHistoryEnabled: Bool = true,
         modelOffloadPolicy: ModelOffloadPolicy = .fiveMinutes,
         keepTranscriptsInClipboardHistory: Bool = false,
-        maxRecordingDuration: MaxRecordingDuration = .fiveMinutes
+        maxRecordingDuration: MaxRecordingDuration = .fiveMinutes,
+        hasEverAuthorizedAccessibility: Bool = false
     ) {
         self.defaultModelID = defaultModelID
         self.selectedModelID = selectedModelID
@@ -112,6 +118,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.modelOffloadPolicy = modelOffloadPolicy
         self.keepTranscriptsInClipboardHistory = keepTranscriptsInClipboardHistory
         self.maxRecordingDuration = maxRecordingDuration
+        self.hasEverAuthorizedAccessibility = hasEverAuthorizedAccessibility
     }
 
     public var modelID: String {
@@ -129,6 +136,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case modelOffloadPolicy
         case keepTranscriptsInClipboardHistory
         case maxRecordingDuration
+        case hasEverAuthorizedAccessibility
     }
 
     public init(from decoder: Decoder) throws {
@@ -142,6 +150,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         modelOffloadPolicy = try container.decodeIfPresent(ModelOffloadPolicy.self, forKey: .modelOffloadPolicy) ?? .fiveMinutes
         keepTranscriptsInClipboardHistory = try container.decodeIfPresent(Bool.self, forKey: .keepTranscriptsInClipboardHistory) ?? false
         maxRecordingDuration = try container.decodeIfPresent(MaxRecordingDuration.self, forKey: .maxRecordingDuration) ?? .fiveMinutes
+        hasEverAuthorizedAccessibility = try container.decodeIfPresent(Bool.self, forKey: .hasEverAuthorizedAccessibility) ?? false
 
         if let hotkey = try container.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) {
             self.hotkey = hotkey
@@ -162,6 +171,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         try container.encode(modelOffloadPolicy, forKey: .modelOffloadPolicy)
         try container.encode(keepTranscriptsInClipboardHistory, forKey: .keepTranscriptsInClipboardHistory)
         try container.encode(maxRecordingDuration, forKey: .maxRecordingDuration)
+        try container.encode(hasEverAuthorizedAccessibility, forKey: .hasEverAuthorizedAccessibility)
     }
 }
 

@@ -30,4 +30,38 @@ final class AccessibilityPromptDecisionTests: XCTestCase {
             .openSettings
         )
     }
+
+    /// A grant existed before but authorization is gone: the TCC record went stale
+    /// (bundle replaced by brew upgrade or DMG drag-over). The record still exists, so
+    /// the system prompt can never appear — skip it and guide the user to re-toggle.
+    func testLostGrantSkipsSystemPromptAndOpensSettings() {
+        XCTAssertEqual(
+            AccessibilityPromptDecision.decide(
+                isAuthorized: false,
+                hasShownSystemPrompt: false,
+                wasPreviouslyAuthorized: true
+            ),
+            .openSettingsForStaleGrant
+        )
+        XCTAssertEqual(
+            AccessibilityPromptDecision.decide(
+                isAuthorized: false,
+                hasShownSystemPrompt: true,
+                wasPreviouslyAuthorized: true
+            ),
+            .openSettingsForStaleGrant
+        )
+    }
+
+    /// A prior grant changes nothing once authorization is back.
+    func testPriorGrantStillAuthorized() {
+        XCTAssertEqual(
+            AccessibilityPromptDecision.decide(
+                isAuthorized: true,
+                hasShownSystemPrompt: false,
+                wasPreviouslyAuthorized: true
+            ),
+            .alreadyAuthorized
+        )
+    }
 }

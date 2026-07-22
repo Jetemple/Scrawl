@@ -90,6 +90,22 @@ final class AppSettingsDecodingTests: XCTestCase {
         XCTAssertFalse(try JSONDecoder().decode(AppSettings.self, from: data).keepTranscriptsInClipboardHistory)
     }
 
+    func testHasEverAuthorizedAccessibilityDefaultsToFalse() {
+        XCTAssertFalse(AppSettings().hasEverAuthorizedAccessibility)
+    }
+
+    func testHasEverAuthorizedAccessibilityRoundTrips() throws {
+        let data = try JSONEncoder().encode(AppSettings(hasEverAuthorizedAccessibility: true))
+        XCTAssertTrue(try JSONDecoder().decode(AppSettings.self, from: data).hasEverAuthorizedAccessibility)
+    }
+
+    func testLegacyJSONWithoutAccessibilityGrantKeyDecodesToFalse() throws {
+        let data = try XCTUnwrap("""
+        {"defaultModelID":"tiny.en","selectedModelID":"tiny.en","language":"en"}
+        """.data(using: .utf8))
+        XCTAssertFalse(try JSONDecoder().decode(AppSettings.self, from: data).hasEverAuthorizedAccessibility)
+    }
+
     func testDecodesLegacyHotkeyDescription() throws {
         let json = """
         {

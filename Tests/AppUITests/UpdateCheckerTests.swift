@@ -84,6 +84,31 @@ final class UpdateCheckerTests: XCTestCase {
         XCTAssertTrue(error is FetchFailure)
     }
 
+    func testChecksWhenNeverCheckedBefore() {
+        XCTAssertTrue(UpdateChecker.shouldCheck(lastCheckDate: nil, now: Self.noon))
+    }
+
+    func testChecksAgainOnceADayHasPassed() {
+        let yesterday = Self.noon.addingTimeInterval(-24 * 60 * 60)
+        XCTAssertTrue(UpdateChecker.shouldCheck(lastCheckDate: yesterday, now: Self.noon))
+    }
+
+    func testSkipsCheckWithinTheDailyWindow() {
+        let anHourAgo = Self.noon.addingTimeInterval(-60 * 60)
+        XCTAssertFalse(UpdateChecker.shouldCheck(lastCheckDate: anHourAgo, now: Self.noon))
+    }
+
+    func testAvailableReleaseIsNilWhenUpToDate() {
+        XCTAssertNil(UpdateCheckOutcome.upToDate(currentVersion: "0.0.12").availableRelease)
+    }
+
+    func testAvailableReleaseCarriesTheReleaseWhenAnUpdateExists() {
+        let release = UpdateRelease(version: "0.0.13", pageURL: Self.releasePageURL)
+        XCTAssertEqual(UpdateCheckOutcome.updateAvailable(release).availableRelease, release)
+    }
+
+    private static let noon = Date(timeIntervalSince1970: 1_700_000_000)
+
     private static let releasePageURL = URL(string: "https://github.com/Jetemple/Scrawl/releases/tag/latest")!
 
     private static func releaseData(tag: String) -> Data {

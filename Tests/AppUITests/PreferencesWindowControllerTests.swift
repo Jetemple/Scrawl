@@ -64,6 +64,10 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.selectSection(.models)
         XCTAssertEqual(contentView.bounds.width, 740, accuracy: 0.5)
 
+        // Dictionary holds short terms, so it shares General's compact width.
+        controller.selectSection(.dictionary)
+        XCTAssertEqual(contentView.bounds.width, 560, accuracy: 0.5)
+
         controller.selectSection(.general)
         XCTAssertEqual(contentView.bounds.width, 560, accuracy: 0.5)
     }
@@ -87,6 +91,16 @@ final class PreferencesWindowControllerTests: XCTestCase {
                     isInstalled: false, isSelected: false,
                     isDownloading: false, isCancelled: false, downloadProgressText: nil
                 ),
+                PreferencesModelRow(
+                    id: "ggml-small.en", displayName: "Small (English)",
+                    isInstalled: false, isSelected: false,
+                    isDownloading: false, isCancelled: false, downloadProgressText: nil
+                ),
+                PreferencesModelRow(
+                    id: "ggml-large-v3-turbo", displayName: "Large v3 Turbo",
+                    isInstalled: false, isSelected: false,
+                    isDownloading: false, isCancelled: false, downloadProgressText: nil
+                ),
             ]
         ))
 
@@ -96,8 +110,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.selectSection(.about)
         let aboutHeight = contentView.bounds.height
         XCTAssertLessThan(
-            aboutHeight, modelsHeight - 100,
-            "About has far less content and must get a correspondingly shorter window"
+            aboutHeight, modelsHeight,
+            "About has less content and must get a correspondingly shorter window"
         )
 
         controller.selectSection(.general)
@@ -237,31 +251,25 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testPageHeaderUsesSameWidthAndLeadingEdgeAsContent() throws {
+    func testGroupedSectionsUseFullPageWidth() {
         let content = PreferencesPageSupport.makeRoundedBackground()
         content.heightAnchor.constraint(equalToConstant: 80).isActive = true
-        let page = PreferencesPageSupport.makePage(
-            title: "Models",
-            description: "Select an installed model or download another.",
-            content: [content]
-        )
+        let page = PreferencesPageSupport.makePage(content: [content])
         page.frame = NSRect(x: 0, y: 0, width: 500, height: 300)
         page.layoutSubtreeIfNeeded()
 
-        let pageStack = try XCTUnwrap(page.subviews.compactMap { $0 as? NSStackView }.first)
-        let header = try XCTUnwrap(pageStack.arrangedSubviews.first)
-
-        XCTAssertEqual(header.frame.minX, content.frame.minX, accuracy: 0.5)
-        XCTAssertEqual(header.frame.width, content.frame.width, accuracy: 0.5)
+        let contentInPage = content.convert(content.bounds, to: page)
+        XCTAssertEqual(contentInPage.minX, PreferencesPageSupport.pageHorizontalInset, accuracy: 0.5)
+        XCTAssertEqual(
+            contentInPage.width,
+            500 - PreferencesPageSupport.pageHorizontalInset * 2,
+            accuracy: 0.5
+        )
     }
 
     @MainActor
     func testPreferencePagesPaintNativeWindowBackground() {
-        let page = PreferencesPageSupport.makePage(
-            title: "General",
-            description: "Readiness and defaults.",
-            content: []
-        )
+        let page = PreferencesPageSupport.makePage(content: [])
 
         XCTAssertTrue(page is PreferencesBackgroundView)
     }
@@ -278,22 +286,17 @@ final class PreferencesWindowControllerTests: XCTestCase {
         XCTAssertEqual(contentMinX, PreferencesPageSupport.rowInset, accuracy: 0.5)
     }
 
+    /// Regression: the bar's fitting height once collapsed to just its edge insets
+    /// because the trailing button's height only propagated as a breakable constraint,
+    /// so the window sized itself too short and clipped "Delete Selected"/"Cancel
+    /// Download" against the card's bottom edge.
     @MainActor
-    func testPageHeaderLabelsFillWidthAndAlignLeft() {
-        let header = PreferencesPageSupport.makePageHeader(
-            title: "Models",
-            description: "Select an installed model or download another."
-        )
-        header.frame = NSRect(x: 0, y: 0, width: 500, height: 60)
-        header.layoutSubtreeIfNeeded()
+    func testPinnedActionBarFittingHeightReservesTrailingButton() {
+        let button = NSButton(title: "Delete Selected", target: nil, action: nil)
+        PreferencesPageSupport.configureSecondaryButton(button)
+        let actionBar = PreferencesPageSupport.makePinnedActionBar(leading: [], trailing: [button])
 
-        let labels = header.subviews.compactMap { $0 as? NSTextField }
-        XCTAssertEqual(labels.count, 2)
-        for label in labels {
-            XCTAssertEqual(label.alignment, .left)
-            XCTAssertGreaterThanOrEqual(label.frame.width, header.bounds.width)
-        }
-        XCTAssertEqual(labels[0].frame.width, labels[1].frame.width, accuracy: 0.5)
+        XCTAssertGreaterThanOrEqual(actionBar.fittingSize.height, button.fittingSize.height)
     }
 
     @MainActor
@@ -483,9 +486,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let contentView = try XCTUnwrap(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
 
-        // "Offload after" now shares its row with "Max recording" (a deliberate two-up
-        // exception), so the leading column is anchored by that row's leading title.
-        let titleMinXs = try ["Hotkey", "Max recording", "Microphone", "Accessibility"].map { title -> CGFloat in
+        let titleMinXs = try ["Hotkey", "Max recording length", "Offload model after", "Microphone", "Accessibility"].map { title -> CGFloat in
             let field = try XCTUnwrap(contentView.textField(withValue: title))
             return contentView.convert(field.bounds, from: field).minX.rounded()
         }
@@ -499,7 +500,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
         controller.update(snapshot: makeSnapshot())
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
-        XCTAssertNotNil(contentView.textField(withValue: "Hotkey, permissions, and defaults."))
+        // The toolbar tab names the page; no in-page title, subtitle, or readiness banner.
+        XCTAssertNil(contentView.textField(withValue: "Hotkey, permissions, and defaults."))
         XCTAssertNil(contentView.textField(withValue: "Readiness"))
         XCTAssertNil(contentView.textField(withValue: "Readiness and defaults."))
     }
@@ -526,21 +528,21 @@ final class PreferencesWindowControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testGeneralRecordingAndOffloadShareOneRow() throws {
+    func testGeneralRecordingAndOffloadUseSeparateRows() throws {
         let controller = PreferencesWindowController(actions: makeActions())
         controller.update(snapshot: makeSnapshot())
         let contentView = try XCTUnwrap(controller.window?.contentView)
         contentView.layoutSubtreeIfNeeded()
 
-        // "Max recording" and "Offload after" sit side by side in one two-up row:
-        // same vertical position, with the offload pair to the right of the recording pair.
-        let recording = try XCTUnwrap(contentView.textField(withValue: "Max recording"))
-        let offload = try XCTUnwrap(contentView.textField(withValue: "Offload after"))
+        // One setting per row, grouped-form style: "Offload model after" sits on its own
+        // row directly below "Max recording length", sharing the same leading edge.
+        let recording = try XCTUnwrap(contentView.textField(withValue: "Max recording length"))
+        let offload = try XCTUnwrap(contentView.textField(withValue: "Offload model after"))
         let recordingFrame = contentView.convert(recording.bounds, from: recording)
         let offloadFrame = contentView.convert(offload.bounds, from: offload)
 
-        XCTAssertEqual(recordingFrame.midY.rounded(), offloadFrame.midY.rounded(), accuracy: 1)
-        XCTAssertGreaterThan(offloadFrame.minX, recordingFrame.maxX)
+        XCTAssertLessThan(offloadFrame.midY, recordingFrame.midY)
+        XCTAssertEqual(offloadFrame.minX, recordingFrame.minX, accuracy: 0.5)
     }
 
     @MainActor
@@ -556,15 +558,18 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let doubleTapHelp = "Double-tap: Record until you tap again."
         let holdHelpLabel = try XCTUnwrap(contentView.textField(withValue: holdHelp))
         let doubleTapHelpLabel = try XCTUnwrap(contentView.textField(withValue: doubleTapHelp))
+        let hotkeyTitle = try XCTUnwrap(contentView.textField(withValue: "Hotkey"))
         let offloadPopup = try XCTUnwrap(contentView.popupButton(selectedTitle: "5 minutes"))
-        let hotkeyFrame = contentView.convert(hotkeyValue.bounds, from: hotkeyValue)
+        let titleFrame = contentView.convert(hotkeyTitle.bounds, from: hotkeyTitle)
         let holdHelpFrame = contentView.convert(holdHelpLabel.bounds, from: holdHelpLabel)
         let doubleTapHelpFrame = contentView.convert(doubleTapHelpLabel.bounds, from: doubleTapHelpLabel)
         let offloadFrame = contentView.convert(offloadPopup.frame, from: offloadPopup.superview)
 
         XCTAssertNil(contentView.textField(withValue: "Press and hold to dictate. Double-tap to keep recording, then tap again to stop."))
-        XCTAssertLessThan(holdHelpFrame.minY, hotkeyFrame.minY)
+        // Help captions stack directly under the row's title, above the offload row below.
+        XCTAssertLessThan(holdHelpFrame.minY, titleFrame.minY)
         XCTAssertLessThan(doubleTapHelpFrame.minY, holdHelpFrame.minY)
+        XCTAssertEqual(holdHelpFrame.minX, titleFrame.minX, accuracy: 0.5)
         XCTAssertGreaterThan(doubleTapHelpFrame.minY, offloadFrame.maxY)
         XCTAssertEqual(holdHelpLabel.font?.pointSize, 11)
         XCTAssertEqual(doubleTapHelpLabel.font?.pointSize, 11)
@@ -613,26 +618,20 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
         controller.selectSection(.dictionary)
-        XCTAssertNotNil(contentView.textField(withValue: "Dictionary"))
         XCTAssertNil(contentView.textField(withValue: "Vocabulary"))
     }
 
     @MainActor
-    func testModelsAddAndRevealButtonsDispatchActionsWithoutFindModels() throws {
-        var addedModel = false
-        var revealedFolder = false
-        let controller = PreferencesWindowController(actions: makeActions(
-            addModel: { addedModel = true },
-            revealModelsFolder: { revealedFolder = true }
-        ))
+    func testModelsPageShelvesBringYourOwnModelAffordances() throws {
+        let controller = PreferencesWindowController(actions: makeActions())
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
         controller.selectSection(.models)
-        try XCTUnwrap(contentView.button(titled: "Add Model…")).performClick(nil)
-        try XCTUnwrap(contentView.button(titled: "Reveal Models Folder")).performClick(nil)
 
-        XCTAssertTrue(addedModel)
-        XCTAssertTrue(revealedFolder)
+        // Shelved while the curated download list is the only supported path; the
+        // buttons and their wiring stay in PreferencesModelsView for the flip back.
+        XCTAssertNil(contentView.button(titled: "Add Model…"))
+        XCTAssertNil(contentView.button(titled: "Reveal Models Folder"))
         XCTAssertNil(contentView.button(titled: "Find Models"))
     }
 
@@ -868,10 +867,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
         let controller = PreferencesWindowController(actions: makeActions())
         let contentView = try XCTUnwrap(controller.window?.contentView)
 
-        // Every page — Models included — now carries a compact subtitle under its title;
-        // the model picker and filter live in a toolbar strip below the header.
-        controller.selectSection(.models)
-        XCTAssertNotNil(contentView.textField(withValue: "On-device transcription models."))
+        // The toolbar tab names each page, so pages carry no in-page title. Dictionary keeps
+        // a single compact caption; the old verbose description must not come back.
         controller.selectSection(.dictionary)
         XCTAssertNotNil(contentView.textField(withValue: "Names, jargon, and acronyms Scrawl should get right."))
         XCTAssertNil(contentView.textField(withValue: "Preferred names, terms, and phrases that help Whisper recognize your language."))
@@ -999,6 +996,7 @@ final class PreferencesWindowControllerTests: XCTestCase {
         revealModelsFolder: @escaping () -> Void = {},
         openModelSource: @escaping () -> Void = {},
         openProjectPage: @escaping () -> Void = {},
+        checkForUpdates: @escaping () -> Void = {},
         setTranscriptHistoryEnabled: @escaping (Bool) -> Void = { _ in },
         setModelOffloadPolicy: @escaping (ModelOffloadPolicy) -> Void = { _ in },
         setMaxRecordingDuration: @escaping (MaxRecordingDuration) -> Void = { _ in },
@@ -1039,7 +1037,8 @@ final class PreferencesWindowControllerTests: XCTestCase {
             saveDictionaryEntry: saveDictionaryEntry,
             deleteDictionaryEntries: deleteDictionaryEntries,
             recoverDictionary: recoverDictionary,
-            openProjectPage: openProjectPage
+            openProjectPage: openProjectPage,
+            checkForUpdates: checkForUpdates
         )
     }
 }

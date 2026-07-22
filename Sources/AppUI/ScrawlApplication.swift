@@ -8,51 +8,7 @@ import TextOutput
 import TranscriptHistoryStore
 import TranscriptionCore
 
-public final class ScrawlApplication {
-    public init() {}
-
-    public func run() {
-        do {
-            let instanceLock = try SingleInstanceLock()
-            if try !instanceLock.tryAcquire() {
-                Self.activateExistingInstance()
-                return
-            }
-            DelegateRetainer.shared.instanceLock = instanceLock
-        } catch {
-            #if DEBUG
-                print("[Scrawl] Single-instance lock unavailable: \(error)")
-            #endif
-        }
-
-        let app = NSApplication.shared
-        let delegate = StatusBarAppDelegate(runtime: .live())
-
-        DelegateRetainer.shared.delegate = delegate
-
-        app.setActivationPolicy(.accessory)
-        app.delegate = delegate
-        app.run()
-    }
-
-    private static func activateExistingInstance() {
-        let currentPID = ProcessInfo.processInfo.processIdentifier
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.jetemple.scrawl"
-        let existing = NSRunningApplication
-            .runningApplications(withBundleIdentifier: bundleID)
-            .first { $0.processIdentifier != currentPID }
-
-        _ = existing?.activate(options: [.activateAllWindows])
-    }
-}
-
-private final class DelegateRetainer {
-    static let shared = DelegateRetainer()
-    var delegate: NSApplicationDelegate?
-    var instanceLock: SingleInstanceLock?
-}
-
-private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private enum RecordingOrigin {
         case manual
         case hotkeyHold
@@ -93,7 +49,19 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     private var startManualItem: NSMenuItem?
     private var stopManualItem: NSMenuItem?
     private var setHotkeyItem: NSMenuItem?
-    private var preferencesWindowController: PreferencesWindowController?
+    var preferencesWindowController: PreferencesWindowController?
+
+    var updateAvailableItem: NSMenuItem?
+    var updateCheckTimer: Timer?
+    let updateCheckStore = UpdateCheckStore()
+    lazy var updateCheckCoordinator: UpdateCheckCoordinator = {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+        let coordinator = UpdateCheckCoordinator(currentVersion: version, store: updateCheckStore)
+        coordinator.onAvailableReleaseChange = { [weak self] release in
+            self?.applyAvailableUpdate(release)
+        }
+        return coordinator
+    }()
 
     private var modelsSubmenu: NSMenu?
     private var historySubmenu: NSMenu?
@@ -157,6 +125,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setupStatusItem()
         observeWorkspaceActivations()
         cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
+        if cachedAccessibilityAuthorized {
+            noteAccessibilityAuthorized()
+        }
         setupHotkeyHandling()
 
         // Feed real mic levels to the recording pill's waveform (nil when not capturing).
@@ -179,6 +150,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setStatus("Idle")
         updateStatusIcon()
         resolveLaunchModelPreparation()
+        startUpdateChecking()
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -197,6 +169,8 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         stopObservingWorkspaceActivations()
         statusAutoClearTimer?.invalidate()
         statusAutoClearTimer = nil
+        updateCheckTimer?.invalidate()
+        updateCheckTimer = nil
         DelegateRetainer.shared.instanceLock?.release()
         DelegateRetainer.shared.instanceLock = nil
     }
@@ -238,6 +212,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
     @objc private func openPreferences(_ sender: Any?) {
         if preferencesWindowController == nil {
             preferencesWindowController = makePreferencesWindowController()
+            preferencesWindowController?.showAvailableUpdate(updateCheckCoordinator.availableRelease)
         }
         // A "Download cancelled" badge from an earlier session is stale by the time Settings
         // is reopened; clear it so a freshly-opened window doesn't show an alarming leftover.
@@ -321,6 +296,9 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
                 openProjectPage: {
                     guard let url = URL(string: "https://github.com/Jetemple/Scrawl") else { return }
                     NSWorkspace.shared.open(url)
+                },
+                checkForUpdates: { [weak self] in
+                    self?.updateCheckCoordinator.checkNow()
                 }
             )
         )
@@ -796,7 +774,10 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         }
         if plan.shouldPrepareOnSelection {
             startSelectedModelPreparationIfNeeded()
-        } else {
+        } else if ModelSelectionPlanner.shouldCancelPreparationOnSelection(
+            shouldPrepareOnSelection: false,
+            isPreparationInFlight: parakeetPreparationState.isPreparing
+        ) {
             cancelParakeetPreparation()
         }
         setStatus(PreferencesModelState.selectedModelStatusText(forModelID: plan.modelID))
@@ -1131,9 +1112,11 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         switch AccessibilityPromptDecision.decide(
             isAuthorized: isAuthorized,
-            hasShownSystemPrompt: hasPromptedAccessibilityForHotkeyAttempt
+            hasShownSystemPrompt: hasPromptedAccessibilityForHotkeyAttempt,
+            wasPreviouslyAuthorized: runtime.settingsStore.load().hasEverAuthorizedAccessibility
         ) {
         case .alreadyAuthorized:
+            noteAccessibilityAuthorized()
             hasPromptedAccessibilityForHotkeyAttempt = false
             updatePermissionRows()
             teardownHotkeyHandling()
@@ -1149,6 +1132,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             cachedAccessibilityAuthorized = runtime.permissionManager.accessibilityStatus() == .authorized
             updatePermissionRows()
             if cachedAccessibilityAuthorized {
+                noteAccessibilityAuthorized()
                 hasPromptedAccessibilityForHotkeyAttempt = false
                 teardownHotkeyHandling()
                 setupHotkeyHandling()
@@ -1162,7 +1146,26 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
             openAccessibilitySettings()
             runtime.overlayController.showTransientMessage("Enable Accessibility in System Settings")
             setStatus("Enable Accessibility in System Settings")
+
+        case .openSettingsForStaleGrant:
+            // Replacing the bundle (brew upgrade, DMG drag-over) can leave the old TCC
+            // grant visible in System Settings while the new binary is not trusted, and
+            // the system prompt never reappears. Only re-toggling the entry fixes it.
+            openAccessibilitySettings()
+            runtime.overlayController.showTransientMessage("Turn Scrawl off and on in the Accessibility list")
+            setStatus("Re-toggle Scrawl in Accessibility settings")
         }
+    }
+
+    /// Persists that an Accessibility grant was observed, so a later lost
+    /// authorization can be recognized as a stale TCC record rather than a
+    /// never-granted state. Bypasses `mutateSettings` — this flag never affects
+    /// model retention or settings rows.
+    private func noteAccessibilityAuthorized() {
+        guard !runtime.settingsStore.load().hasEverAuthorizedAccessibility else {
+            return
+        }
+        try? runtime.settingsStore.mutate { $0.hasEverAuthorizedAccessibility = true }
     }
 
     private func openAccessibilitySettings() {
@@ -1312,6 +1315,7 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
         cachedAccessibilityAuthorized = isAuthorized
         if isAuthorized {
+            noteAccessibilityAuthorized()
             hasPromptedAccessibilityForHotkeyAttempt = false
         }
         updatePermissionRows()
@@ -1329,10 +1333,6 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
 
     @objc private func quit(_: Any?) {
         NSApplication.shared.terminate(nil)
-    }
-
-    @objc private func checkForUpdates(_: Any?) {
-        UpdateChecker.checkAndPresent()
     }
 
     private func setupStatusItem() {
@@ -1427,6 +1427,12 @@ private final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMen
         setHotkeyItem.target = self
         menu.addItem(setHotkeyItem)
         self.setHotkeyItem = setHotkeyItem
+
+        let updateAvailableItem = NSMenuItem(title: "", action: #selector(openAvailableUpdate(_:)), keyEquivalent: "")
+        updateAvailableItem.target = self
+        updateAvailableItem.isHidden = true
+        menu.addItem(updateAvailableItem)
+        self.updateAvailableItem = updateAvailableItem
 
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
         checkForUpdatesItem.target = self

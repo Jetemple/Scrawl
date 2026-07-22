@@ -19,7 +19,7 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -180,11 +180,23 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           spctl -a -t exec -vv "$APP_PATH"
 
+          # The window layout ships as a pre-baked .DS_Store; its background alias
+          # was recorded against an HFS+ volume named "Scrawl", so keep both fixed.
           DMG_STAGING="$RUNNER_TEMP/scrawl-dmg"
-          mkdir -p "$DMG_STAGING"
+          mkdir -p "$DMG_STAGING/.background"
           cp -R "$APP_PATH" "$DMG_STAGING/Scrawl.app"
           ln -s /Applications "$DMG_STAGING/Applications"
-          hdiutil create -volname "Scrawl" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH"
+          cp Config/dmg/background.tiff "$DMG_STAGING/.background/background.tiff"
+          cp Config/dmg/DS_Store "$DMG_STAGING/.DS_Store"
+          cp Config/AppIcon.icns "$DMG_STAGING/.VolumeIcon.icns"
+
+          DMG_RW="$RUNNER_TEMP/scrawl-rw.dmg"
+          DMG_MOUNT="$RUNNER_TEMP/scrawl-dmg-mount"
+          hdiutil create -volname "Scrawl" -srcfolder "$DMG_STAGING" -ov -format UDRW -fs HFS+ "$DMG_RW"
+          hdiutil attach "$DMG_RW" -nobrowse -mountpoint "$DMG_MOUNT"
+          xcrun SetFile -a C "$DMG_MOUNT"
+          hdiutil detach "$DMG_MOUNT"
+          hdiutil convert "$DMG_RW" -format UDZO -ov -o "$DMG_PATH"
           codesign --sign "$SCRAWL_CODESIGN_IDENTITY" --timestamp "$DMG_PATH"
 
           xcrun notarytool submit "$DMG_PATH" \
@@ -237,7 +249,7 @@ jobs:
 
       - name: Checkout Homebrew tap
         if: steps.version.outputs.should_release == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Jetemple/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}

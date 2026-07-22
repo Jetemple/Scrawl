@@ -158,10 +158,6 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
             stateStack.centerYAnchor.constraint(equalTo: stateView.centerYAnchor),
         ])
 
-        let (workspace, listHeight) = PreferencesPageSupport.makeListWorkspace(scrollView: scrollView, stateView: stateView)
-        workspaceGroup = workspace
-        listHeightConstraint = listHeight
-
         PreferencesPageSupport.configureSecondaryButton(editButton)
         PreferencesPageSupport.configureSecondaryButton(deleteButton)
         deleteButton.contentTintColor = .systemRed
@@ -171,14 +167,28 @@ final class PreferencesDictionaryView: NSView, NSTableViewDataSource, NSTableVie
         deleteButton.action = #selector(deleteSelected(_:))
         let actionBar = PreferencesPageSupport.makePinnedActionBar(leading: [editButton], trailing: [deleteButton])
         actionBarView = actionBar
+        let (workspace, listHeight) = PreferencesPageSupport.makeListWorkspace(
+            scrollView: scrollView,
+            stateView: stateView,
+            actionBar: actionBar
+        )
+        workspaceGroup = workspace
+        listHeightConstraint = listHeight
+
+        termField.translatesAutoresizingMaskIntoConstraints = false
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        termField.widthAnchor.constraint(greaterThanOrEqualToConstant: 280).isActive = true
+        searchField.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        let fieldRow = NSStackView(views: [termField, NSView(), searchField])
+        fieldRow.orientation = .horizontal
+        fieldRow.alignment = .centerY
+        fieldRow.spacing = 12
+
         let page = PreferencesPageSupport.makePage(
-            title: "Dictionary",
-            description: "Names, jargon, and acronyms Scrawl should get right.",
             content: [
-                termField,
-                searchField,
+                PreferencesPageSupport.makeCaptionRow("Names, jargon, and acronyms Scrawl should get right."),
+                fieldRow,
                 workspace,
-                actionBar,
             ]
         )
         PreferencesPageSupport.fill(self, with: page)

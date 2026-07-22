@@ -22,10 +22,6 @@
   <img src="docs/scrawl-voice.gif" alt="Scrawl turning speech into text in a note, live" width="480">
 </p>
 
-## What it does
-
-Hold your hotkey (Right Option ⌥ by default, rebindable in Settings), speak, and release. Scrawl transcribes on-device and pastes the result into whatever app you're using. Or double-tap to record hands-free, then tap again to stop.
-
 ## Install
 
 Requires macOS 14 or later. Runs best on Apple Silicon.
@@ -54,13 +50,17 @@ cd Scrawl && make install PREFIX=/Applications
 open /Applications/Scrawl.app
 ```
 
-On first launch, grant Microphone and Accessibility. Scrawl starts with Whisper `small.en` (466 MB), a fast English-only model; it needs the `whisper-cpp` binary (`brew install whisper-cpp`). On Apple Silicon, the Models menu also offers Parakeet v3: one click, no extra binary, and your current model keeps working until the download finishes. Other Whisper sizes live in the same menu: `medium` (1.5 GB) handles other languages, `large-v3-turbo` (1.6 GB) is the most accurate. Then focus a text field, hold Right Option ⌥, and talk.
+## Usage
+
+Focus a text field, hold Right Option ⌥, speak, and release. Scrawl transcribes on-device and pastes the result at the cursor. Double-tap the hotkey to record hands-free, tap again to stop. Rebind the key in Settings → General.
+
+On first launch, grant Microphone and Accessibility when asked. Scrawl starts with Whisper `small.en` (466 MB), a fast English-only model that needs `whisper-cpp` from Homebrew. On Apple Silicon, the Models menu also offers Parakeet v3: one click, no extra binary, and your current model keeps working until the download finishes. Other Whisper sizes live in the same menu: `medium` (1.5 GB) handles other languages, `large-v3-turbo` (1.6 GB) is the most accurate.
 
 ## Features
 
 - **Fully local.** Audio never leaves your Mac.
 - **Pastes at the cursor.** Straight into the focused field, or the clipboard if an app blocks it.
-- **Parakeet v3 on Apple Silicon.** One-click download, no extra binary. Scrawl keeps your current model active until the new one is ready.
+- **Parakeet v3 on Apple Silicon.** One-click download, no extra binary.
 - **Bring your own Whisper model.** Download a built-in size (tiny/small/medium/large-v3-turbo), or load any whisper.cpp ggml model.
 - **Stays warm.** Keeps the model in memory between recordings, unloads it after an idle delay you pick. GPU by default, CPU fallback.
 - **Never records forever.** Recordings stop themselves at a limit you set (1 to 10 minutes), so a stuck key can't run your mic all day.
@@ -82,16 +82,18 @@ Add one under **Models** in Settings:
 ## Troubleshooting
 
 <details>
-<summary>Permissions reset after a reinstall or upgrade</summary>
+<summary>Permissions break after a reinstall or upgrade</summary>
 
-Source builds are unsigned, so macOS drops the Accessibility grant on reinstall. Sign with a stable identity to keep it:
+Replacing the app in place (a brew upgrade, or dragging a new copy over the old one) can leave macOS holding a stale Accessibility grant: System Settings shows Scrawl as enabled, but text stops inserting and no permission prompt appears. Open System Settings → Privacy & Security → Accessibility and turn Scrawl off and on.
+
+Source builds are unsigned, so macOS drops the Accessibility grant on every reinstall. Sign with a stable identity to keep it:
 
 ```bash
 security find-identity -v -p codesigning          # find your identity
 SCRAWL_CODESIGN_IDENTITY="Your Name (TeamID)" make install
 ```
 
-If the mic or accessibility gets stuck after an upgrade, reset and relaunch:
+If toggling doesn't fix it, reset the grants and relaunch:
 
 ```bash
 tccutil reset Microphone com.jetemple.scrawl
