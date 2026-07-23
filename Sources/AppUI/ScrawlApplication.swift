@@ -69,6 +69,17 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     private var recordingOrigin: RecordingOrigin?
     private var recordingStartedAt: Date?
     private var recordingSafetyTimer: Timer?
+    private var isFinishingCapture = false
+    /// The scheduled grace-window finalize, held so a forced stop (sleep, safety timeout) can
+    /// cancel it and finalize at once instead of letting two finalizes run.
+    private var pendingGraceFinalize: DispatchWorkItem?
+
+    /// How long the microphone stays open after a stop is requested. AVAudioRecorder
+    /// finalizes the file the instant it is stopped, so a word still being spoken as
+    /// the hotkey is released is simply never recorded. Keeping capture running for a
+    /// brief grace window lets that trailing word land in the file; if the user has
+    /// already stopped talking it is harmless silence the transcriber ignores.
+    private static let captureGraceSeconds: TimeInterval = 0.3
     private var insertionTargetApp: NSRunningApplication?
     private var lastExternalActiveApp: NSRunningApplication?
 
@@ -916,8 +927,8 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                     guard let self else { return }
                     Task { @MainActor [weak self] in
                         guard let self, modelDownloadGeneration == downloadGeneration else { return }
-                        let newText = downloadProgressText(
-                            for: model,
+                        let newText = DownloadProgressFormatter.statusText(
+                            modelDisplayName: PreferencesModelState.displayName(forModelID: model.id),
                             receivedBytes: receivedBytes,
                             totalBytes: totalBytes
                         )
@@ -925,7 +936,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                         // Only rebuild the Models page when the rendered progress string
                         // changes — the callback fires on every URLSession data chunk,
                         // which is far more often than the text visually changes.
-                        let progressLabel = formatProgressLabel(receivedBytes: receivedBytes, totalBytes: totalBytes)
+                        let progressLabel = DownloadProgressFormatter.rowLabel(receivedBytes: receivedBytes, totalBytes: totalBytes)
                         guard progressLabel != currentDownloadProgressText else { return }
                         currentDownloadProgressText = progressLabel
                         refreshPreferencesWindow()
@@ -972,43 +983,6 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                 self.refreshPreferencesWindow()
             }
         }
-    }
-
-    private func downloadProgressText(for model: DownloadableModel, receivedBytes: Int64, totalBytes: Int64?) -> String {
-        let modelName = PreferencesModelState.displayName(forModelID: model.id)
-        let receivedMB = formatMegabytes(receivedBytes)
-
-        guard let totalBytes, totalBytes > 0 else {
-            return "Downloading \(modelName): \(receivedMB) MB"
-        }
-
-        let totalMB = formatMegabytes(totalBytes)
-        let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
-        let percent = Int((ratio * 100).rounded())
-        return "Downloading \(modelName): \(percent)% (\(receivedMB)/\(totalMB) MB)"
-    }
-
-    /// Compact progress string shown inline in the Models page row, e.g. "25% (412/1621 MB)".
-    private func formatProgressLabel(receivedBytes: Int64, totalBytes: Int64?) -> String {
-        let receivedMB = formatMegabytes(receivedBytes)
-        guard let totalBytes, totalBytes > 0 else {
-            return "\(receivedMB) MB"
-        }
-        let totalMB = formatMegabytes(totalBytes)
-        let ratio = max(0, min(1, Double(receivedBytes) / Double(totalBytes)))
-        let percent = Int((ratio * 100).rounded())
-        return "\(percent)% (\(receivedMB)/\(totalMB) MB)"
-    }
-
-    private func formatMegabytes(_ bytes: Int64) -> String {
-        let mb = Double(bytes) / (1024 * 1024)
-        if mb >= 100 {
-            return String(format: "%.0f", mb)
-        }
-        if mb >= 10 {
-            return String(format: "%.1f", mb)
-        }
-        return String(format: "%.2f", mb)
     }
 
     private func validateTranscriptionPrerequisites(origin: RecordingOrigin) -> Bool {
@@ -1515,7 +1489,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                 beginRecording(origin: .hotkeyHold)
             case .stopHoldRecording:
                 if recordingOrigin == .hotkeyHold {
-                    stopRecordingAndTranscribe(reason: "Hold release")
+                    stopRecordingAndTranscribe(reason: "Hold release", isHoldRelease: true)
                 }
             case .startToggleRecording:
                 beginRecording(origin: .hotkeyToggle)
@@ -1528,7 +1502,10 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
 
     private func beginRecording(origin: RecordingOrigin) {
-        guard recordingOrigin == nil else {
+        guard CaptureStopDecision.canBeginCapture(
+            hasActiveCapture: recordingOrigin != nil,
+            isFinishing: isFinishingCapture
+        ) else {
             return
         }
 
@@ -1576,13 +1553,56 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         }
     }
 
-    private func stopRecordingAndTranscribe(reason: String) {
+    /// - Parameters:
+    ///   - isHoldRelease: the stop is a genuine push-to-talk key release, the one case that
+    ///     earns the trailing-word grace window. Derived from the call site, not the recording's
+    ///     origin, so a forced stop of a hold recording is not mistaken for a key release.
+    ///   - forced: the stop is unavoidable (system sleep, safety timeout). A forced stop
+    ///     preempts an in-flight grace window and finalizes at once so the mic never lingers
+    ///     past the moment it must close.
+    private func stopRecordingAndTranscribe(reason: String, isHoldRelease: Bool = false, forced: Bool = false) {
         guard let activeOrigin = recordingOrigin else {
+            return
+        }
+
+        let decision = CaptureStopDecision.decide(
+            hasActiveCapture: true,
+            isFinishing: isFinishingCapture,
+            isHoldRelease: isHoldRelease,
+            isForced: forced
+        )
+        guard decision != .ignore else {
             return
         }
 
         recordingSafetyTimer?.invalidate()
         recordingSafetyTimer = nil
+
+        switch decision {
+        case .ignore:
+            return
+        case .finalizeNow:
+            // Deliberate (manual, toggle) or forced (sleep, safety timeout) stop — finalize at
+            // once. If a grace window was already running, drop it so it cannot finalize twice.
+            pendingGraceFinalize?.cancel()
+            pendingGraceFinalize = nil
+            finalizeRecordingAndTranscribe(activeOrigin: activeOrigin, reason: reason)
+        case .finalizeAfterGrace:
+            // Push-to-talk release: keep the mic open for a short grace window before
+            // finalizing so a word still being spoken as the hotkey comes up still lands
+            // in the file. The overlay stays in its recording state during the window.
+            isFinishingCapture = true
+            let work = DispatchWorkItem { [weak self] in
+                self?.finalizeRecordingAndTranscribe(activeOrigin: activeOrigin, reason: reason)
+            }
+            pendingGraceFinalize = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.captureGraceSeconds, execute: work)
+        }
+    }
+
+    private func finalizeRecordingAndTranscribe(activeOrigin: RecordingOrigin, reason: String) {
+        isFinishingCapture = false
+        pendingGraceFinalize = nil
 
         let audioURL: URL
         let recordingDurationMS = recordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) }
@@ -1673,7 +1693,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         ) { [weak self] _ in
             guard let self, recordingOrigin != nil else { return }
             setStatus("Auto-stopping...")
-            stopRecordingAndTranscribe(reason: "System sleep")
+            stopRecordingAndTranscribe(reason: "System sleep", forced: true)
         }
 
         // On wake, reset the hotkey gesture state machine so any partially
@@ -2099,7 +2119,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                 return
             }
             setStatus("Auto-stopping...")
-            stopRecordingAndTranscribe(reason: "Safety timeout")
+            stopRecordingAndTranscribe(reason: "Safety timeout", forced: true)
         }
         if let recordingSafetyTimer {
             RunLoop.main.add(recordingSafetyTimer, forMode: .common)
