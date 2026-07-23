@@ -7,6 +7,12 @@
 /// deliberate (manual, toggle) or forced (system sleep, safety timeout): those finalize at
 /// once, both to avoid needless latency and because lingering past a sleep-driven stop would
 /// keep the mic live exactly when it must not be.
+///
+/// `isHoldRelease` describes the *stop*, not the recording: only a genuine push-to-talk key
+/// release earns the grace window. A sleep or safety timeout that stops a hold recording is
+/// forced, not a key release, so it finalizes now — and a forced stop preempts an already
+/// running grace window rather than being swallowed, which is what actually guarantees the mic
+/// is closed before the machine sleeps.
 enum CaptureStopDecision: Equatable {
     /// No capture is active, or one is already finalizing — ignore the stop request.
     case ignore
@@ -18,10 +24,17 @@ enum CaptureStopDecision: Equatable {
     static func decide(
         hasActiveCapture: Bool,
         isFinishing: Bool,
-        isHoldRelease: Bool
+        isHoldRelease: Bool,
+        isForced: Bool
     ) -> CaptureStopDecision {
-        guard hasActiveCapture, !isFinishing else {
+        guard hasActiveCapture else {
             return .ignore
+        }
+        // A grace window is already running. A forced stop (sleep, safety timeout) must preempt
+        // it and finalize now so the mic does not linger into sleep; any other stop is a no-op
+        // because the finalize is already scheduled.
+        if isFinishing {
+            return isForced ? .finalizeNow : .ignore
         }
         return isHoldRelease ? .finalizeAfterGrace : .finalizeNow
     }

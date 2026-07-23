@@ -70,6 +70,9 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     private var recordingStartedAt: Date?
     private var recordingSafetyTimer: Timer?
     private var isFinishingCapture = false
+    /// The scheduled grace-window finalize, held so a forced stop (sleep, safety timeout) can
+    /// cancel it and finalize at once instead of letting two finalizes run.
+    private var pendingGraceFinalize: DispatchWorkItem?
 
     /// How long the microphone stays open after a stop is requested. AVAudioRecorder
     /// finalizes the file the instant it is stopped, so a word still being spoken as
@@ -1486,7 +1489,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                 beginRecording(origin: .hotkeyHold)
             case .stopHoldRecording:
                 if recordingOrigin == .hotkeyHold {
-                    stopRecordingAndTranscribe(reason: "Hold release")
+                    stopRecordingAndTranscribe(reason: "Hold release", isHoldRelease: true)
                 }
             case .startToggleRecording:
                 beginRecording(origin: .hotkeyToggle)
@@ -1550,7 +1553,14 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         }
     }
 
-    private func stopRecordingAndTranscribe(reason: String) {
+    /// - Parameters:
+    ///   - isHoldRelease: the stop is a genuine push-to-talk key release, the one case that
+    ///     earns the trailing-word grace window. Derived from the call site, not the recording's
+    ///     origin, so a forced stop of a hold recording is not mistaken for a key release.
+    ///   - forced: the stop is unavoidable (system sleep, safety timeout). A forced stop
+    ///     preempts an in-flight grace window and finalizes at once so the mic never lingers
+    ///     past the moment it must close.
+    private func stopRecordingAndTranscribe(reason: String, isHoldRelease: Bool = false, forced: Bool = false) {
         guard let activeOrigin = recordingOrigin else {
             return
         }
@@ -1558,7 +1568,8 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         let decision = CaptureStopDecision.decide(
             hasActiveCapture: true,
             isFinishing: isFinishingCapture,
-            isHoldRelease: activeOrigin == .hotkeyHold
+            isHoldRelease: isHoldRelease,
+            isForced: forced
         )
         guard decision != .ignore else {
             return
@@ -1571,22 +1582,27 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         case .ignore:
             return
         case .finalizeNow:
-            // Deliberate (manual, toggle) or forced (sleep, safety timeout) stop —
-            // finalize at once rather than holding the mic open for no benefit.
+            // Deliberate (manual, toggle) or forced (sleep, safety timeout) stop — finalize at
+            // once. If a grace window was already running, drop it so it cannot finalize twice.
+            pendingGraceFinalize?.cancel()
+            pendingGraceFinalize = nil
             finalizeRecordingAndTranscribe(activeOrigin: activeOrigin, reason: reason)
         case .finalizeAfterGrace:
             // Push-to-talk release: keep the mic open for a short grace window before
             // finalizing so a word still being spoken as the hotkey comes up still lands
             // in the file. The overlay stays in its recording state during the window.
             isFinishingCapture = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.captureGraceSeconds) { [weak self] in
+            let work = DispatchWorkItem { [weak self] in
                 self?.finalizeRecordingAndTranscribe(activeOrigin: activeOrigin, reason: reason)
             }
+            pendingGraceFinalize = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.captureGraceSeconds, execute: work)
         }
     }
 
     private func finalizeRecordingAndTranscribe(activeOrigin: RecordingOrigin, reason: String) {
         isFinishingCapture = false
+        pendingGraceFinalize = nil
 
         let audioURL: URL
         let recordingDurationMS = recordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) }
@@ -1677,7 +1693,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         ) { [weak self] _ in
             guard let self, recordingOrigin != nil else { return }
             setStatus("Auto-stopping...")
-            stopRecordingAndTranscribe(reason: "System sleep")
+            stopRecordingAndTranscribe(reason: "System sleep", forced: true)
         }
 
         // On wake, reset the hotkey gesture state machine so any partially
@@ -2103,7 +2119,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
                 return
             }
             setStatus("Auto-stopping...")
-            stopRecordingAndTranscribe(reason: "Safety timeout")
+            stopRecordingAndTranscribe(reason: "Safety timeout", forced: true)
         }
         if let recordingSafetyTimer {
             RunLoop.main.add(recordingSafetyTimer, forMode: .common)
