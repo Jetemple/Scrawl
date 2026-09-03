@@ -422,11 +422,11 @@ public enum DictionaryReplacer {
     }
 
     private static func applyCaseStyle(from original: String, to replacement: String) -> String {
-        let cased = original.unicodeScalars.filter { $0.properties.isCased }
-        if cased.allSatisfy({ $0.properties.isUppercase }) {
+        let cased = original.unicodeScalars.filter(\.properties.isCased)
+        if cased.allSatisfy(\.properties.isUppercase) {
             return replacement.uppercased()
         }
-        if cased.allSatisfy({ $0.properties.isLowercase }) {
+        if cased.allSatisfy(\.properties.isLowercase) {
             return replacement.lowercased()
         }
         // Rare mixed-case path: keep the exact legacy grapheme comparison (it allocates,

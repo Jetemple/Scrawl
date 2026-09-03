@@ -364,7 +364,7 @@ actor WarmWhisperServer {
         return body
     }
 
-    private static func result(data: Data, response: URLResponse, modelID: String, startedAt: Date) throws -> TranscriptionResult {
+    private static func result(data: Data, response: URLResponse, modelID _: String, startedAt: Date) throws -> TranscriptionResult {
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw TranscriptionError.executionFailed("whisper-server returned an invalid response")
         }

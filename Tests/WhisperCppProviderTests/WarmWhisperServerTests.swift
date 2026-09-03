@@ -435,6 +435,7 @@ final class WarmWhisperServerTests: XCTestCase {
         defer { WarmWhisperServer.stagingDirectory = FileManager.default.temporaryDirectory }
         XCTAssertThrowsError(try WarmWhisperServer.writeMultipartBody(
             audioURL: URL(filePath: "/tmp/x.wav"), prompt: nil, boundary: "TEST",
-            to: WarmWhisperServer.stagingDirectory.appendingPathComponent("y.bin")))
+            to: WarmWhisperServer.stagingDirectory.appendingPathComponent("y.bin")
+        ))
     }
 }
