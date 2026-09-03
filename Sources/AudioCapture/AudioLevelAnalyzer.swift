@@ -222,3 +222,15 @@ public struct AudioAnalysis: Sendable, Equatable {
         self.totalActiveSeconds = totalActiveSeconds
     }
 }
+
+extension AudioAnalysis {
+    /// Verdict for undecodable audio: legacy behavior lets the recording through,
+    /// so this value passes every threshold check in the service verdict.
+    static var decodeSkipped: AudioAnalysis {
+        AudioAnalysis(
+            isSilent: false,
+            longestActiveSeconds: .greatestFiniteMagnitude,
+            totalActiveSeconds: .greatestFiniteMagnitude
+        )
+    }
+}

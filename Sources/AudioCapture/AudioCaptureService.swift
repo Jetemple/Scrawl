@@ -108,9 +108,49 @@ extension AudioCaptureError: LocalizedError {
 public protocol AudioCaptureServing: Sendable {
     func startCapture() throws
     func stopCapture() throws -> URL
+    /// Stops the recorder and runs the cheap rejections (duration, file size),
+    /// returning the capture file without running audio analysis. Pair with
+    /// `analyzeCaptureFile(at:)` to reproduce `stopCapture()` in two stages.
+    func finishCapture() throws -> URL
+    /// Decodes `url` and runs the silence/active-duration verdicts off the calling
+    /// thread. Throws `audioLevelTooLow` exactly where `stopCapture()` would.
+    /// An undecodable file passes through, matching the legacy `try?` fallbacks.
+    func analyzeCaptureFile(at url: URL) async throws -> AudioAnalysis
     /// Instantaneous input level in decibels (typically -160...0) for the live
     /// recording indicator. nil when no capture is in progress.
     func currentAveragePower() -> Float?
+}
+
+public extension AudioCaptureServing {
+    /// Default for conformers that only implement the combined `stopCapture()`
+    /// (e.g. test stubs): finishing alone is the whole stop.
+    func finishCapture() throws -> URL {
+        try stopCapture()
+    }
+
+    /// Default verdict using default configuration, computed off the calling thread.
+    func analyzeCaptureFile(at url: URL) async throws -> AudioAnalysis {
+        try await Task.detached(priority: .userInitiated) {
+            guard let samples = try? AudioLevelAnalyzer.samples(fromFileURL: url) else {
+                return AudioAnalysis.decodeSkipped
+            }
+            let config = AudioCaptureConfig()
+            let analysis = AudioLevelAnalyzer.analyze(
+                samples: samples,
+                sampleRate: config.sampleRate,
+                silenceThresholdRMS: config.silenceThresholdRMS,
+                windowSeconds: config.activeWindowSeconds,
+                activeRMS: config.activeWindowRMS
+            )
+            if samples.isEmpty || analysis.isSilent {
+                throw AudioCaptureError.audioLevelTooLow
+            }
+            if analysis.longestActiveSeconds < config.minimumSustainedActiveSeconds {
+                throw AudioCaptureError.audioLevelTooLow
+            }
+            return analysis
+        }.value
+    }
 }
 
 public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable {
@@ -159,6 +199,14 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
     }
 
     public func stopCapture() throws -> URL {
+        let outputURL = try finishCapture()
+        if let samples = try? AudioLevelAnalyzer.samples(fromFileURL: outputURL) {
+            try Self.verdict(samples: samples, config: config, removing: outputURL)
+        }
+        return outputURL
+    }
+
+    public func finishCapture() throws -> URL {
         lock.lock()
         defer { lock.unlock() }
 
@@ -182,37 +230,50 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.outputFileEmpty
         }
 
-        // Decode once and run the fused silence/active analysis on the same samples: a failed
-        // decode still skips the checks, matching the old per-check `try?` fallbacks that let
-        // the recording through.
-        if let samples = try? AudioLevelAnalyzer.samples(fromFileURL: outputURL) {
-            let analysis = AudioLevelAnalyzer.analyze(
-                samples: samples,
-                sampleRate: config.sampleRate,
-                silenceThresholdRMS: config.silenceThresholdRMS,
-                windowSeconds: config.activeWindowSeconds,
-                activeRMS: config.activeWindowRMS
-            )
-            if samples.isEmpty || analysis.isSilent {
-                try? FileManager.default.removeItem(at: outputURL)
-                throw AudioCaptureError.audioLevelTooLow
-            }
+        return outputURL
+    }
 
-            let activeSeconds: Double = if config.usesSustainedActiveDuration {
-                analysis.longestActiveSeconds
-            } else {
-                analysis.totalActiveSeconds
+    public func analyzeCaptureFile(at url: URL) async throws -> AudioAnalysis {
+        let config = config
+        return try await Task.detached(priority: .userInitiated) {
+            // A failed decode skips the checks, matching the old per-check `try?`
+            // fallbacks that let the recording through.
+            guard let samples = try? AudioLevelAnalyzer.samples(fromFileURL: url) else {
+                return AudioAnalysis.decodeSkipped
             }
-            let requiredActiveSeconds = config.usesSustainedActiveDuration
-                ? config.minimumSustainedActiveSeconds
-                : config.minimumActiveSeconds
-            if activeSeconds < requiredActiveSeconds {
-                try? FileManager.default.removeItem(at: outputURL)
-                throw AudioCaptureError.audioLevelTooLow
-            }
+            return try Self.verdict(samples: samples, config: config, removing: url)
+        }.value
+    }
+
+    /// Shared silence/active verdict behind both `stopCapture()` and
+    /// `analyzeCaptureFile(at:)`. Removes a rejected file, like the legacy code.
+    private static func verdict(samples: [Int16], config: AudioCaptureConfig, removing outputURL: URL) throws -> AudioAnalysis {
+        // Decode once and run the fused silence/active analysis on the same samples.
+        let analysis = AudioLevelAnalyzer.analyze(
+            samples: samples,
+            sampleRate: config.sampleRate,
+            silenceThresholdRMS: config.silenceThresholdRMS,
+            windowSeconds: config.activeWindowSeconds,
+            activeRMS: config.activeWindowRMS
+        )
+        if samples.isEmpty || analysis.isSilent {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw AudioCaptureError.audioLevelTooLow
         }
 
-        return outputURL
+        let activeSeconds: Double = if config.usesSustainedActiveDuration {
+            analysis.longestActiveSeconds
+        } else {
+            analysis.totalActiveSeconds
+        }
+        let requiredActiveSeconds = config.usesSustainedActiveDuration
+            ? config.minimumSustainedActiveSeconds
+            : config.minimumActiveSeconds
+        if activeSeconds < requiredActiveSeconds {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw AudioCaptureError.audioLevelTooLow
+        }
+        return analysis
     }
 
     public func currentAveragePower() -> Float? {
