@@ -81,19 +81,28 @@ enum PreferencesContentState {
         maximumLength: Int = 500
     ) -> String? {
         var seen: Set<String> = []
-        var accepted: [String] = []
+        // Built incrementally instead of re-joining the whole accepted list on every
+        // term (quadratic in the vocabulary size). The prefix is constant, so track the
+        // length of the joined suffix and only append a term when it still fits —
+        // identical selection and output to the previous `(accepted + [value]).joined(...)`
+        // check, since Character counts add across string concatenation.
+        var joined = ""
+        var termCount = 0
         let prefix = "Preferred vocabulary: "
 
         for term in terms {
             let value = term.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty, seen.insert(value.lowercased()).inserted else { continue }
-            let candidate = prefix + (accepted + [value]).joined(separator: ", ")
-            guard candidate.count <= maximumLength else { continue }
-            accepted.append(value)
+            let separator = termCount == 0 ? "" : ", "
+            guard prefix.count + joined.count + separator.count + value.count <= maximumLength else {
+                continue
+            }
+            joined += separator + value
+            termCount += 1
         }
 
-        guard !accepted.isEmpty else { return nil }
-        return prefix + accepted.joined(separator: ", ")
+        guard termCount > 0 else { return nil }
+        return prefix + joined
     }
 
     private static func normalizedQuery(_ query: String) -> String {

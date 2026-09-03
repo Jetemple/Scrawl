@@ -93,6 +93,60 @@ final class UpdateCheckCoordinatorTests: XCTestCase {
         XCTAssertEqual(store.availableRelease, UpdateRelease(version: "9.9.9", pageURL: Self.pageURL))
     }
 
+    func testCachedReleaseAtOrBelowCurrentVersionIsNotSurfaced() {
+        // A prior build cached this release; the user has since updated to it (or past
+        // it). Until the next daily check clears the cache, the indicator must already
+        // read "up to date" — the getter re-validates against the running version.
+        store.record(
+            checkedAt: Self.noon.addingTimeInterval(-60),
+            availableRelease: UpdateRelease(version: "1.0.0", pageURL: Self.pageURL)
+        )
+        let coordinator = makeCoordinator(fetchResult: .success(Self.upToDateData))
+
+        XCTAssertNil(coordinator.availableRelease, "The running build's own version is not an available update")
+    }
+
+    func testCachedReleaseOlderThanCurrentVersionIsNotSurfaced() {
+        // The user didn't just install the cached release — they're running a build
+        // that is already newer than it (jumped several releases, or a newer build
+        // from another channel). An older cached release is still stale and must not
+        // be surfaced as an update.
+        store.record(
+            checkedAt: Self.noon.addingTimeInterval(-60),
+            availableRelease: UpdateRelease(version: "0.0.9", pageURL: Self.pageURL)
+        )
+        let coordinator = makeCoordinator(fetchResult: .success(Self.upToDateData))
+
+        XCTAssertNil(coordinator.availableRelease, "A cached release older than the running build is not an update")
+    }
+
+    func testCachedReleaseWithVPrefixMatchingCurrentVersionIsNotSurfaced() {
+        // The cache can hold a "v"-prefixed version (a legacy build stored it
+        // unnormalized). The getter must normalize before comparing, so a cached
+        // "v1.0.0" is treated as equal to the running "1.0.0", not newer.
+        store.record(
+            checkedAt: Self.noon.addingTimeInterval(-60),
+            availableRelease: UpdateRelease(version: "v1.0.0", pageURL: Self.pageURL)
+        )
+        let coordinator = makeCoordinator(fetchResult: .success(Self.upToDateData))
+
+        XCTAssertNil(coordinator.availableRelease, "A 'v'-prefixed cached release matching the running version is not an update")
+    }
+
+    func testCachedReleaseNewerThanCurrentVersionIsSurfaced() {
+        store.record(
+            checkedAt: Self.noon.addingTimeInterval(-60),
+            availableRelease: UpdateRelease(version: "9.9.9", pageURL: Self.pageURL)
+        )
+        let coordinator = makeCoordinator(fetchResult: .success(Self.upToDateData))
+
+        XCTAssertEqual(
+            coordinator.availableRelease,
+            UpdateRelease(version: "9.9.9", pageURL: Self.pageURL),
+            "A genuinely newer cached release still renders at launch"
+        )
+    }
+
     private func makeCoordinator(
         fetchResult: Result<Data, Error>,
         present: @escaping (Result<UpdateCheckOutcome, Error>) -> Void = { _ in },
