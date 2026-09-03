@@ -213,4 +213,9 @@ final class AudioLevelAnalyzerTests: XCTestCase {
         }
         return out
     }
+
+    func testFusedVersusLegacyPerformance() {
+        let samples = Self.longSpeechLikeBuffer(seconds: 600)
+        measure { _ = AudioLevelAnalyzer.analyze(samples: samples, sampleRate: 16000, silenceThresholdRMS: 0.001) }
+    }
 }
