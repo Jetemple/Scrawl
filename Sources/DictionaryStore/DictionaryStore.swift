@@ -399,6 +399,7 @@ private extension NSLock {
 
 public enum DictionaryReplacer {
     public static func apply(entries: [DictionaryEntry], to text: String) -> String {
+        guard !entries.isEmpty, !text.isEmpty else { return text }
         var output = text
         for entry in entries where !entry.wrong.isEmpty {
             output = replacingCaseInsensitive(entry.wrong, with: entry.correct, in: output)
@@ -421,12 +422,15 @@ public enum DictionaryReplacer {
     }
 
     private static func applyCaseStyle(from original: String, to replacement: String) -> String {
-        if original == original.uppercased() {
+        let cased = original.unicodeScalars.filter { $0.properties.isCased }
+        if cased.allSatisfy({ $0.properties.isUppercase }) {
             return replacement.uppercased()
         }
-        if original == original.lowercased() {
+        if cased.allSatisfy({ $0.properties.isLowercase }) {
             return replacement.lowercased()
         }
+        // Rare mixed-case path: keep the exact legacy grapheme comparison (it allocates,
+        // but only for mixed-case matches) rather than risk divergence on uncased-first text.
         if original.prefix(1) == original.prefix(1).uppercased(),
            original.dropFirst() == original.dropFirst().lowercased()
         {
