@@ -182,32 +182,26 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.outputFileEmpty
         }
 
-        // Decode once and run both level checks on the same samples: the silence and
-        // active-duration analyses each used to re-read the whole file, doubling the
-        // hotkey-release stall. A failed decode skips the checks, matching the old
-        // per-check `try?` fallbacks that let the recording through.
+        // Decode once and run the fused silence/active analysis on the same samples: a failed
+        // decode still skips the checks, matching the old per-check `try?` fallbacks that let
+        // the recording through.
         if let samples = try? AudioLevelAnalyzer.samples(fromFileURL: outputURL) {
-            if samples.isEmpty
-                || AudioLevelAnalyzer.isLikelySilent(samples: samples, minimumRMS: config.silenceThresholdRMS)
-            {
+            let analysis = AudioLevelAnalyzer.analyze(
+                samples: samples,
+                sampleRate: config.sampleRate,
+                silenceThresholdRMS: config.silenceThresholdRMS,
+                windowSeconds: config.activeWindowSeconds,
+                activeRMS: config.activeWindowRMS
+            )
+            if samples.isEmpty || analysis.isSilent {
                 try? FileManager.default.removeItem(at: outputURL)
                 throw AudioCaptureError.audioLevelTooLow
             }
 
             let activeSeconds: Double = if config.usesSustainedActiveDuration {
-                AudioLevelAnalyzer.longestActiveAudioSeconds(
-                    samples: samples,
-                    sampleRate: config.sampleRate,
-                    windowSeconds: config.activeWindowSeconds,
-                    activeRMS: config.activeWindowRMS
-                )
+                analysis.longestActiveSeconds
             } else {
-                AudioLevelAnalyzer.activeAudioSeconds(
-                    samples: samples,
-                    sampleRate: config.sampleRate,
-                    windowSeconds: config.activeWindowSeconds,
-                    activeRMS: config.activeWindowRMS
-                )
+                analysis.totalActiveSeconds
             }
             let requiredActiveSeconds = config.usesSustainedActiveDuration
                 ? config.minimumSustainedActiveSeconds

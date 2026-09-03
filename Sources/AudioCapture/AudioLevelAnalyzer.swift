@@ -105,6 +105,51 @@ public enum AudioLevelAnalyzer {
         )
     }
 
+    public static func analyze(
+        samples: [Int16],
+        sampleRate: Double,
+        silenceThresholdRMS: Double,
+        windowSeconds: Double = 0.03,
+        activeRMS: Double = 0.0075
+    ) -> AudioAnalysis {
+        guard !samples.isEmpty, sampleRate > 0, windowSeconds > 0 else {
+            return AudioAnalysis(isSilent: true, longestActiveSeconds: 0, totalActiveSeconds: 0)
+        }
+        let windowSize = max(1, Int(sampleRate * windowSeconds))
+        var grandSum = 0.0
+        var windowSum = 0.0
+        var windowCount = 0
+        var totalActive = 0.0
+        var currentRun = 0.0
+        var longestRun = 0.0
+        func closeWindow() {
+            let rms = sqrt(windowSum / Double(windowCount))
+            if rms >= activeRMS {
+                let dur = Double(windowCount) / sampleRate
+                totalActive += dur
+                currentRun += dur
+                longestRun = max(longestRun, currentRun)
+            } else {
+                currentRun = 0
+            }
+            windowSum = 0
+            windowCount = 0
+        }
+        for sample in samples {
+            let n = Double(sample) / Double(Int16.max)
+            grandSum += n * n
+            windowSum += n * n
+            windowCount += 1
+            if windowCount == windowSize { closeWindow() }
+        }
+        if windowCount > 0 { closeWindow() }
+        return AudioAnalysis(
+            isSilent: sqrt(grandSum / Double(samples.count)) < silenceThresholdRMS,
+            longestActiveSeconds: longestRun,
+            totalActiveSeconds: totalActive
+        )
+    }
+
     // MARK: - Private helpers
 
     /// Reads an AVAudioFile and returns all samples as normalised Int16 values across all channels.
@@ -164,5 +209,16 @@ public enum AudioLevelAnalyzer {
             sumOfSquares += normalized * normalized
         }
         return sqrt(sumOfSquares / Double(samples.count))
+    }
+}
+
+public struct AudioAnalysis: Sendable, Equatable {
+    public var isSilent: Bool
+    public var longestActiveSeconds: Double
+    public var totalActiveSeconds: Double
+    public init(isSilent: Bool, longestActiveSeconds: Double, totalActiveSeconds: Double) {
+        self.isSilent = isSilent
+        self.longestActiveSeconds = longestActiveSeconds
+        self.totalActiveSeconds = totalActiveSeconds
     }
 }

@@ -119,4 +119,31 @@ final class AudioLevelAnalyzerTests: XCTestCase {
         let active = AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: sampleRate)
         XCTAssertGreaterThanOrEqual(active, 0.9, "1s of speech-like signal must yield ≥0.9s active")
     }
+
+    func testFusedAnalysisAgreesWithLegacyEntryPoints() {
+        let sampleRate: Double = 16000
+        // 1s silence, 300ms speech-like burst, 200ms room tone, trailing partial window
+        var samples = [Int16](repeating: 0, count: 16000)
+        let amp = Int16(Int16.max / 3)
+        for i in 16000..<(16000 + 4800) { samples.append((i % 2 == 0) ? amp : -amp) }
+        var state: UInt64 = 999
+        for _ in 0..<3200 {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            samples.append(Int16(Int64(bitPattern: state) % 100))
+        }
+        samples.append(contentsOf: [Int16](repeating: amp, count: 17)) // partial window
+        let fused = AudioLevelAnalyzer.analyze(samples: samples, sampleRate: sampleRate, silenceThresholdRMS: 0.001)
+        XCTAssertEqual(fused.isSilent, AudioLevelAnalyzer.isLikelySilent(samples: samples, minimumRMS: 0.001))
+        XCTAssertEqual(fused.longestActiveSeconds,
+            AudioLevelAnalyzer.longestActiveAudioSeconds(samples: samples, sampleRate: sampleRate), accuracy: 0.0)
+        XCTAssertEqual(fused.totalActiveSeconds,
+            AudioLevelAnalyzer.activeAudioSeconds(samples: samples, sampleRate: sampleRate), accuracy: 0.0)
+    }
+
+    func testFusedAnalysisEmptyInput() {
+        let fused = AudioLevelAnalyzer.analyze(samples: [], sampleRate: 16000, silenceThresholdRMS: 0.001)
+        XCTAssertTrue(fused.isSilent)
+        XCTAssertEqual(fused.longestActiveSeconds, 0.0)
+        XCTAssertEqual(fused.totalActiveSeconds, 0.0)
+    }
 }
