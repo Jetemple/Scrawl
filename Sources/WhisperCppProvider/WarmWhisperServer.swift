@@ -81,11 +81,6 @@ actor WarmWhisperServer {
         httpRequest.httpMethod = "POST"
         let boundary = "Scrawl-\(UUID().uuidString)"
         httpRequest.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        httpRequest.httpBody = try Self.multipartBody(
-            audioURL: request.audioFileURL,
-            prompt: request.promptContext,
-            boundary: boundary
-        )
         httpRequest.timeoutInterval = TimeInterval(config.transcriptionTimeoutSeconds)
 
         inFlightRequests += 1
@@ -93,15 +88,33 @@ actor WarmWhisperServer {
             inFlightRequests -= 1
             scheduleOffload()
         }
-        let (data, response) = try await URLSession.shared.data(for: httpRequest)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw TranscriptionError.executionFailed("whisper-server returned an invalid response")
+        let stagedURL = Self.stagingDirectory.appendingPathComponent("scrawl-upload-\(UUID().uuidString).bin")
+        let data: Data
+        let response: URLResponse
+        do {
+            try Self.writeMultipartBody(
+                audioURL: request.audioFileURL,
+                prompt: request.promptContext,
+                boundary: boundary,
+                to: stagedURL
+            )
+        } catch {
+            // Staging failed (disk full, unwritable temp): fall back to the legacy
+            // in-memory body. Anything after the upload starts propagates instead —
+            // retrying an ambiguous upload could transcribe twice.
+            try? FileManager.default.removeItem(at: stagedURL)
+            httpRequest.httpBody = try Self.multipartBody(
+                audioURL: request.audioFileURL,
+                prompt: request.promptContext,
+                boundary: boundary
+            )
+            (data, response) = try await URLSession.shared.data(for: httpRequest)
+            return try Self.result(data: data, response: response, modelID: request.modelID, startedAt: startedAt)
         }
-        let text = try WhisperCppProvider.decodeServerTranscript(data)
-        return TranscriptionResult(
-            text: text,
-            latencyMS: Int(Date().timeIntervalSince(startedAt) * 1000)
-        )
+        // The upload is awaited below, so deleting here cannot unlink under it.
+        defer { try? FileManager.default.removeItem(at: stagedURL) }
+        (data, response) = try await URLSession.shared.upload(for: httpRequest, fromFile: stagedURL)
+        return try Self.result(data: data, response: response, modelID: request.modelID, startedAt: startedAt)
     }
 
     func shutdown() {
@@ -328,7 +341,10 @@ actor WarmWhisperServer {
         shutdown()
     }
 
-    private static func multipartBody(audioURL: URL, prompt: String?, boundary: String) throws -> Data {
+    /// Directory for transient multipart staging files. A test seam for failure injection.
+    static var stagingDirectory: URL = FileManager.default.temporaryDirectory
+
+    static func multipartBody(audioURL: URL, prompt: String?, boundary: String) throws -> Data {
         var body = Data()
         func append(_ string: String) {
             body.append(Data(string.utf8))
@@ -346,6 +362,48 @@ actor WarmWhisperServer {
         }
         append("--\(boundary)--\r\n")
         return body
+    }
+
+    private static func result(data: Data, response: URLResponse, modelID: String, startedAt: Date) throws -> TranscriptionResult {
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw TranscriptionError.executionFailed("whisper-server returned an invalid response")
+        }
+        let text = try WhisperCppProvider.decodeServerTranscript(data)
+        return TranscriptionResult(
+            text: text,
+            latencyMS: Int(Date().timeIntervalSince(startedAt) * 1000)
+        )
+    }
+
+    /// Streams the same framing as `multipartBody` to `fileURL`, copying the audio
+    /// in 1 MB chunks so a long recording never sits in memory twice. Wire bytes
+    /// are identical to the in-memory builder.
+    static func writeMultipartBody(audioURL: URL, prompt: String?, boundary: String, to fileURL: URL) throws {
+        FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+        let handle = try FileHandle(forWritingTo: fileURL)
+        defer { try? handle.close() }
+        func append(_ string: String) throws {
+            try handle.write(contentsOf: Data(string.utf8))
+        }
+
+        try append("--\(boundary)\r\n")
+        try append("Content-Disposition: form-data; name=\"file\"; filename=\"\(audioURL.lastPathComponent)\"\r\n")
+        try append("Content-Type: audio/wav\r\n\r\n")
+        let audio = try FileHandle(forReadingFrom: audioURL)
+        defer { try? audio.close() }
+        while true {
+            let chunk = try audio.read(upToCount: 1_048_576) ?? Data()
+            guard !chunk.isEmpty else { break }
+            try handle.write(contentsOf: chunk)
+        }
+        try append("\r\n--\(boundary)\r\n")
+        try append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\njson\r\n")
+        if let prompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty {
+            try append("--\(boundary)\r\n")
+            try append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n\(prompt)\r\n")
+        }
+        try append("--\(boundary)--\r\n")
     }
 
     /// Asks the kernel for a free TCP port by binding to :0 and reading the assigned address.
