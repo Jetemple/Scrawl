@@ -201,10 +201,10 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
             timeoutSeconds: config.transcriptionTimeoutSeconds
         )
 
-        let stdout = (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
         let stderr = stderrCapture.string()
 
         guard exitCode == 0 else {
+            let stdout = (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
             throw TranscriptionError.executionFailed(
                 "whisper.cpp exited with status \(exitCode): \(stderr.isEmpty ? stdout : stderr)"
             )
@@ -213,7 +213,7 @@ public final class WhisperCppProvider: ModelRetainingTranscriptionProvider, @unc
         let transcriptText: String = if let text = try? String(contentsOf: transcriptFile, encoding: .utf8) {
             text
         } else {
-            stdout
+            (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
         }
 
         let cleaned = transcriptText

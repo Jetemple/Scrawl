@@ -410,4 +410,32 @@ final class WarmWhisperServerTests: XCTestCase {
             XCTFail("Expected second call to throw")
         } catch {}
     }
+
+    func testStagedMultipartBodyIsByteIdentical() throws {
+        let audio = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-test-\(UUID().uuidString).wav")
+        let bytes = Data((0..<3_000_000).map { _ in UInt8.random(in: 0...255) })
+        try bytes.write(to: audio)
+        defer { try? FileManager.default.removeItem(at: audio) }
+        for prompt in [nil, "  ", "Preferred vocabulary: Ada, mantra"] as [String?] {
+            let staged = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-test-\(UUID().uuidString).bin")
+            defer { try? FileManager.default.removeItem(at: staged) }
+            try WarmWhisperServer.writeMultipartBody(audioURL: audio, prompt: prompt, boundary: "TEST", to: staged)
+            XCTAssertEqual(try Data(contentsOf: staged), try WarmWhisperServer.multipartBody(audioURL: audio, prompt: prompt, boundary: "TEST"))
+        }
+        // Permissions: owner-only, mirroring the stores.
+        let staged = FileManager.default.temporaryDirectory.appendingPathComponent("scrawl-test-\(UUID().uuidString).bin")
+        defer { try? FileManager.default.removeItem(at: staged) }
+        try WarmWhisperServer.writeMultipartBody(audioURL: audio, prompt: nil, boundary: "TEST", to: staged)
+        let perms = try FileManager.default.attributesOfItem(atPath: staged.path)[.posixPermissions] as? Int
+        XCTAssertEqual(perms, 0o600)
+    }
+
+    func testStagingFailureThrows() {
+        WarmWhisperServer.stagingDirectory = URL(filePath: "/nonexistent-dir-scrawl-test")
+        defer { WarmWhisperServer.stagingDirectory = FileManager.default.temporaryDirectory }
+        XCTAssertThrowsError(try WarmWhisperServer.writeMultipartBody(
+            audioURL: URL(filePath: "/tmp/x.wav"), prompt: nil, boundary: "TEST",
+            to: WarmWhisperServer.stagingDirectory.appendingPathComponent("y.bin")
+        ))
+    }
 }
