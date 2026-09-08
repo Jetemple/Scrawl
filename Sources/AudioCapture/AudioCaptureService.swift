@@ -158,6 +158,12 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
     private let lock = NSLock()
     private var recorder: AVAudioRecorder?
     private var outputURL: URL?
+    /// Microphone-open time for the active recording, kept only while diagnostics are
+    /// enabled. `finishCapture()` consumes it into `diagnosticWallSecondsByURL`.
+    private var startedAt: Date?
+    /// Wall durations keyed by finished capture URL, handed from synchronous
+    /// `finishCapture()` to detached `analyzeCaptureFile(at:)` and consumed exactly once.
+    private var diagnosticWallSecondsByURL: [URL: Double] = [:]
 
     public init(config: AudioCaptureConfig = AudioCaptureConfig()) {
         self.config = config
@@ -170,6 +176,10 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
         guard recorder == nil else {
             throw AudioCaptureError.alreadyCapturing
         }
+
+        // Drop any stale timing before assigning a new start; a previous capture may
+        // have failed before `finishCapture()` could consume it.
+        startedAt = nil
 
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("scrawl-audio-\(UUID().uuidString)")
@@ -196,6 +206,9 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
 
         self.recorder = recorder
         self.outputURL = outputURL
+        if CaptureDiagnostics.isEnabled {
+            startedAt = Date()
+        }
     }
 
     public func stopCapture() throws -> URL {
@@ -214,6 +227,12 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.notCapturing
         }
 
+        // Snapshot and clear active timing on every path past this point so a stale
+        // start never leaks into the next capture. Dictionary writes happen inline
+        // here (never via the helpers below) because this scope already owns `lock`.
+        let captureStart = startedAt
+        startedAt = nil
+
         let durationSeconds = recorder.currentTime
         recorder.stop()
         self.recorder = nil
@@ -228,6 +247,12 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
         if fileSize <= 44 {
             try? FileManager.default.removeItem(at: outputURL)
             throw AudioCaptureError.outputFileEmpty
+        }
+
+        // Hand wall timing to async analysis; the `recordCapture`/`recordRejection`
+        // logging policy itself belongs to the next integration step.
+        if CaptureDiagnostics.isEnabled, let captureStart {
+            diagnosticWallSecondsByURL[outputURL] = Date().timeIntervalSince(captureStart)
         }
 
         return outputURL
@@ -274,6 +299,26 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             throw AudioCaptureError.audioLevelTooLow
         }
         return analysis
+    }
+
+    /// Focused test seam for the finish → analysis wall-time handoff (see
+    /// `AudioCaptureDiagnosticsLifecycleTests`). Internal only so `@testable` tests can
+    /// drive the exactly-once and disabled-mode invariants without a live microphone.
+    /// Must never be called while the caller already owns `lock` (e.g. from inside
+    /// `finishCapture()`); update `diagnosticWallSecondsByURL` directly there instead.
+    func storeDiagnosticWallSecondsIfEnabled(_ seconds: Double, for url: URL) {
+        guard CaptureDiagnostics.isEnabled else { return }
+        lock.lock()
+        diagnosticWallSecondsByURL[url] = seconds
+        lock.unlock()
+    }
+
+    /// Consumes the pending wall duration for `url` exactly once; `nil` when diagnostics
+    /// were disabled or the entry was already taken. Same re-entry rule as above.
+    func takeDiagnosticWallSeconds(for url: URL) -> Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return diagnosticWallSecondsByURL.removeValue(forKey: url)
     }
 
     public func currentAveragePower() -> Float? {
