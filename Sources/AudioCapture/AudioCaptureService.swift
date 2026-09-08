@@ -213,52 +213,41 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
 
     public func stopCapture() throws -> URL {
         let outputURL = try finishCapture()
-        if let samples = try? AudioLevelAnalyzer.samples(fromFileURL: outputURL) {
-            try Self.verdict(samples: samples, config: config, removing: outputURL)
-        }
-        return outputURL
+        return try verifyCompatibilityCapture(at: outputURL)
     }
 
     public func finishCapture() throws -> URL {
+        let outputURLCopy: URL
+        let durationSeconds: Double
+        let captureStart: Date?
         lock.lock()
-        defer { lock.unlock() }
-
         guard let recorder, let outputURL else {
+            lock.unlock()
             throw AudioCaptureError.notCapturing
         }
 
         // Snapshot and clear active timing on every path past this point so a stale
-        // start never leaks into the next capture. Dictionary writes happen inline
-        // here (never via the helpers below) because this scope already owns `lock`.
-        let captureStart = startedAt
+        // start never leaks into the next capture. The lock is released before file
+        // and diagnostics I/O below; `completeFinishCapture` re-acquires it only for
+        // the URL-keyed store.
+        captureStart = startedAt
         startedAt = nil
 
-        let durationSeconds = recorder.currentTime
+        durationSeconds = recorder.currentTime
         recorder.stop()
         self.recorder = nil
         self.outputURL = nil
+        outputURLCopy = outputURL
+        lock.unlock()
 
-        if durationSeconds < config.minimumDurationSeconds {
-            try? FileManager.default.removeItem(at: outputURL)
-            throw AudioCaptureError.captureTooShort(durationSeconds: durationSeconds)
-        }
-
-        let fileSize = (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        if fileSize <= 44 {
-            try? FileManager.default.removeItem(at: outputURL)
-            throw AudioCaptureError.outputFileEmpty
-        }
-
-        // Hand wall timing to async analysis; the `recordCapture`/`recordRejection`
-        // logging policy itself belongs to the next integration step.
-        if CaptureDiagnostics.isEnabled, let captureStart {
-            diagnosticWallSecondsByURL[outputURL] = Date().timeIntervalSince(captureStart)
-        }
-
-        return outputURL
+        let wallSeconds = captureStart.map { Date().timeIntervalSince($0) } ?? durationSeconds
+        return try completeFinishCapture(at: outputURLCopy, recorderSeconds: durationSeconds, wallSeconds: wallSeconds)
     }
 
     public func analyzeCaptureFile(at url: URL) async throws -> AudioAnalysis {
+        // Consume before detaching so success, decode-skipped, and rejection all
+        // clear the entry exactly once; the detached body never touches the lock.
+        let wallSeconds = takeDiagnosticWallSeconds(for: url)
         let config = config
         return try await Task.detached(priority: .userInitiated) {
             // A failed decode skips the checks, matching the old per-check `try?`
@@ -266,11 +255,65 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
             guard let samples = try? AudioLevelAnalyzer.samples(fromFileURL: url) else {
                 return AudioAnalysis.decodeSkipped
             }
-            return try Self.verdict(samples: samples, config: config, removing: url)
+            do {
+                return try Self.verdict(samples: samples, config: config, removing: url)
+            } catch {
+                if let wallSeconds {
+                    CaptureDiagnostics.recordRejection(wallSeconds: wallSeconds, error: error)
+                }
+                throw error
+            }
         }.value
     }
 
-    /// Shared silence/active verdict behind both `stopCapture()` and
+    /// Stage-1 event policy shared by `finishCapture()` and the lifecycle tests.
+    /// Cheap synchronous checks only (duration, file size): no decode, no await.
+    /// On success stores the wall duration for detached analysis and logs/copies one
+    /// capture; on rejection removes the file and logs one rejection. Safe to call
+    /// without holding `lock`; the store re-acquires it internally.
+    func completeFinishCapture(at url: URL, recorderSeconds: Double, wallSeconds: Double) throws -> URL {
+        if recorderSeconds < config.minimumDurationSeconds {
+            try? FileManager.default.removeItem(at: url)
+            CaptureDiagnostics.recordRejection(
+                wallSeconds: wallSeconds,
+                error: AudioCaptureError.captureTooShort(durationSeconds: recorderSeconds)
+            )
+            throw AudioCaptureError.captureTooShort(durationSeconds: recorderSeconds)
+        }
+
+        let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if fileSize <= 44 {
+            try? FileManager.default.removeItem(at: url)
+            CaptureDiagnostics.recordRejection(wallSeconds: wallSeconds, error: AudioCaptureError.outputFileEmpty)
+            throw AudioCaptureError.outputFileEmpty
+        }
+
+        storeDiagnosticWallSecondsIfEnabled(wallSeconds, for: url)
+        CaptureDiagnostics.recordCapture(audioURL: url, wallSeconds: wallSeconds, recorderSeconds: recorderSeconds)
+        return url
+    }
+
+    /// Stage-2 sync policy shared by compatibility `stopCapture()` and the lifecycle
+    /// tests. Consumes the stored wall duration on every path (success, decode-skipped,
+    /// rejection) so entries never orphan. Logs a rejection only when the verdict
+    /// fails; never logs a second capture line because `completeFinishCapture` did.
+    func verifyCompatibilityCapture(at url: URL) throws -> URL {
+        let wallSeconds = takeDiagnosticWallSeconds(for: url)
+        guard let samples = try? AudioLevelAnalyzer.samples(fromFileURL: url) else {
+            return url
+        }
+        do {
+            _ = try Self.verdict(samples: samples, config: config, removing: url)
+        } catch {
+            if let wallSeconds {
+                CaptureDiagnostics.recordRejection(wallSeconds: wallSeconds, error: error)
+            }
+            throw error
+        }
+        return url
+    }
+
+    /// Shared silence/active verdict behind compatibility `stopCapture()` and
     /// `analyzeCaptureFile(at:)`. Removes a rejected file, like the legacy code.
     private static func verdict(samples: [Int16], config: AudioCaptureConfig, removing outputURL: URL) throws -> AudioAnalysis {
         // Decode once and run the fused silence/active analysis on the same samples.
@@ -304,13 +347,12 @@ public final class AudioCaptureService: AudioCaptureServing, @unchecked Sendable
     /// Focused test seam for the finish → analysis wall-time handoff (see
     /// `AudioCaptureDiagnosticsLifecycleTests`). Internal only so `@testable` tests can
     /// drive the exactly-once and disabled-mode invariants without a live microphone.
-    /// Must never be called while the caller already owns `lock` (e.g. from inside
-    /// `finishCapture()`); update `diagnosticWallSecondsByURL` directly there instead.
+    /// Self-locking; never call while already holding `lock`.
     func storeDiagnosticWallSecondsIfEnabled(_ seconds: Double, for url: URL) {
         guard CaptureDiagnostics.isEnabled else { return }
         lock.lock()
+        defer { lock.unlock() }
         diagnosticWallSecondsByURL[url] = seconds
-        lock.unlock()
     }
 
     /// Consumes the pending wall duration for `url` exactly once; `nil` when diagnostics
