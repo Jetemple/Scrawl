@@ -15,6 +15,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
+      - name: Test release tooling
+        run: ruby scripts/update-homebrew-cask_test.rb
       - uses: swift-actions/setup-swift@v2
       - name: Swift version
         run: swift --version

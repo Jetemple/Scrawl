@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - master
+    paths:
+      - Config/ScrawlApp-Info.plist
   workflow_dispatch:
 
 permissions:
@@ -34,6 +36,12 @@ jobs:
           set -euo pipefail
 
           CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Config/ScrawlApp-Info.plist)
+          BUILD_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Config/ScrawlApp-Info.plist)
+          if [[ "$CURRENT_VERSION" != "$BUILD_VERSION" ]]; then
+            echo "CFBundleShortVersionString ($CURRENT_VERSION) and CFBundleVersion ($BUILD_VERSION) must match."
+            exit 1
+          fi
+
           echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
 
@@ -73,9 +81,17 @@ jobs:
       - name: Skip release
         if: steps.version.outputs.should_release != 'true'
         run: |
-          echo "Skipping release."
+          echo "Skipping release: the app version did not change."
           echo "Current version: ${{ steps.version.outputs.version }}"
           echo "Previous version: ${{ steps.version.outputs.previous_version }}"
+          {
+            echo "## Release skipped"
+            echo
+            echo "The app version did not change, so this push does not publish a release."
+            echo
+            echo "- Current version: \`${{ steps.version.outputs.version }}\`"
+            echo "- Previous version: \`${{ steps.version.outputs.previous_version }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Validate release secrets
         if: steps.version.outputs.should_release == 'true'
@@ -242,7 +258,7 @@ jobs:
             gh release upload "$TAG" "$ZIP_PATH" "$DMG_PATH" "$SHA_PATH" --clobber
           else
             gh release create "$TAG" "$ZIP_PATH" "$DMG_PATH" "$SHA_PATH" \
-              --title "$TAG" \
+              --title "Scrawl $TAG" \
               --generate-notes \
               --target "$GITHUB_SHA"
           fi
@@ -266,7 +282,12 @@ jobs:
           set -euo pipefail
 
           CASK_PATH="homebrew-tap/Casks/scrawl.rb"
-          SHA256_VALUE="$(awk '{ print $1 }' "$SHA_PATH")"
+          SHA256_VALUE="$(awk 'NR == 1 { print $1; exit }' "$SHA_PATH")"
+          if [[ ! "$SHA256_VALUE" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Invalid ZIP SHA256 digest: $SHA256_VALUE"
+            exit 1
+          fi
+
           RELEASE_URL="https://github.com/$REPOSITORY/releases/download/$TAG/Scrawl-$VERSION.zip"
 
           ruby scripts/update-homebrew-cask.rb "$CASK_PATH" "$VERSION" "$SHA256_VALUE" "$RELEASE_URL"
