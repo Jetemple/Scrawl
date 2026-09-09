@@ -23,6 +23,21 @@ final class PreferencesContentStateTests: XCTestCase {
         XCTAssertNil(PreferencesContentState.vocabularyPrompt(terms: [VocabularyTerm(value: "  ")]))
     }
 
+    func testVocabularyPromptSkipsOversizedTermInTheMiddleAndContinues() {
+        // An oversized term must be skipped without ending the build: smaller terms
+        // after it still fit and must still be included.
+        let prompt = PreferencesContentState.vocabularyPrompt(
+            terms: [
+                VocabularyTerm(value: "Alpha"),
+                VocabularyTerm(value: String(repeating: "x", count: 500)),
+                VocabularyTerm(value: "Bravo"),
+            ],
+            maximumLength: "Preferred vocabulary: Alpha, Bravo".count
+        )
+
+        XCTAssertEqual(prompt, "Preferred vocabulary: Alpha, Bravo")
+    }
+
     func testHistoryMetricsIncludeAvailablePerformanceData() {
         let record = TranscriptRecord(
             id: UUID(),

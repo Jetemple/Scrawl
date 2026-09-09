@@ -1,4 +1,5 @@
 import AppKit
+import AudioCapture
 import Foundation
 import SettingsStore
 
@@ -67,6 +68,8 @@ final class HotkeyMonitor {
         let downFromEvent = expectedFlag.map { event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains($0) } ?? false
         let downFromSource = CGEventSource.keyState(.hidSystemState, key: hotkey.keyCode)
         let downNow = downFromEvent || downFromSource
+
+        CaptureDiagnostics.recordHotkeyTransition(isDown: downNow, flag: downFromEvent, keyState: downFromSource)
 
         if downNow, !isDown {
             isDown = true

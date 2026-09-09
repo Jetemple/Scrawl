@@ -6,7 +6,10 @@ import Foundation
 /// and shows a modal. Either way the cached "update available" state is
 /// refreshed and `onAvailableReleaseChange` fires so the surfaces re-render.
 final class UpdateCheckCoordinator {
-    private let currentVersion: String
+    /// The running build's version, normalized once at init (it never changes) so
+    /// every `availableRelease` read — surfaces query it on menu opens and
+    /// preferences refreshes — avoids re-stripping the `v` prefix each time.
+    private let normalizedCurrentVersion: String
     private let store: UpdateCheckStore
     private let makeChecker: (String) -> UpdateChecker
     private let present: (Result<UpdateCheckOutcome, Error>) -> Void
@@ -26,7 +29,7 @@ final class UpdateCheckCoordinator {
         present: @escaping (Result<UpdateCheckOutcome, Error>) -> Void = UpdateCheckPresenter.present,
         notifyOnMain: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }
     ) {
-        self.currentVersion = currentVersion
+        normalizedCurrentVersion = UpdateChecker.normalizedVersion(currentVersion)
         self.store = store
         self.now = now
         self.makeChecker = makeChecker
@@ -34,10 +37,20 @@ final class UpdateCheckCoordinator {
         self.notifyOnMain = notifyOnMain
     }
 
-    /// The release already cached from a prior run, so surfaces render at launch
-    /// without waiting on the network.
+    /// The release cached from a prior run, so surfaces render at launch without
+    /// waiting on the network — but only while it is genuinely newer than the
+    /// running build. A prior version caches the release it found; after the user
+    /// installs it, that cache lingers until the next daily check clears it, so we
+    /// re-validate here. Otherwise the indicator keeps saying "update available"
+    /// for the very version now running.
     var availableRelease: UpdateRelease? {
-        store.availableRelease
+        guard let cached = store.availableRelease,
+              UpdateChecker.isVersion(
+                  UpdateChecker.normalizedVersion(cached.version),
+                  newerThan: normalizedCurrentVersion
+              )
+        else { return nil }
+        return cached
     }
 
     /// The daily background check. No-ops when a check ran within the window.
@@ -53,7 +66,7 @@ final class UpdateCheckCoordinator {
     }
 
     private func runCheck(presenting: Bool) {
-        makeChecker(currentVersion).check { [weak self] result in
+        makeChecker(normalizedCurrentVersion).check { [weak self] result in
             self?.notifyOnMain {
                 self?.handle(result, presenting: presenting)
             }

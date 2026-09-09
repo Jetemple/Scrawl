@@ -9,7 +9,7 @@ import TranscriptHistoryStore
 import TranscriptionCore
 
 final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private enum RecordingOrigin {
+    enum RecordingOrigin {
         case manual
         case hotkeyHold
         case hotkeyToggle
@@ -17,7 +17,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
 
     private static let hotkeyCapturePrompt = "Press a key, Fn, or a modifier. Esc cancels."
 
-    private let runtime: AppRuntime
+    let runtime: AppRuntime
     private let modelManager: LocalModelManager
     private lazy var modelCatalog = ModelCatalog(
         manager: modelManager,
@@ -66,8 +66,8 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
     private var modelsSubmenu: NSMenu?
     private var historySubmenu: NSMenu?
 
-    private var recordingOrigin: RecordingOrigin?
-    private var recordingStartedAt: Date?
+    var recordingOrigin: RecordingOrigin?
+    var recordingStartedAt: Date?
     private var recordingSafetyTimer: Timer?
     private var isFinishingCapture = false
     /// The scheduled grace-window finalize, held so a forced stop (sleep, safety timeout) can
@@ -1236,12 +1236,12 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         refreshPreferencesWindow()
     }
 
-    private func presentNoSpeechDetectedAlert() {
+    func presentNoSpeechDetectedAlert() {
         runtime.overlayController.showTransientMessage("No speech detected. Try again.")
         setStatus("No speech detected")
     }
 
-    private func presentNoAudioCapturedMessage() {
+    func presentNoAudioCapturedMessage() {
         runtime.overlayController.showTransientMessage("No audio captured. Check your mic.")
         setStatus("No audio captured")
     }
@@ -1607,19 +1607,10 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         let audioURL: URL
         let recordingDurationMS = recordingStartedAt.map { Int(Date().timeIntervalSince($0) * 1000) }
         do {
-            audioURL = try runtime.audioCaptureService.stopCapture()
+            audioURL = try runtime.audioCaptureService.finishCapture()
         } catch {
-            recordingOrigin = nil
-            recordingStartedAt = nil
-            updateRecordingActionRows()
-            runtime.overlayController.setState(.idle)
-            updateStatusIcon()
-            setStatus("Stop error: \(describe(error))")
-            if case AudioCaptureError.audioLevelTooLow = error {
-                presentNoAudioCapturedMessage()
-            } else if case AudioCaptureError.captureTooShort = error, activeOrigin != .manual {
-                presentNoSpeechDetectedAlert()
-            }
+            let stopError = error
+            Task { [weak self] in await self?.handleStopCaptureError(stopError, activeOrigin: activeOrigin) }
             return
         }
 
@@ -1638,6 +1629,12 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
 
         Task { [weak self] in
             defer { try? FileManager.default.removeItem(at: audioURL) }
+            do {
+                _ = try await runtime.audioCaptureService.analyzeCaptureFile(at: audioURL)
+            } catch {
+                await self?.handleStopCaptureError(error, activeOrigin: activeOrigin)
+                return
+            }
             do {
                 let request = TranscriptionRequest(
                     audioFileURL: audioURL,
@@ -1953,7 +1950,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         refreshPreferencesWindow()
     }
 
-    private func updateRecordingActionRows() {
+    func updateRecordingActionRows() {
         let isRecording = recordingOrigin != nil
         startManualItem?.isEnabled = !isRecording
         stopManualItem?.isEnabled = isRecording
@@ -1963,7 +1960,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         "Recording...", "Transcribing...", hotkeyCapturePrompt,
     ]
 
-    private func setStatus(_ text: String, autoClear: Bool = true) {
+    func setStatus(_ text: String, autoClear: Bool = true) {
         Task { @MainActor [weak self] in
             self?.applyStatus(text, autoClear: autoClear)
         }
@@ -2067,7 +2064,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         PreferencesModelState.displayName(forModelID: modelID)
     }
 
-    private func updateStatusIcon() {
+    func updateStatusIcon() {
         guard let button = statusItem?.button else {
             return
         }
@@ -2196,7 +2193,7 @@ final class StatusBarAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegat
         }
     }
 
-    private func describe(_ error: Error) -> String {
+    func describe(_ error: Error) -> String {
         if let error = error as? LocalizedError, let description = error.errorDescription {
             return description
         }

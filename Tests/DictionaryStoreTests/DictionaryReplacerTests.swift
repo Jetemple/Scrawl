@@ -223,4 +223,38 @@ final class DictionaryReplacerTests: XCTestCase {
         ]))
         XCTAssertEqual(store.entries(), original)
     }
+
+    func testGoldenOutputs() {
+        let entries = [
+            DictionaryEntry(wrong: "a", correct: "b"),
+            DictionaryEntry(wrong: "b", correct: "c"),
+            DictionaryEntry(wrong: "ss", correct: "SS-out"),
+            DictionaryEntry(wrong: "hello", correct: "goodbye"),
+        ]
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: "a b"), "c c") // chaining
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: "SS ss"), "SS-OUT ss-out")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: "STRASSE"), "STRCSS-OUTE") // chained then ss
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: "İ"), "İ")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: "hELLO hello HELLO"), "goodbye goodbye GOODBYE")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: " he"), " he")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: "123"), "123")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: entries, to: "👋 hello"), "👋 goodbye")
+    }
+
+    func testGoldenPassthroughAndOverlap() {
+        XCTAssertEqual(DictionaryReplacer.apply(entries: [], to: "hello"), "hello")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: [DictionaryEntry(wrong: "x", correct: "y")], to: ""), "")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: [DictionaryEntry(wrong: "", correct: "x")], to: "abc"), "abc")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: [DictionaryEntry(wrong: "x", correct: "y")], to: "hello"), "hello")
+        let shortFirst = [
+            DictionaryEntry(wrong: "he", correct: "HA"),
+            DictionaryEntry(wrong: "hello", correct: "BYE"),
+        ]
+        let longFirst = [
+            DictionaryEntry(wrong: "hello", correct: "BYE"),
+            DictionaryEntry(wrong: "he", correct: "HA"),
+        ]
+        XCTAssertEqual(DictionaryReplacer.apply(entries: shortFirst, to: "well hello"), "well hallo")
+        XCTAssertEqual(DictionaryReplacer.apply(entries: longFirst, to: "well hello"), "well bye")
+    }
 }
