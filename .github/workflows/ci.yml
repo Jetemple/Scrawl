@@ -14,7 +14,7 @@ jobs:
   test:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Test release tooling
         run: ruby scripts/update-homebrew-cask_test.rb
       - uses: swift-actions/setup-swift@v2
@@ -56,7 +56,7 @@ jobs:
   lint:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install SwiftLint
         run: brew install swiftlint
       - name: SwiftLint

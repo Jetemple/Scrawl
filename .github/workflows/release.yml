@@ -21,7 +21,7 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -265,7 +265,7 @@ jobs:
 
       - name: Checkout Homebrew tap
         if: steps.version.outputs.should_release == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: Jetemple/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
