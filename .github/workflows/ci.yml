@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Test release tooling
         run: ruby scripts/update-homebrew-cask_test.rb
-      - uses: swift-actions/setup-swift@v2
+      - uses: swift-actions/setup-swift@v3
       - name: Swift version
         run: swift --version
       - name: Build
