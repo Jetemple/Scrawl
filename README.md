@@ -108,6 +108,14 @@ open /Applications/Scrawl.app
 Some app has macOS Secure Keyboard Entry on, often a terminal or password manager, which blocks synthesized ⌘V system-wide. Scrawl writes into native text fields through the Accessibility API where it can, and otherwise leaves the text on the clipboard. Press ⌘V to paste, or turn off secure input in the app that switched it on.
 </details>
 
+## Support
+
+- Found a bug? [Open an issue](https://github.com/Jetemple/Scrawl/issues/new/choose) with your Scrawl version and macOS version.
+- Want to contribute? Read [CONTRIBUTING.md](CONTRIBUTING.md).
+- Found a security issue? Use the private process in [SECURITY.md](SECURITY.md).
+
+Please remove transcripts, recordings, credentials, and other private data from reports.
+
 ## Development
 
 ```bash

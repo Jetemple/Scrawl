@@ -1,69 +1,95 @@
-# Release Process
+# Release process
 
-## Automated release (primary)
+Scrawl uses explicit app versions. Merging a normal pull request does **not** publish a release. A release PR must update both `CFBundleShortVersionString` and `CFBundleVersion` in `Config/ScrawlApp-Info.plist`.
 
-`.github/workflows/release.yml` creates a signed, notarized GitHub release when either `main` or `master` receives a push that changes `CFBundleShortVersionString` in `Config/ScrawlApp-Info.plist`.
+## Automated release
 
-That means:
+The primary release path is `.github/workflows/release.yml`:
 
-- Merge the release branch into `main` or `master`
-- Make sure `Config/ScrawlApp-Info.plist` is bumped to the release version
-- GitHub Actions will build, sign, notarize, tag `v<version>`, and publish the release zip automatically
+1. Create a release branch from the current `master`.
+2. Update both plist version fields to the new version.
+3. Run the local checks below and open a pull request.
+4. Merge the release PR into `master`.
+5. The version change starts GitHub Actions, which will:
+   - run the test suite;
+   - build the arm64 and Intel release binary;
+   - sign and notarize the app;
+   - publish both `Scrawl-<version>.zip` and `Scrawl-<version>.dmg`;
+   - publish a SHA256 file containing both artifact checksums;
+   - create the `v<version>` GitHub release with generated notes; and
+   - update `Jetemple/homebrew-tap/Casks/scrawl.rb` to point at the ZIP.
 
-Normal merges that do not change the app version do not create a release.
+Normal code merges do not start the release workflow. A manual dispatch is available for rerunning an intentional release, but it should not be used to republish an old version by accident.
 
-Required repo secrets:
+## Release checklist
+
+From a clean checkout:
+
+```bash
+VERSION=0.0.16
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Config/ScrawlApp-Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Config/ScrawlApp-Info.plist
+
+swift test
+make format-check
+make lint
+ruby scripts/update-homebrew-cask_test.rb
+git diff --check
+```
+
+Confirm the two plist values match before opening the PR. The PR should describe the user-facing changes and call out any migration, permission, or model-download implications.
+
+After merging, verify the release run and published assets:
+
+```bash
+gh run list --workflow Release --limit 5
+gh release view "v$VERSION"
+```
+
+Then verify the Homebrew tap points to the same version and ZIP checksum:
+
+```bash
+brew update
+brew info --cask scrawl
+```
+
+## Required repository secrets
 
 | Secret | Value |
 |---|---|
-| `DEVELOPER_ID_APPLICATION` | Base64-encoded `.p12` of the Developer ID Application cert. Export from Keychain Access → right-click cert → Export → `.p12`, then `base64 -i cert.p12 \| pbcopy` |
-| `DEVELOPER_ID_PASSWORD` | Password used when exporting the `.p12` |
-| `APPLE_ID` | Your Apple ID email (e.g. the one associated with your Developer ID) |
-| `APPLE_TEAM_ID` | `4RUT26EY4D` |
-| `NOTARY_PASSWORD` | App-specific password from https://appleid.apple.com/account/manage |
-| `HOMEBREW_TAP_TOKEN` | GitHub personal access token with repo write access to `Jetemple/homebrew-tap` |
+| `DEVELOPER_ID_APPLICATION` | Base64-encoded `.p12` for the Developer ID Application certificate |
+| `DEVELOPER_ID_PASSWORD` | Password used to export the certificate |
+| `APPLE_ID` | Apple ID email used for notarization |
+| `APPLE_TEAM_ID` | Apple Developer team ID (`4RUT26EY4D`) |
+| `NOTARY_PASSWORD` | App-specific Apple password |
+| `HOMEBREW_TAP_TOKEN` | GitHub token with write access to `Jetemple/homebrew-tap` |
 
-After the GitHub release is published, the workflow also updates `Jetemple/homebrew-tap/Casks/scrawl.rb` with the new version, sha256, and release asset URL.
+The release job validates these secrets before building anything.
 
-## Manual release (fallback)
+## Manual fallback
 
-1. Build, sign, and notarize:
+If GitHub Actions is unavailable, use the tracked install script to build and verify a signed, notarized ZIP locally:
 
 ```bash
 make build BUILD_ARCHS="arm64 x86_64"
 SCRAWL_CODESIGN_IDENTITY="Developer ID Application: Jack Temple (4RUT26EY4D)" \
-  SCRAWL_BUILD_ARCHS="arm64 x86_64" SCRAWL_SKIP_BUILD=1 SCRAWL_SKIP_LAUNCH=1 ./scripts/install-app.sh /tmp/scrawl-release
+  SCRAWL_BUILD_ARCHS="arm64 x86_64" SCRAWL_SKIP_BUILD=1 SCRAWL_SKIP_LAUNCH=1 \
+  ./scripts/install-app.sh /tmp/scrawl-release
 
 cd /tmp/scrawl-release
 ditto -c -k --sequesterRsrc --keepParent Scrawl.app /tmp/Scrawl-<version>.zip
-
 xcrun notarytool submit /tmp/Scrawl-<version>.zip \
   --apple-id <your-apple-id-email> \
   --team-id 4RUT26EY4D \
   --password <app-specific-password> \
   --wait
-
-xcrun stapler staple /tmp/scrawl-release/Scrawl.app
-
-xcrun stapler validate /tmp/scrawl-release/Scrawl.app
-
-# Re-zip after stapling
-cd /tmp/scrawl-release
+xcrun stapler staple Scrawl.app
+xcrun stapler validate Scrawl.app
 rm /tmp/Scrawl-<version>.zip
 ditto -c -k --sequesterRsrc --keepParent Scrawl.app /tmp/Scrawl-<version>.zip
-
-# Verify signature and Gatekeeper acceptance before uploading
-codesign --verify --deep --strict --verbose=2 /tmp/scrawl-release/Scrawl.app
-spctl -a -t exec -vv /tmp/scrawl-release/Scrawl.app
-
+codesign --verify --deep --strict --verbose=2 Scrawl.app
+spctl -a -t exec -vv Scrawl.app
 shasum -a 256 /tmp/Scrawl-<version>.zip
 ```
 
-2. Create GitHub release at https://github.com/Jetemple/Scrawl/releases/new
-   - Tag: `v<version>`
-   - Upload `/tmp/Scrawl-<version>.zip`
-
-3. Update homebrew tap:
-   - Edit `Casks/scrawl.rb` in `Jetemple/homebrew-tap`
-   - Set new `version` and `sha256`
-   - Push to main
+Upload the verified ZIP to a manually created `v<version>` release and update the Homebrew cask with its version, URL, and checksum. This fallback does not create the production DMG; prefer the automated workflow for a complete release.
