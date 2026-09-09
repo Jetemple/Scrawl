@@ -47,7 +47,7 @@ jobs:
       - name: Upload coverage to Codecov
         if: hashFiles('coverage.lcov') != ''
         continue-on-error: true
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         with:
           files: coverage.lcov
           fail_ci_if_error: false
